@@ -54,14 +54,69 @@ class UsageModelsTest {
             style = UsageStyle.BALANCE,
             valueText = "6.50 USD left",
         )
+        val fullCreditGauge = window(
+            usedPercent = 0.0,
+            style = UsageStyle.CREDIT_GAUGE,
+            valueText = "500 credits",
+        )
 
         assertTrue(emptyGauge.isUnused)
         assertFalse(usedGauge.isUnused)
         assertFalse(balance.isUnused)
+        assertFalse(fullCreditGauge.isUnused)
+        assertTrue(emptyGauge.isGaugeLike)
+        assertTrue(fullCreditGauge.isGaugeLike)
+        assertFalse(balance.isGaugeLike)
         assertEquals("6.50 USD left", balance.valueText)
         assertEquals(UsageStyle.GAUGE, emptyGauge.style)
         assertEquals(60.0, window(usedPercent = 40.0).remainingPercent, 0.0)
         assertEquals(0.0, window(usedPercent = 120.0).remainingPercent, 0.0)
+    }
+
+    @Test
+    fun creditGaugePolicyConvertsRemainingBalanceAndClamps() {
+        assertEquals(0.0, CreditGaugePolicy.usedPercent(500.0, 500.0)!!, 0.0)
+        assertEquals(50.0, CreditGaugePolicy.usedPercent(250.0, 500.0)!!, 0.0)
+        assertEquals(100.0, CreditGaugePolicy.usedPercent(0.0, 500.0)!!, 0.0)
+        assertEquals(100.0, CreditGaugePolicy.usedPercent(-10.0, 500.0)!!, 0.0)
+        assertEquals(0.0, CreditGaugePolicy.usedPercent(600.0, 500.0)!!, 0.0)
+        assertNull(CreditGaugePolicy.usedPercent(100.0, 0.0))
+        assertNull(CreditGaugePolicy.usedPercent(100.0, -5.0))
+    }
+
+    @Test
+    fun creditGaugePeakIsMonotonicAndGrowsOnTopUp() {
+        assertEquals(42.0, CreditGaugePolicy.newPeak(null, 42.0), 0.0)
+        assertEquals(500.0, CreditGaugePolicy.newPeak(500.0, 300.0), 0.0)
+        assertEquals(900.0, CreditGaugePolicy.newPeak(500.0, 900.0), 0.0)
+    }
+
+    @Test
+    fun promotionPreservesRawBalanceAndMarksEstimatedScale() {
+        val balance = UsageWindow(
+            label = "Credits",
+            usedPercent = 0.0,
+            resetsAt = now,
+            kind = WindowKind.WEEKLY,
+            style = UsageStyle.BALANCE,
+            valueText = "487.50 credits left",
+            balanceRemaining = 487.5,
+            balanceTotal = 500.0,
+        )
+
+        val promoted = balance.promotedToCreditGauge(
+            usedPercent = 2.5,
+            estimatedTotal = true,
+        )
+
+        assertEquals(UsageStyle.CREDIT_GAUGE, promoted.style)
+        assertEquals(2.5, promoted.usedPercent, 0.0)
+        assertTrue(promoted.estimatedTotal)
+        assertEquals("487.50 credits left", promoted.valueText)
+        assertEquals(487.5, promoted.balanceRemaining!!, 0.0)
+        assertEquals(500.0, promoted.balanceTotal!!, 0.0)
+        assertEquals(now, promoted.resetsAt)
+        assertEquals(97.5, promoted.remainingPercent, 0.0)
     }
 
     @Test

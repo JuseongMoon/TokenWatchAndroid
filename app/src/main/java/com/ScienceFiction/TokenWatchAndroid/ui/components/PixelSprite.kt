@@ -1,14 +1,22 @@
 package com.ScienceFiction.TokenWatchAndroid.ui.components
 
+import android.animation.ValueAnimator
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.unit.Dp
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 
 /** Rectangular integer-grid animation frames with a shared color palette. */
 data class PixelSprite(
@@ -57,7 +65,7 @@ data class PixelSprite(
             palette = mapOf(
                 1 to Color(0xFF47D966),
                 2 to Color(0xFFBFF8C7),
-                3 to Color(0xFF1A8C3D),
+                3 to Color(0xFF29A64A),
                 4 to Color(0xFF052614),
             ),
         )
@@ -91,6 +99,41 @@ fun PixelSpriteView(
             flatColor = flatColor,
         )
     }
+}
+
+/**
+ * Toggles a sprite's frames in place for compact previews. Disabling system animations pins the
+ * sprite to its landing frame, matching the stationary gauge critter behavior.
+ */
+@Composable
+fun AnimatedPixelSpriteView(
+    sprite: PixelSprite,
+    cell: Dp,
+    modifier: Modifier = Modifier,
+    flatColor: Color? = null,
+    tickMillis: Long = 250L,
+    reduceMotion: Boolean = !ValueAnimator.areAnimatorsEnabled(),
+) {
+    require(tickMillis > 0L) { "Sprite animation tick must be positive" }
+
+    var tick by remember(sprite, tickMillis, reduceMotion) { mutableIntStateOf(0) }
+    LaunchedEffect(sprite, tickMillis, reduceMotion) {
+        tick = 0
+        if (!reduceMotion) {
+            while (isActive) {
+                delay(tickMillis)
+                tick += 1
+            }
+        }
+    }
+
+    PixelSpriteView(
+        sprite = sprite,
+        frameIndex = if (reduceMotion) 0 else tick,
+        cell = cell,
+        modifier = modifier,
+        flatColor = flatColor,
+    )
 }
 
 private fun Modifier.pixelSpriteSize(width: Dp, height: Dp): Modifier =

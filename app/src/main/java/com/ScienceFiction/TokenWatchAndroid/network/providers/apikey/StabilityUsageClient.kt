@@ -15,7 +15,13 @@ class StabilityUsageClient(
     override fun mapSuccessfulBody(body: String): List<UsageWindow> {
         val response = checkNotNull(apiKeyProviderMoshi.adapter(Response::class.java).fromJson(body))
         val value = String.format(Locale.US, "%.2f credits", response.credits ?: 0.0)
-        return listOf(balanceWindow("Credits", value))
+        return listOf(
+            balanceWindow(
+                label = "Credits",
+                valueText = value,
+                balanceRemaining = response.credits,
+            ),
+        )
     }
 
     private data class Response(val credits: Double? = null)

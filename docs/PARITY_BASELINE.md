@@ -1,31 +1,34 @@
 # TokenWatch Android parity baseline
 
-The first Android release mirrors the iOS repository through commit `e7d1715`
-(`feat: Claude usage 429 완화 및 rate-limit 표시 개선`) on
+The Android release mirrors the iOS repository through commit `fe5d972`
+(`fix: 설정 시트 가로 스크롤 제거 + 타겟 선택 표식을 [v]로 구분`) on
 `feat/claude-token-watch`. Uncommitted iOS working-tree changes are deliberately
 not part of this baseline.
 
 ## Included behavior
 
 - 18 providers and the four authentication families defined at `6df2689`.
-- Gauge and absolute balance usage styles.
+- Subscription gauges, reverse-fill prepaid-credit gauges, and absolute balance
+  fallback text.
+- Exact credit totals where providers expose them, observed-peak estimates where
+  they do not, and per-window peak reset.
+- Claude extra-usage monthly credit balance.
 - Foreground-only refresh with off/30s/60s/5m/adaptive settings.
-- Adaptive ladder `[30, 60, 120, 300, 600]` and reset-time refresh.
+- Adaptive ladder `[10, 20, 30, 60, 120, 180, 300]`, a 60-second entry reset,
+  surge jumps to 30 or 10 seconds, and reset-time refresh.
 - Per-agent in-flight suppression and a 20-second minimum usage-fetch spacing.
 - 429 `Retry-After` handling with five-minute fallback, last-good graphs, and a
   localized stale-data/retry notice.
 - Claude usage requests identified as `claude-code/2.1.0` with JSON headers.
-- Provider status polling and the terminal UI, localization, heartbeat, and
-  gauge critter behavior present in the baseline commit.
-
-## Explicitly deferred working-tree changes
-
-- `creditGauge`, reverse-fill gauges, observed credit peaks, and remaining
-  accessibility text.
-- Inline `[●]` service status in card titles.
-
-These items must arrive as a later synchronized iOS/Android parity update,
-not silently enter the first Android implementation.
+- Provider status polling that preserves the last good value and retries
+  immediately after transport or schema failure while keeping a valid unknown
+  provider status distinct.
+- Inline card-header service status, remaining-balance accessibility text, and
+  gauge-like heartbeat tracking for both subscription and credit gauges.
+- Eight-step gauge-slime entry/exit fades, an animated settings preview, and the
+  lighter slime shadow palette.
+- A vertically constrained settings screen whose heartbeat target marker (`[v]`)
+  is visually distinct from on/off toggles (`[x]`).
 
 ## Android identity
 
@@ -41,3 +44,8 @@ not silently enter the first Android implementation.
   for POST requests, while the iOS `WKNavigationDelegate` sees the equivalent
   form navigation. The request-stage interception is therefore required for
   Claude login parity and must remain one-shot to preserve PKCE state handling.
+- Android keeps the screen-awake flag through `ON_PAUSE` and clears it only at
+  `ON_STOP`, matching the iOS rule that preserves the flag while inactive and
+  clears it only after entering the background.
+- Compose settings already use a vertical-only scroll container; the content is
+  also width-constrained to prevent children from creating horizontal overflow.

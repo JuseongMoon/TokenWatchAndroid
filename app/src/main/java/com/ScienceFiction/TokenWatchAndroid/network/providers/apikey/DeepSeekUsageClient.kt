@@ -15,7 +15,13 @@ class DeepSeekUsageClient(
         val response = checkNotNull(apiKeyProviderMoshi.adapter(Response::class.java).fromJson(body))
         val balance = response.balance_infos?.firstOrNull() ?: return emptyList()
         val value = "${balance.total_balance ?: "0"} ${balance.currency.orEmpty()}".trim()
-        return listOf(balanceWindow("Balance", value))
+        return listOf(
+            balanceWindow(
+                label = "Balance",
+                valueText = value,
+                balanceRemaining = balance.total_balance?.toDoubleOrNull(),
+            ),
+        )
     }
 
     private data class Response(

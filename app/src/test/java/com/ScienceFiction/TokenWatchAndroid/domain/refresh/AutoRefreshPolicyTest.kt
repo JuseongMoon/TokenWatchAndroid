@@ -12,8 +12,8 @@ class AutoRefreshPolicyTest {
     @Test
     fun ladderIsSortedWithExpectedBounds() {
         assertEquals(-1, AutoRefreshPolicy.sentinel)
-        assertEquals(30, AutoRefreshPolicy.ladder.first())
-        assertEquals(600, AutoRefreshPolicy.ladder.last())
+        assertEquals(10, AutoRefreshPolicy.ladder.first())
+        assertEquals(300, AutoRefreshPolicy.ladder.last())
         assertEquals(AutoRefreshPolicy.ladder.sorted(), AutoRefreshPolicy.ladder)
         assertEquals(60, AutoRefreshPolicy.ladder[AutoRefreshPolicy.baseIndex])
         assertEquals(Duration.ofSeconds(1), AutoRefreshPolicy.resetSlack)
@@ -28,7 +28,20 @@ class AutoRefreshPolicyTest {
     @Test
     fun surgeShrinksTwoSteps() {
         assertEquals(1, AutoRefreshPolicy.nextLadderIndex(from = 3, maxDelta = 4.0))
-        assertEquals(2, AutoRefreshPolicy.nextLadderIndex(from = 4, maxDelta = 25.0))
+        assertEquals(4, AutoRefreshPolicy.nextLadderIndex(from = 6, maxDelta = 4.5))
+    }
+
+    @Test
+    fun moderateSurgeSkipsToThirtySeconds() {
+        assertEquals(2, AutoRefreshPolicy.nextLadderIndex(from = 6, maxDelta = 5.0))
+        assertEquals(2, AutoRefreshPolicy.nextLadderIndex(from = 4, maxDelta = 9.9))
+        assertEquals(1, AutoRefreshPolicy.nextLadderIndex(from = 1, maxDelta = 8.0))
+    }
+
+    @Test
+    fun extremeSurgeCrashesToTenSeconds() {
+        assertEquals(0, AutoRefreshPolicy.nextLadderIndex(from = 4, maxDelta = 14.0))
+        assertEquals(0, AutoRefreshPolicy.nextLadderIndex(from = 6, maxDelta = 50.0))
     }
 
     @Test
@@ -46,13 +59,13 @@ class AutoRefreshPolicyTest {
     @Test
     fun noSignalHolds() {
         assertEquals(0, AutoRefreshPolicy.nextLadderIndex(from = 0, maxDelta = null))
-        assertEquals(4, AutoRefreshPolicy.nextLadderIndex(from = 4, maxDelta = null))
+        assertEquals(6, AutoRefreshPolicy.nextLadderIndex(from = 6, maxDelta = null))
     }
 
     @Test
     fun clampsAtFastestAndSlowest() {
-        assertEquals(0, AutoRefreshPolicy.nextLadderIndex(from = 0, maxDelta = 9.9))
-        assertEquals(0, AutoRefreshPolicy.nextLadderIndex(from = 1, maxDelta = 5.0))
+        assertEquals(0, AutoRefreshPolicy.nextLadderIndex(from = 0, maxDelta = 25.0))
+        assertEquals(0, AutoRefreshPolicy.nextLadderIndex(from = 1, maxDelta = 4.0))
         val last = AutoRefreshPolicy.ladder.lastIndex
         assertEquals(last, AutoRefreshPolicy.nextLadderIndex(from = last, maxDelta = 0.0))
     }

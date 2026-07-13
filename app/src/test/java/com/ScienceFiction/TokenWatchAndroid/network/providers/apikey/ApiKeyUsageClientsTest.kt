@@ -17,7 +17,7 @@ class ApiKeyUsageClientsTest {
     private val tokens = OAuthTokens.apiKey("secret-key")
 
     @Test
-    fun requestsAndSuccessMappingsMatchCleanIosBaseline() {
+    fun requestsAndSuccessMappingsMatchIosParityBaseline() {
         fixtures().forEach { fixture ->
             val overrideEndpoint = "https://fixture.invalid/${fixture.id}"
             val transport = FakeNetworkTransport(networkResponse(body = fixture.successBody))
@@ -158,7 +158,9 @@ class ApiKeyUsageClientsTest {
             authHeaderName = "Authorization",
             authHeaderValue = "Bearer secret-key",
             successBody = """{"data":{"total_credits":10.5,"total_usage":3.0}}""",
-            expectedWindows = listOf(balance("Credits", "7.50 credits left")),
+            expectedWindows = listOf(
+                balance("Credits", "7.50 credits left", remaining = 7.5, total = 10.5),
+            ),
             create = { transport, endpoint -> OpenRouterUsageClient(transport, endpoint) },
         ),
         Fixture(
@@ -166,7 +168,7 @@ class ApiKeyUsageClientsTest {
             authHeaderName = "Authorization",
             authHeaderValue = "Bearer secret-key",
             successBody = """{"is_available":true,"balance_infos":[{"currency":"USD","total_balance":"6.50"}]}""",
-            expectedWindows = listOf(balance("Balance", "6.50 USD")),
+            expectedWindows = listOf(balance("Balance", "6.50 USD", remaining = 6.5)),
             create = { transport, endpoint -> DeepSeekUsageClient(transport, endpoint) },
         ),
         Fixture(
@@ -174,7 +176,9 @@ class ApiKeyUsageClientsTest {
             authHeaderName = "Authorization",
             authHeaderValue = "Bearer secret-key",
             successBody = """{"current_point_balance":1250000}""",
-            expectedWindows = listOf(balance("Compute points", "1,250,000 pts")),
+            expectedWindows = listOf(
+                balance("Compute points", "1,250,000 pts", remaining = 1_250_000.0),
+            ),
             create = { transport, endpoint -> PoeUsageClient(transport, endpoint) },
         ),
         Fixture(
@@ -182,7 +186,7 @@ class ApiKeyUsageClientsTest {
             authHeaderName = "Authorization",
             authHeaderValue = "Key secret-key",
             successBody = """{"credits":{"current_balance":12.345,"currency":"USD"}}""",
-            expectedWindows = listOf(balance("Balance", "12.35 USD")),
+            expectedWindows = listOf(balance("Balance", "12.35 USD", remaining = 12.345)),
             create = { transport, endpoint -> FalUsageClient(transport, endpoint) },
         ),
         Fixture(
@@ -190,7 +194,7 @@ class ApiKeyUsageClientsTest {
             authHeaderName = "Authorization",
             authHeaderValue = "Bearer secret-key",
             successBody = """{"credits":8.5}""",
-            expectedWindows = listOf(balance("Credits", "8.50 credits")),
+            expectedWindows = listOf(balance("Credits", "8.50 credits", remaining = 8.5)),
             create = { transport, endpoint -> StabilityUsageClient(transport, endpoint) },
         ),
         Fixture(
@@ -198,7 +202,7 @@ class ApiKeyUsageClientsTest {
             authHeaderName = "Authorization",
             authHeaderValue = "Bearer secret-key",
             successBody = """{"credits":42}""",
-            expectedWindows = listOf(balance("Credits", "42 credits")),
+            expectedWindows = listOf(balance("Credits", "42 credits", remaining = 42.0)),
             create = { transport, endpoint -> RecraftUsageClient(transport, endpoint) },
         ),
         Fixture(
@@ -206,7 +210,7 @@ class ApiKeyUsageClientsTest {
             authHeaderName = "Authorization",
             authHeaderValue = "Bearer secret-key",
             successBody = """{"credit_balance":650}""",
-            expectedWindows = listOf(balance("Balance", "6.50 USD")),
+            expectedWindows = listOf(balance("Balance", "6.50 USD", remaining = 6.5)),
             create = { transport, endpoint -> LumaUsageClient(transport, endpoint) },
         ),
         Fixture(
@@ -215,7 +219,7 @@ class ApiKeyUsageClientsTest {
             authHeaderValue = "Bearer secret-key",
             extraHeaders = mapOf("X-Runway-Version" to "2024-11-06"),
             successBody = """{"creditBalance":12.6}""",
-            expectedWindows = listOf(balance("Credits", "13 credits")),
+            expectedWindows = listOf(balance("Credits", "13 credits", remaining = 12.6)),
             create = { transport, endpoint -> RunwayUsageClient(transport, endpoint) },
         ),
         Fixture(
@@ -223,7 +227,9 @@ class ApiKeyUsageClientsTest {
             authHeaderName = "Authorization",
             authHeaderValue = "Basic secret-key",
             successBody = """{"credits":[{"remaining":4.6,"total":10}]}""",
-            expectedWindows = listOf(balance("Credits", "5 credits")),
+            expectedWindows = listOf(
+                balance("Credits", "5 credits", remaining = 4.6, total = 10.0),
+            ),
             create = { transport, endpoint -> DIDUsageClient(transport, endpoint) },
         ),
         Fixture(
@@ -231,7 +237,7 @@ class ApiKeyUsageClientsTest {
             authHeaderName = "X-Api-Key",
             authHeaderValue = "secret-key",
             successBody = """{"data":{"remaining_quota":180}}""",
-            expectedWindows = listOf(balance("Credits", "3 credits")),
+            expectedWindows = listOf(balance("Credits", "3 credits", remaining = 3.0)),
             create = { transport, endpoint -> HeyGenUsageClient(transport, endpoint) },
         ),
         Fixture(
@@ -239,18 +245,25 @@ class ApiKeyUsageClientsTest {
             authHeaderName = "Authorization",
             authHeaderValue = "Bearer secret-key",
             successBody = """{"user_details":[{"subscriptionTokens":99,"apiSubscriptionTokens":10,"apiPaidTokens":3}]}""",
-            expectedWindows = listOf(balance("API tokens", "13 tokens")),
+            expectedWindows = listOf(balance("API tokens", "13 tokens", remaining = 13.0)),
             create = { transport, endpoint -> LeonardoUsageClient(transport, endpoint) },
         ),
     )
 
-    private fun balance(label: String, text: String) = UsageWindow(
+    private fun balance(
+        label: String,
+        text: String,
+        remaining: Double? = null,
+        total: Double? = null,
+    ) = UsageWindow(
         label = label,
         usedPercent = 0.0,
         resetsAt = null,
         kind = WindowKind.WEEKLY,
         style = UsageStyle.BALANCE,
         valueText = text,
+        balanceRemaining = remaining,
+        balanceTotal = total,
     )
 
     private data class Fixture(

@@ -1,16 +1,18 @@
 package com.ScienceFiction.TokenWatchAndroid.network.providers.subscription
 
 import com.ScienceFiction.TokenWatchAndroid.auth.OAuthTokens
+import com.ScienceFiction.TokenWatchAndroid.domain.UsageStyle
 import com.ScienceFiction.TokenWatchAndroid.domain.UsageWindow
 import com.ScienceFiction.TokenWatchAndroid.domain.WindowKind
 import com.ScienceFiction.TokenWatchAndroid.network.core.HttpTransport
 import com.ScienceFiction.TokenWatchAndroid.network.core.NetworkTransport
 import com.ScienceFiction.TokenWatchAndroid.network.core.ProviderUsageClient
+import java.util.Locale
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Request
 
-/** Claude OAuth usage client matching iOS parity commit e7d1715. */
+/** Claude OAuth usage client matching iOS parity commit 5515740. */
 class ClaudeUsageClient(
     private val transport: NetworkTransport = HttpTransport(),
     private val endpoint: HttpUrl = DefaultEndpoint.toHttpUrl(),
@@ -30,6 +32,12 @@ class ClaudeUsageClient(
     }
 
     private fun mapWindows(root: Map<String, Any?>): List<UsageWindow> {
+        val windows = baseWindows(root).toMutableList()
+        extraUsageWindow(root["extra_usage"])?.let(windows::add)
+        return windows
+    }
+
+    private fun baseWindows(root: Map<String, Any?>): List<UsageWindow> {
         val rawLimits = root["limits"].asArray()
         val limits = rawLimits?.map { it.asObject() }
         if (!limits.isNullOrEmpty() && limits.all { it != null }) {
@@ -68,7 +76,7 @@ class ClaudeUsageClient(
     private fun mapLegacyWindows(root: Map<String, Any?>): List<UsageWindow> {
         val legacy = linkedMapOf<String, LegacyWindow>()
         for ((key, rawValue) in root) {
-            if (key == "limits") continue
+            if (key == "limits" || key == "extra_usage") continue
             val value = rawValue.asObject() ?: continue
             val utilization = value["utilization"].asNumberOrString()
             val resetsAt = parseIsoInstant(value["resets_at"] as? String)
@@ -103,6 +111,39 @@ class ClaudeUsageClient(
             if (key !in consumed) take(key, label, WindowKind.WEEKLY)
         }
         return output
+    }
+
+    /** Maps Claude's optional extra-usage allowance from minor currency units into a balance. */
+    private fun extraUsageWindow(raw: Any?): UsageWindow? {
+        val extra = raw.asObject() ?: return null
+        val enabled = extra["is_enabled"] as? Boolean ?: false
+        val limitMinor = extra["monthly_limit"].asNumberOrString()
+        if (!enabled || limitMinor == null || limitMinor <= 0.0) return null
+
+        val usedMinor = extra["used_credits"].asNumberOrString()
+            ?: extra["utilization"].asNumberOrString()?.let { limitMinor * it / 100.0 }
+            ?: 0.0
+        val total = limitMinor / 100.0
+        val remaining = ((limitMinor - usedMinor) / 100.0).coerceAtLeast(0.0)
+        val currency = (extra["currency"] as? String)
+            ?.trim()
+            ?.uppercase(Locale.US)
+            .orEmpty()
+        val amount = if (currency.isEmpty() || currency == "USD") {
+            String.format(Locale.US, "\$%.2f", remaining)
+        } else {
+            String.format(Locale.US, "%.2f %s", remaining, currency)
+        }
+        return UsageWindow(
+            label = "Extra usage",
+            usedPercent = 0.0,
+            resetsAt = null,
+            kind = WindowKind.WEEKLY,
+            style = UsageStyle.BALANCE,
+            valueText = "$amount left",
+            balanceRemaining = remaining,
+            balanceTotal = total,
+        )
     }
 
     private data class LegacyWindow(

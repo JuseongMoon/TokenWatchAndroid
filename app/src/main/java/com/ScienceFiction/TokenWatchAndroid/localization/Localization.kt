@@ -32,7 +32,7 @@ enum class AppLanguage(val wireId: String, val segmentLabel: String) {
 enum class Lang { KO, EN }
 
 /**
- * Korean/English catalog mirrored through iOS parity commit `e7d1715`.
+ * Korean/English catalog mirrored through iOS parity commit `565cfff`.
  *
  * Terminal chrome intentionally remains English in both languages; this catalog contains natural
  * language help, error, date, dialog, and accessibility text.
@@ -52,8 +52,8 @@ data class L10n(val lang: Lang) {
         )
 
     fun settingsRefreshAutoHelp(current: String) = choose(
-        "auto: 사용량이 빠르게 오르면 간격을 줄이고, 멈추면 늘립니다(30초~10분). 현재 $current",
-        "auto: shortens the interval while usage climbs and relaxes it when idle (30s–10m). now $current",
+        "auto: 사용량이 빠르게 오르면 간격을 줄이고, 멈추면 늘립니다(10초~5분). 현재 $current",
+        "auto: shortens the interval while usage climbs and relaxes it when idle (10s–5m). now $current",
     )
 
     val settingsScreenHelp get() = choose(
@@ -129,6 +129,18 @@ data class L10n(val lang: Lang) {
     )
 
     fun a11yUsed(percent: Int) = choose("$percent% 사용", "$percent% used")
+    fun a11yRemaining(percent: Int) = choose("$percent% 남음", "$percent% left")
+    val creditApproxNote get() = choose(
+        "총액은 관측된 최고 잔액 기준 추정",
+        "total estimated from highest observed balance",
+    )
+    val creditResetButton get() = choose("[재설정]", "[reset]")
+    val creditResetTitle get() = choose("게이지 기준 재설정", "Reset gauge scale")
+    val creditResetConfirm get() = choose("재설정", "Reset")
+    val creditResetMessage get() = choose(
+        "현재 잔액을 100%(가득)로 삼아 이 게이지의 기준을 다시 잡습니다. 이상값으로 게이지가 낮게 굳었을 때 사용하세요.",
+        "Re-baselines this gauge, treating the current balance as 100% (full). Use when a spike has frozen the gauge too low.",
+    )
     val resetDone get() = choose("리셋됨", "reset")
 
     fun resetExact(date: Instant, kind: WindowKind, zoneId: ZoneId = ZoneId.systemDefault()): String {

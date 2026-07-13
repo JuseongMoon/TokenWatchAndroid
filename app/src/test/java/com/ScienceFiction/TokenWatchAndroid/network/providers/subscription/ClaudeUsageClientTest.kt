@@ -1,6 +1,7 @@
 package com.ScienceFiction.TokenWatchAndroid.network.providers.subscription
 
 import com.ScienceFiction.TokenWatchAndroid.auth.OAuthTokens
+import com.ScienceFiction.TokenWatchAndroid.domain.UsageStyle
 import com.ScienceFiction.TokenWatchAndroid.domain.WindowKind
 import com.ScienceFiction.TokenWatchAndroid.network.core.UsageException
 import java.time.Instant
@@ -80,6 +81,77 @@ class ClaudeUsageClientTest {
             windows.map { it.label },
         )
         assertEquals(listOf(58.5, 0.0, 0.0, 100.0), windows.map { it.usedPercent })
+    }
+
+    @Test
+    fun appendsEnabledExtraUsageAfterSubscriptionWindows() {
+        val transport = RecordingTransport(
+            jsonResponse(
+                """
+                {
+                  "limits":[{"kind":"session","group":"session","percent":40}],
+                  "extra_usage":{
+                    "is_enabled":true,
+                    "monthly_limit":4000,
+                    "used_credits":1500,
+                    "currency":"USD"
+                  }
+                }
+                """.trimIndent(),
+            ),
+        )
+
+        val windows = runSuspend {
+            ClaudeUsageClient(transport).fetch(OAuthTokens(accessToken = "token"))
+        }
+
+        assertEquals(listOf("Current session", "Extra usage"), windows.map { it.label })
+        val extra = windows.last()
+        assertEquals(UsageStyle.BALANCE, extra.style)
+        assertEquals("\$25.00 left", extra.valueText)
+        assertEquals(25.0, extra.balanceRemaining!!, 0.0)
+        assertEquals(40.0, extra.balanceTotal!!, 0.0)
+    }
+
+    @Test
+    fun extraUsageAcceptsNumericStringsAndBackfillsFromUtilization() {
+        val transport = RecordingTransport(
+            jsonResponse(
+                """
+                {
+                  "extra_usage":{
+                    "is_enabled":true,
+                    "monthly_limit":"5000",
+                    "utilization":"20",
+                    "currency":" eur "
+                  }
+                }
+                """.trimIndent(),
+            ),
+        )
+
+        val extra = runSuspend {
+            ClaudeUsageClient(transport).fetch(OAuthTokens(accessToken = "token"))
+        }.single()
+
+        assertEquals("40.00 EUR left", extra.valueText)
+        assertEquals(40.0, extra.balanceRemaining!!, 0.0)
+        assertEquals(50.0, extra.balanceTotal!!, 0.0)
+    }
+
+    @Test
+    fun disabledOrMissingLimitExtraUsageDoesNotCreateAWindow() {
+        listOf(
+            """{"extra_usage":{"is_enabled":false,"monthly_limit":4000,"used_credits":1000}}""",
+            """{"extra_usage":{"is_enabled":true,"used_credits":1000}}""",
+            """{"extra_usage":{"is_enabled":true,"monthly_limit":0,"used_credits":0}}""",
+        ).forEach { json ->
+            val windows = runSuspend {
+                ClaudeUsageClient(RecordingTransport(jsonResponse(json)))
+                    .fetch(OAuthTokens(accessToken = "token"))
+            }
+            assertEquals(0, windows.size)
+        }
     }
 
     @Test

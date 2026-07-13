@@ -19,6 +19,10 @@ class AgentRepository(
         .map { preferences -> AgentJsonCodec.decode(preferences.safeGet(agentsKey)) }
         .distinctUntilChanged()
 
+    val creditPeaks: Flow<Map<String, Double>> = dataStore.safeData
+        .map { preferences -> CreditPeaksCodec.decode(preferences.safeGet(creditPeaksKey)) }
+        .distinctUntilChanged()
+
     suspend fun saveAgents(agents: List<Agent>) {
         dataStore.edit { preferences ->
             preferences[agentsKey] = AgentJsonCodec.encode(agents)
@@ -32,7 +36,21 @@ class AgentRepository(
         }
     }
 
+    suspend fun saveCreditPeaks(peaks: Map<String, Double>) {
+        dataStore.edit { preferences ->
+            preferences[creditPeaksKey] = CreditPeaksCodec.encode(peaks)
+        }
+    }
+
+    suspend fun updateCreditPeaks(transform: (Map<String, Double>) -> Map<String, Double>) {
+        dataStore.edit { preferences ->
+            val current = CreditPeaksCodec.decode(preferences.safeGet(creditPeaksKey))
+            preferences[creditPeaksKey] = CreditPeaksCodec.encode(transform(current))
+        }
+    }
+
     private companion object {
         val agentsKey = stringPreferencesKey("tokenwatch.agents.v1")
+        val creditPeaksKey = stringPreferencesKey("tokenwatch.creditPeaks.v1")
     }
 }

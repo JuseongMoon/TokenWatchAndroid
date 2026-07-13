@@ -1,15 +1,23 @@
 package com.ScienceFiction.TokenWatchAndroid.ui.screens
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -36,17 +44,13 @@ fun AgentCard(
     modifier: Modifier = Modifier,
 ) {
     TerminalBox(
-        title = agentCardTitle(agent),
-        titleColor = agent.provider.terminalColor(),
         modifier = modifier,
     ) {
         Column(
             modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            if (serviceHealth != null) {
-                ServiceHealthLine(serviceHealth = serviceHealth, loc = loc)
-            }
+            AgentCardTitleBar(agent = agent, serviceHealth = serviceHealth, loc = loc)
             AgentUsageContent(
                 snapshot = snapshot,
                 isLoading = isLoading,
@@ -55,6 +59,64 @@ fun AgentCard(
                 gaugeCritterEnabled = gaugeCritterEnabled,
             )
         }
+    }
+}
+
+/** `[C] CLAUDE [●] · pro`; status text stays available to accessibility only. */
+@Composable
+private fun AgentCardTitleBar(agent: Agent, serviceHealth: ServiceHealth?, loc: L10n) {
+    val providerColor = agent.provider.terminalColor()
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = "${agent.provider.terminalTag} ${agent.provider.displayName.uppercase()}",
+            color = providerColor,
+            maxLines = 1,
+            style = terminalTextStyle(12.sp, FontWeight.SemiBold).copy(
+                shadow = Shadow(
+                    color = providerColor.copy(alpha = 0.5f),
+                    offset = Offset.Zero,
+                    blurRadius = 2f,
+                ),
+            ),
+        )
+        serviceHealth?.let { health ->
+            ServiceHealthBadge(health = health, loc = loc)
+        }
+        agent.accountLabel
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() && '@' !in it }
+            ?.let { plan ->
+                Text(
+                    text = "· $plan",
+                    color = providerColor,
+                    maxLines = 1,
+                    style = terminalTextStyle(12.sp, FontWeight.SemiBold),
+                )
+            }
+        Spacer(modifier = Modifier.weight(1f))
+    }
+}
+
+@Composable
+private fun ServiceHealthBadge(health: ServiceHealth, loc: L10n) {
+    Row(
+        modifier = Modifier.clearAndSetSemantics {
+            contentDescription = loc.serviceHealthLabel(health)
+        },
+        horizontalArrangement = Arrangement.spacedBy(1.5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(text = "[", color = Term.Dim, style = terminalTextStyle(12.sp))
+        Box(
+            modifier = Modifier
+                .size(8.dp)
+                .background(serviceHealthDotColor(health), CircleShape),
+        )
+        Text(text = "]", color = Term.Dim, style = terminalTextStyle(12.sp))
     }
 }
 
@@ -76,27 +138,6 @@ internal fun visibleUsageWindows(
     windows: List<UsageWindow>,
     hideUnusedWindows: Boolean,
 ): List<UsageWindow> = if (hideUnusedWindows) windows.filterNot(UsageWindow::isUnused) else windows
-
-@Composable
-private fun ServiceHealthLine(serviceHealth: ServiceHealth, loc: L10n) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(5.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = "●",
-            color = serviceHealthColor(serviceHealth),
-            style = terminalTextStyle(9.sp),
-        )
-        Text(
-            text = loc.serviceHealthLabel(serviceHealth),
-            color = Term.Dim,
-            style = terminalTextStyle(10.sp),
-        )
-        Spacer(modifier = Modifier.weight(1f))
-    }
-}
 
 @Composable
 private fun AgentUsageContent(

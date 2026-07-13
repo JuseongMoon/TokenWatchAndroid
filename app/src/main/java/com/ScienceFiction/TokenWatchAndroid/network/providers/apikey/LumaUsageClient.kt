@@ -14,8 +14,15 @@ class LumaUsageClient(
 
     override fun mapSuccessfulBody(body: String): List<UsageWindow> {
         val response = checkNotNull(apiKeyProviderMoshi.adapter(Response::class.java).fromJson(body))
-        val value = String.format(Locale.US, "%.2f USD", (response.credit_balance ?: 0.0) / 100.0)
-        return listOf(balanceWindow("Balance", value))
+        val usd = (response.credit_balance ?: 0.0) / 100.0
+        val value = String.format(Locale.US, "%.2f USD", usd)
+        return listOf(
+            balanceWindow(
+                label = "Balance",
+                valueText = value,
+                balanceRemaining = usd,
+            ),
+        )
     }
 
     private data class Response(val credit_balance: Double? = null)

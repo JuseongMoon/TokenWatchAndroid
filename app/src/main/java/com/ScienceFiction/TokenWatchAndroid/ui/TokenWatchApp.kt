@@ -89,6 +89,9 @@ internal fun TokenWatchApp(
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
                 Lifecycle.Event.ON_START, Lifecycle.Event.ON_RESUME -> isForeground = true
+                // Keep the screen-awake flag across ON_PAUSE (notification shade, permission UI,
+                // and other transient interruptions). ON_STOP is the actual background boundary,
+                // matching iOS c983971's active/inactive versus background distinction.
                 Lifecycle.Event.ON_STOP, Lifecycle.Event.ON_DESTROY -> isForeground = false
                 else -> Unit
             }
@@ -282,6 +285,9 @@ private fun AgentDetailRoute(
             }
         },
         onOpenStatusPage = onOpenUrl,
+        onResetCreditPeak = { windowLabel ->
+            scope.launch { store.resetCreditPeak(agent.id, windowLabel) }
+        },
         onLogoutRequest = { showLogoutConfirmation = true },
         onLogoutConfirm = {
             showLogoutConfirmation = false

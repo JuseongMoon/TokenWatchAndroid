@@ -2,17 +2,22 @@ package com.ScienceFiction.TokenWatchAndroid.ui.screens
 
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.ScienceFiction.TokenWatchAndroid.data.AppSettings
 import com.ScienceFiction.TokenWatchAndroid.domain.Agent
 import com.ScienceFiction.TokenWatchAndroid.domain.AgentProvider
 import com.ScienceFiction.TokenWatchAndroid.domain.AgentSnapshot
 import com.ScienceFiction.TokenWatchAndroid.domain.ServiceHealth
+import com.ScienceFiction.TokenWatchAndroid.domain.UsageStyle
 import com.ScienceFiction.TokenWatchAndroid.domain.UsageWindow
 import com.ScienceFiction.TokenWatchAndroid.domain.WindowKind
 import com.ScienceFiction.TokenWatchAndroid.localization.L10n
 import com.ScienceFiction.TokenWatchAndroid.localization.Lang
+import com.ScienceFiction.TokenWatchAndroid.ui.components.UsageBar
 import com.ScienceFiction.TokenWatchAndroid.ui.theme.TokenWatchTheme
 import java.time.Instant
 import org.junit.Assert.assertTrue
@@ -26,7 +31,7 @@ class ScreenUiTest {
     val composeRule = createComposeRule()
 
     @Test
-    fun agentCard_hidesEmailAndKeepsStatusOnSeparateLine() {
+    fun agentCard_hidesEmailAndExposesInlineStatusBadge() {
         val agent = Agent(
             provider = AgentProvider.CLAUDE,
             accountLabel = "private@example.com",
@@ -45,8 +50,86 @@ class ScreenUiTest {
         }
 
         composeRule.onNodeWithText("[C] CLAUDE").assertIsDisplayed()
-        composeRule.onNodeWithText("operational").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("operational").assertIsDisplayed()
+        composeRule.onNodeWithText("operational").assertDoesNotExist()
         composeRule.onNodeWithText("private@example.com").assertDoesNotExist()
+    }
+
+    @Test
+    fun agentCard_omitsStatusBadgeWhenProviderHasNoStatusEndpoint() {
+        composeRule.setContent {
+            TokenWatchTheme {
+                AgentCard(
+                    agent = Agent(provider = AgentProvider.LEONARDO, accountLabel = "pro"),
+                    snapshot = null,
+                    isLoading = false,
+                    serviceHealth = null,
+                    hideUnusedWindows = false,
+                    loc = L10n(Lang.EN),
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("[le] LEONARDO").assertIsDisplayed()
+        composeRule.onNodeWithText("· pro").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("operational").assertDoesNotExist()
+        composeRule.onNodeWithContentDescription("unknown").assertDoesNotExist()
+    }
+
+    @Test
+    fun creditUsageBar_showsEstimatedBalanceAndRemainingSemantics() {
+        composeRule.setContent {
+            TokenWatchTheme {
+                UsageBar(
+                    window = creditWindow(),
+                    loc = L10n(Lang.EN),
+                    gaugeCritterEnabled = false,
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("~18.00 USD left").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("18% left").assertIsDisplayed()
+    }
+
+    @Test
+    fun creditDetail_confirmsAndDispatchesPeakReset() {
+        var resetWindowLabel: String? = null
+        val agent = Agent(provider = AgentProvider.OPENROUTER, accountLabel = "api")
+        composeRule.setContent {
+            TokenWatchTheme {
+                DetailScreen(
+                    agent = agent,
+                    snapshot = AgentSnapshot(
+                        windows = listOf(creditWindow()),
+                        planLabel = null,
+                        fetchedAt = Instant.parse("2026-07-11T00:00:00Z"),
+                        error = null,
+                    ),
+                    isLoading = false,
+                    account = DetailAccountUiState(isLoading = false),
+                    serviceHealth = ServiceHealth.UNKNOWN,
+                    hideUnusedWindows = false,
+                    gaugeCritterEnabled = false,
+                    loc = L10n(Lang.EN),
+                    showLogoutConfirmation = false,
+                    onBack = {},
+                    onRefresh = {},
+                    onOpenStatusPage = {},
+                    onResetCreditPeak = { resetWindowLabel = it },
+                    onLogoutRequest = {},
+                    onLogoutConfirm = {},
+                    onLogoutDismiss = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("[reset]").performScrollTo().performClick()
+        composeRule.onNodeWithText("Reset gauge scale").assertIsDisplayed()
+        composeRule.onNodeWithText("[Reset]").performClick()
+        composeRule.runOnIdle {
+            assertTrue(resetWindowLabel == "Balance")
+        }
     }
 
     @Test
@@ -112,4 +195,57 @@ class ScreenUiTest {
         composeRule.onNodeWithText("시스템 언어를 따르거나 직접 선택합니다.").assertExists()
         composeRule.onNodeWithText("no accounts connected").assertExists()
     }
+
+    @Test
+    fun settingsScreen_marksSelectedHeartbeatTargetWithV() {
+        val agent = Agent(provider = AgentProvider.CODEX)
+        val window = UsageWindow(
+            label = "Current session",
+            usedPercent = 25.0,
+            resetsAt = null,
+            kind = WindowKind.SESSION,
+        )
+        val targetId = "${agent.id}|${window.label}"
+
+        composeRule.setContent {
+            TokenWatchTheme {
+                SettingsScreen(
+                    settings = AppSettings(
+                        heartbeatCursor = true,
+                        heartbeatTracking = true,
+                        heartbeatTargets = setOf(targetId),
+                    ),
+                    agents = listOf(agent),
+                    snapshots = mapOf(
+                        agent.id to AgentSnapshot(
+                            windows = listOf(window),
+                            planLabel = null,
+                            fetchedAt = Instant.parse("2026-07-11T00:00:00Z"),
+                            error = null,
+                        ),
+                    ),
+                    autoIntervalSeconds = 60,
+                    appVersion = "1.0 (1)",
+                    loc = L10n(Lang.EN),
+                    onSettingsChange = {},
+                    onLogoutAgent = {},
+                    onDone = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("[v]").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("[x]").assertExists()
+    }
+
+    private fun creditWindow() = UsageWindow(
+        label = "Balance",
+        usedPercent = 82.0,
+        resetsAt = null,
+        kind = WindowKind.WEEKLY,
+        style = UsageStyle.CREDIT_GAUGE,
+        valueText = "18.00 USD left",
+        balanceRemaining = 18.0,
+        estimatedTotal = true,
+    )
 }

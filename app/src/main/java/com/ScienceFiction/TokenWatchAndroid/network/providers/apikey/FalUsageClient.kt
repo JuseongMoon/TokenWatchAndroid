@@ -21,7 +21,13 @@ class FalUsageClient(
             credits.current_balance ?: 0.0,
             credits.currency.orEmpty(),
         ).trim()
-        return listOf(balanceWindow("Balance", value))
+        return listOf(
+            balanceWindow(
+                label = "Balance",
+                valueText = value,
+                balanceRemaining = credits.current_balance,
+            ),
+        )
     }
 
     private data class Response(

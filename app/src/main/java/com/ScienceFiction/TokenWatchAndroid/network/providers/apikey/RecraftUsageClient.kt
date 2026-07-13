@@ -13,7 +13,13 @@ class RecraftUsageClient(
 
     override fun mapSuccessfulBody(body: String): List<UsageWindow> {
         val response = checkNotNull(apiKeyProviderMoshi.adapter(Response::class.java).fromJson(body))
-        return listOf(balanceWindow("Credits", "${response.credits ?: 0} credits"))
+        return listOf(
+            balanceWindow(
+                label = "Credits",
+                valueText = "${response.credits ?: 0} credits",
+                balanceRemaining = response.credits?.toDouble(),
+            ),
+        )
     }
 
     private data class Response(

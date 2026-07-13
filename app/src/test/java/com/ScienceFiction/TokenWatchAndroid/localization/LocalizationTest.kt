@@ -41,6 +41,26 @@ class LocalizationTest {
         )
         assertEquals("42% 사용", ko.a11yUsed(42))
         assertEquals("42% used", en.a11yUsed(42))
+        assertEquals(
+            "auto: 사용량이 빠르게 오르면 간격을 줄이고, 멈추면 늘립니다(10초~5분). 현재 60s",
+            ko.settingsRefreshAutoHelp("60s"),
+        )
+        assertEquals(
+            "auto: shortens the interval while usage climbs and relaxes it when idle (10s–5m). now 60s",
+            en.settingsRefreshAutoHelp("60s"),
+        )
+        assertEquals("58% 남음", ko.a11yRemaining(58))
+        assertEquals("58% left", en.a11yRemaining(58))
+        assertEquals("총액은 관측된 최고 잔액 기준 추정", ko.creditApproxNote)
+        assertEquals("total estimated from highest observed balance", en.creditApproxNote)
+        assertEquals("[재설정]", ko.creditResetButton)
+        assertEquals("[reset]", en.creditResetButton)
+        assertEquals("게이지 기준 재설정", ko.creditResetTitle)
+        assertEquals("Reset gauge scale", en.creditResetTitle)
+        assertEquals("재설정", ko.creditResetConfirm)
+        assertEquals("Reset", en.creditResetConfirm)
+        assertTrue(ko.creditResetMessage.contains("100%(가득)"))
+        assertTrue(en.creditResetMessage.contains("100% (full)"))
     }
 
     @Test

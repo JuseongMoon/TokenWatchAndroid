@@ -16,7 +16,13 @@ class LeonardoUsageClient(
         val detail = response.user_details?.firstOrNull() ?: return emptyList()
         val apiTokens = (detail.apiSubscriptionTokens ?: 0) + (detail.apiPaidTokens ?: 0)
         val tokensLeft = if (apiTokens > 0) apiTokens else detail.subscriptionTokens ?: 0
-        return listOf(balanceWindow("API tokens", "$tokensLeft tokens"))
+        return listOf(
+            balanceWindow(
+                label = "API tokens",
+                valueText = "$tokensLeft tokens",
+                balanceRemaining = tokensLeft.toDouble(),
+            ),
+        )
     }
 
     private data class Response(val user_details: List<Detail>? = null)

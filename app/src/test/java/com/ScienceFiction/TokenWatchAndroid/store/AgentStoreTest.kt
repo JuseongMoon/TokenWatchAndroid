@@ -196,6 +196,186 @@ class AgentStoreTest {
     }
 
     @Test
+    fun `first refresh waits for asynchronous credit peaks before promotion`() = runBlocking {
+        val agent = Agent(AgentProvider.GROK)
+        val peakUpdates = MutableSharedFlow<Map<String, Double>>()
+        val fixture = fixture(
+            parentScope = this,
+            initialAgents = listOf(agent),
+            creditPeakUpdates = peakUpdates,
+            fetchSnapshot = { _, _ -> creditSnapshot(remaining = 50.0) },
+        )
+
+        val refresh = async { fixture.store.refresh(agent) }
+        delay(10)
+        assertFalse(refresh.isCompleted)
+        peakUpdates.emit(mapOf("${agent.id}|Credits" to 100.0))
+        refresh.await()
+
+        val promoted = fixture.store.snapshots.value.getValue(agent.id).windows.single()
+        assertEquals(UsageStyle.CREDIT_GAUGE, promoted.style)
+        assertEquals(50.0, promoted.usedPercent, 0.0)
+        assertTrue(promoted.estimatedTotal)
+        fixture.close()
+    }
+
+    @Test
+    fun `provider total creates an exact credit gauge without an estimated peak`() = runBlocking {
+        val agent = Agent(AgentProvider.GROK)
+        val persistedPeaks = mutableListOf<Map<String, Double>>()
+        val fixture = fixture(
+            parentScope = this,
+            initialAgents = listOf(agent),
+            persistCreditPeaks = { persistedPeaks += it },
+            fetchSnapshot = { _, _ -> creditSnapshot(remaining = 75.0, total = 100.0) },
+        )
+        fixture.store.awaitInitialLoad()
+
+        fixture.store.refresh(agent)
+
+        val promoted = fixture.store.snapshots.value.getValue(agent.id).windows.single()
+        assertEquals(UsageStyle.CREDIT_GAUGE, promoted.style)
+        assertEquals(25.0, promoted.usedPercent, 0.0)
+        assertFalse(promoted.estimatedTotal)
+        assertTrue(persistedPeaks.isEmpty())
+        fixture.close()
+    }
+
+    @Test
+    fun `estimated credit peak persists resets without network and is pruned on remove`() = runBlocking {
+        val start = Instant.parse("2026-07-11T00:00:00Z")
+        val clock = AtomicReference(start)
+        val agent = Agent(AgentProvider.GROK)
+        val fetches = AtomicInteger(0)
+        val persistedPeaks = mutableListOf<Map<String, Double>>()
+        val fixture = fixture(
+            parentScope = this,
+            initialAgents = listOf(agent),
+            now = clock::get,
+            persistCreditPeaks = { persistedPeaks += it },
+            fetchSnapshot = { _, _ ->
+                val remaining = if (fetches.incrementAndGet() == 1) 100.0 else 60.0
+                creditSnapshot(remaining = remaining)
+            },
+        )
+        fixture.store.awaitInitialLoad()
+
+        fixture.store.refresh(agent)
+        val peakKey = "${agent.id}|Credits"
+        assertEquals(mapOf(peakKey to 100.0), persistedPeaks.single())
+
+        clock.set(start.plusSeconds(20))
+        fixture.store.refresh(agent)
+        val consumed = fixture.store.snapshots.value.getValue(agent.id).windows.single()
+        assertEquals(40.0, consumed.usedPercent, 0.0)
+        assertEquals(1, persistedPeaks.size)
+
+        fixture.store.resetCreditPeak(agent.id, "Credits")
+        val reset = fixture.store.snapshots.value.getValue(agent.id).windows.single()
+        assertEquals(0.0, reset.usedPercent, 0.0)
+        assertEquals(mapOf(peakKey to 60.0), persistedPeaks.last())
+        assertEquals(2, fetches.get())
+
+        fixture.store.remove(agent)
+        assertEquals(emptyMap<String, Double>(), persistedPeaks.last())
+        assertTrue(fixture.store.snapshots.value.isEmpty())
+        fixture.close()
+    }
+
+    @Test
+    fun `parallel agent promotions serialize peak persistence without lost updates`() = runBlocking {
+        val one = Agent(AgentProvider.GROK)
+        val two = Agent(AgentProvider.GROK)
+        val activePersists = AtomicInteger(0)
+        val maxActivePersists = AtomicInteger(0)
+        val persistedPeaks = mutableListOf<Map<String, Double>>()
+        val fixture = fixture(
+            parentScope = this,
+            initialAgents = listOf(one, two),
+            persistCreditPeaks = { peaks ->
+                val active = activePersists.incrementAndGet()
+                maxActivePersists.updateAndGet { previous -> maxOf(previous, active) }
+                delay(10)
+                persistedPeaks += peaks
+                activePersists.decrementAndGet()
+            },
+            fetchSnapshot = { _, id ->
+                creditSnapshot(remaining = if (id == one.id) 10.0 else 20.0)
+            },
+        )
+        fixture.store.awaitInitialLoad()
+
+        fixture.store.refreshAll()
+
+        assertEquals(1, maxActivePersists.get())
+        assertEquals(
+            mapOf("${one.id}|Credits" to 10.0, "${two.id}|Credits" to 20.0),
+            persistedPeaks.last(),
+        )
+        fixture.close()
+    }
+
+    @Test
+    fun `late refresh cannot recreate snapshot or peak after agent removal`() = runBlocking {
+        val agent = Agent(AgentProvider.GROK)
+        val fetchEntered = CompletableDeferred<Unit>()
+        val releaseFetch = CompletableDeferred<Unit>()
+        val persistedPeaks = mutableListOf<Map<String, Double>>()
+        val fixture = fixture(
+            parentScope = this,
+            initialAgents = listOf(agent),
+            persistCreditPeaks = { persistedPeaks += it },
+            fetchSnapshot = { _, _ ->
+                fetchEntered.complete(Unit)
+                releaseFetch.await()
+                creditSnapshot(remaining = 100.0)
+            },
+        )
+        fixture.store.awaitInitialLoad()
+
+        val refresh = async { fixture.store.refresh(agent) }
+        fetchEntered.await()
+        fixture.store.remove(agent)
+        releaseFetch.complete(Unit)
+        refresh.await()
+
+        assertTrue(fixture.store.snapshots.value.isEmpty())
+        assertTrue(persistedPeaks.isEmpty())
+        assertTrue(fixture.store.loadingIDs.value.isEmpty())
+        fixture.close()
+    }
+
+    @Test
+    fun `failed peak persistence retries unchanged value on next refresh`() = runBlocking {
+        val start = Instant.parse("2026-07-11T00:00:00Z")
+        val clock = AtomicReference(start)
+        val agent = Agent(AgentProvider.GROK)
+        val attempts = AtomicInteger(0)
+        val persisted = mutableListOf<Map<String, Double>>()
+        val fixture = fixture(
+            parentScope = this,
+            initialAgents = listOf(agent),
+            now = clock::get,
+            persistCreditPeaks = { peaks ->
+                if (attempts.incrementAndGet() == 1) error("disk unavailable")
+                persisted += peaks
+            },
+            fetchSnapshot = { _, _ -> creditSnapshot(remaining = 100.0) },
+        )
+        fixture.store.awaitInitialLoad()
+
+        fixture.store.refresh(agent)
+        assertEquals(1, attempts.get())
+        assertTrue(persisted.isEmpty())
+
+        clock.set(start.plusSeconds(20))
+        fixture.store.refresh(agent)
+        assertEquals(2, attempts.get())
+        assertEquals(mapOf("${agent.id}|Credits" to 100.0), persisted.single())
+        fixture.close()
+    }
+
+    @Test
     fun `service status joins an in-flight request and enforces provider 60 second throttle`() = runBlocking {
         val clock = AtomicReference(Instant.parse("2026-07-11T00:00:00Z"))
         val fetches = AtomicInteger(0)
@@ -228,6 +408,35 @@ class AgentStoreTest {
         clock.set(clock.get().plusSeconds(1))
         fixture.store.refreshStatus(AgentProvider.CLAUDE)
         assertEquals(2, fetches.get())
+        fixture.close()
+    }
+
+    @Test
+    fun `failed status keeps last-good and retries immediately without a success timestamp`() = runBlocking {
+        val start = Instant.parse("2026-07-11T00:00:00Z")
+        val clock = AtomicReference(start)
+        val responses = ArrayDeque<ServiceHealth?>(
+            listOf(ServiceHealth.OPERATIONAL, null, ServiceHealth.DEGRADED),
+        )
+        val fetches = AtomicInteger(0)
+        val fixture = fixture(
+            parentScope = this,
+            now = clock::get,
+            fetchStatus = {
+                fetches.incrementAndGet()
+                responses.removeFirst()
+            },
+        )
+        fixture.store.awaitInitialLoad()
+
+        assertEquals(ServiceHealth.OPERATIONAL, fixture.store.refreshStatus(AgentProvider.CLAUDE))
+        clock.set(start.plusSeconds(60))
+        assertEquals(ServiceHealth.OPERATIONAL, fixture.store.refreshStatus(AgentProvider.CLAUDE))
+        assertEquals(ServiceHealth.OPERATIONAL, fixture.store.serviceStatus.value[AgentProvider.CLAUDE])
+
+        assertEquals(ServiceHealth.DEGRADED, fixture.store.refreshStatus(AgentProvider.CLAUDE))
+        assertEquals(3, fetches.get())
+        assertEquals(ServiceHealth.DEGRADED, fixture.store.serviceStatus.value[AgentProvider.CLAUDE])
         fixture.close()
     }
 
@@ -314,6 +523,52 @@ class AgentStoreTest {
         awaitCondition { fetches.get() >= 2 && fixture.store.autoIntervalSeconds.value == 30 }
         val secondSleep = withTimeout(2_000) { sleeper.requests.receive() }
         assertEquals(Duration.ofSeconds(30), secondSleep.duration)
+        fixture.store.stopAutoRefresh()
+        fixture.close()
+    }
+
+    @Test
+    fun `reentering adaptive refresh resets displayed interval and ladder index to sixty seconds`() = runBlocking {
+        val start = Instant.parse("2026-07-11T00:00:00Z")
+        val clock = AtomicReference(start)
+        val agent = Agent(AgentProvider.GROK)
+        val fetches = AtomicInteger(0)
+        val sleeper = ControlledSleeper()
+        val fixture = fixture(
+            parentScope = this,
+            initialAgents = listOf(agent),
+            now = clock::get,
+            sleeper = sleeper,
+            fetchSnapshot = { _, _ ->
+                val percent = when (fetches.incrementAndGet()) {
+                    1 -> 10.0
+                    2 -> 15.0
+                    else -> 17.0
+                }
+                snapshot(percent = percent)
+            },
+        )
+        fixture.store.awaitInitialLoad()
+
+        fixture.store.startAutoRefresh(AutoRefreshPolicy.sentinel)
+        val initialSleep = withTimeout(2_000) { sleeper.requests.receive() }
+        assertEquals(Duration.ofSeconds(60), initialSleep.duration)
+        clock.set(start.plusSeconds(60))
+        initialSleep.release.complete(Unit)
+        awaitCondition { fetches.get() >= 2 && fixture.store.autoIntervalSeconds.value == 30 }
+        val fastSleep = withTimeout(2_000) { sleeper.requests.receive() }
+        assertEquals(Duration.ofSeconds(30), fastSleep.duration)
+
+        fixture.store.startAutoRefresh(AutoRefreshPolicy.sentinel)
+        assertEquals(60, fixture.store.autoIntervalSeconds.value)
+        val reentrySleep = withTimeout(2_000) { sleeper.requests.receive() }
+        assertEquals(Duration.ofSeconds(60), reentrySleep.duration)
+        clock.set(start.plusSeconds(120))
+        reentrySleep.release.complete(Unit)
+
+        awaitCondition { fetches.get() >= 3 && fixture.store.autoIntervalSeconds.value == 30 }
+        val postDeltaSleep = withTimeout(2_000) { sleeper.requests.receive() }
+        assertEquals(Duration.ofSeconds(30), postDeltaSleep.duration)
         fixture.store.stopAutoRefresh()
         fixture.close()
     }
@@ -407,19 +662,24 @@ class AgentStoreTest {
         parentScope: CoroutineScope,
         initialAgents: List<Agent> = emptyList(),
         agentUpdates: Flow<List<Agent>> = MutableStateFlow(initialAgents),
+        initialCreditPeaks: Map<String, Double> = emptyMap(),
+        creditPeakUpdates: Flow<Map<String, Double>> = MutableStateFlow(initialCreditPeaks),
         persistAgents: suspend (List<Agent>) -> Unit = {},
+        persistCreditPeaks: suspend (Map<String, Double>) -> Unit = {},
         now: () -> Instant = { Instant.parse("2026-07-11T00:00:00Z") },
         sleeper: StoreSleeper = StoreSleeper.DEFAULT,
         fetchSnapshot: suspend (AgentProvider, UUID) -> AgentSnapshot = { _, _ -> snapshot(0.0) },
-        fetchStatus: suspend () -> ServiceHealth = { ServiceHealth.OPERATIONAL },
+        fetchStatus: suspend () -> ServiceHealth? = { ServiceHealth.OPERATIONAL },
     ): Fixture {
         val tokens = ConcurrentHashMap<UUID, OAuthTokens>()
         val store = AgentStore(
             parentScope = parentScope,
             dependencies = AgentStoreDependencies(
                 agentUpdates = agentUpdates,
+                creditPeakUpdates = creditPeakUpdates,
                 settingsUpdates = flowOf(AppSettings()),
                 persistAgents = persistAgents,
+                persistCreditPeaks = persistCreditPeaks,
                 persistSettings = {},
                 saveTokens = { id, value -> tokens[id] = value },
                 loadTokens = { id -> tokens[id] },
@@ -451,6 +711,27 @@ class AgentStoreTest {
             ),
             planLabel = plan,
             fetchedAt = fetchedAt,
+            error = null,
+        )
+
+        fun creditSnapshot(
+            remaining: Double,
+            total: Double? = null,
+        ) = AgentSnapshot(
+            windows = listOf(
+                UsageWindow(
+                    label = "Credits",
+                    usedPercent = 0.0,
+                    resetsAt = null,
+                    kind = WindowKind.WEEKLY,
+                    style = UsageStyle.BALANCE,
+                    valueText = "$remaining credits",
+                    balanceRemaining = remaining,
+                    balanceTotal = total,
+                ),
+            ),
+            planLabel = null,
+            fetchedAt = Instant.parse("2026-07-11T00:00:00Z"),
             error = null,
         )
 

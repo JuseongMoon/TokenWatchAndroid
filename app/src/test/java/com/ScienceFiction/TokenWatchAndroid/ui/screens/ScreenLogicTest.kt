@@ -4,6 +4,7 @@ import com.ScienceFiction.TokenWatchAndroid.data.AppSettings
 import com.ScienceFiction.TokenWatchAndroid.domain.Agent
 import com.ScienceFiction.TokenWatchAndroid.domain.AgentProvider
 import com.ScienceFiction.TokenWatchAndroid.domain.AgentSnapshot
+import com.ScienceFiction.TokenWatchAndroid.domain.ServiceHealth
 import com.ScienceFiction.TokenWatchAndroid.domain.UsageStyle
 import com.ScienceFiction.TokenWatchAndroid.domain.UsageWindow
 import com.ScienceFiction.TokenWatchAndroid.domain.WindowKind
@@ -36,19 +37,26 @@ class ScreenLogicTest {
     fun `hide unused removes only zero percent gauges`() {
         val unusedGauge = window("session", 0.0)
         val usedGauge = window("week", 12.0)
+        val fullCreditGauge = window("prepaid", 0.0, UsageStyle.CREDIT_GAUGE)
         val balance = window("credits", 0.0, UsageStyle.BALANCE)
 
         assertEquals(
-            listOf(usedGauge, balance),
-            visibleUsageWindows(listOf(unusedGauge, usedGauge, balance), hideUnusedWindows = true),
+            listOf(usedGauge, fullCreditGauge, balance),
+            visibleUsageWindows(
+                listOf(unusedGauge, usedGauge, fullCreditGauge, balance),
+                hideUnusedWindows = true,
+            ),
         )
     }
 
     @Test
     fun `tracked usage averages selected gauge windows`() {
         val agent = Agent(AgentProvider.CODEX, agentId)
-        val snapshot = snapshot(window("session", 40.0), window("week", 60.0))
-        val targets = setOf("$agentId|session", "$agentId|week", "$agentId|missing")
+        val snapshot = snapshot(
+            window("session", 40.0),
+            window("credits", 60.0, UsageStyle.CREDIT_GAUGE),
+        )
+        val targets = setOf("$agentId|session", "$agentId|credits", "$agentId|missing")
 
         assertEquals(
             50.0,
@@ -59,18 +67,27 @@ class ScreenLogicTest {
     }
 
     @Test
-    fun `trackable graph options exclude balances and keep stable ids`() {
+    fun `trackable graph options include credit gauges and exclude balances`() {
         val agent = Agent(AgentProvider.OPENROUTER, agentId)
         val graph = window("limit", 20.0)
+        val credit = window("credit", 35.0, UsageStyle.CREDIT_GAUGE)
         val balance = window("credits", 0.0, UsageStyle.BALANCE)
 
         val options = trackableGraphOptions(
             agents = listOf(agent),
-            snapshots = mapOf(agentId to snapshot(graph, balance)),
+            snapshots = mapOf(agentId to snapshot(graph, credit, balance)),
         )
 
-        assertEquals(1, options.size)
-        assertEquals("$agentId|limit", options.single().id)
+        assertEquals(listOf("$agentId|limit", "$agentId|credit"), options.map(GraphOption::id))
+    }
+
+    @Test
+    fun `unknown service status uses a dimmer dot without dimming its label color`() {
+        assertEquals(0.4f, serviceHealthDotColor(ServiceHealth.UNKNOWN).alpha, 0.0001f)
+        assertEquals(
+            serviceHealthColor(ServiceHealth.OPERATIONAL),
+            serviceHealthDotColor(ServiceHealth.OPERATIONAL),
+        )
     }
 
     @Test
@@ -146,7 +163,7 @@ class ScreenLogicTest {
         resetsAt = null,
         kind = WindowKind.WEEKLY,
         style = style,
-        valueText = if (style == UsageStyle.BALANCE) "12.50 USD left" else null,
+        valueText = if (style == UsageStyle.GAUGE) null else "12.50 USD left",
     )
 
     private fun snapshot(vararg windows: UsageWindow) = AgentSnapshot(

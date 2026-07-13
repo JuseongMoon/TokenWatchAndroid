@@ -14,8 +14,15 @@ class HeyGenUsageClient(
     override fun mapSuccessfulBody(body: String): List<UsageWindow> {
         val response = checkNotNull(apiKeyProviderMoshi.adapter(Response::class.java).fromJson(body))
         val quota = response.data?.remaining_quota ?: return emptyList()
-        val value = String.format(Locale.US, "%.0f credits", quota / 60.0)
-        return listOf(balanceWindow("Credits", value))
+        val credits = quota / 60.0
+        val value = String.format(Locale.US, "%.0f credits", credits)
+        return listOf(
+            balanceWindow(
+                label = "Credits",
+                valueText = value,
+                balanceRemaining = credits,
+            ),
+        )
     }
 
     private data class Response(val data: Quota? = null)

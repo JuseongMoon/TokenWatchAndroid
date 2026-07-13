@@ -3,6 +3,7 @@ package com.ScienceFiction.TokenWatchAndroid.network.parsing
 import com.ScienceFiction.TokenWatchAndroid.domain.ServiceHealth
 import com.ScienceFiction.TokenWatchAndroid.domain.StatusPlatform
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 class ServiceStatusParserTest {
@@ -14,8 +15,8 @@ class ServiceStatusParserTest {
         assertEquals(ServiceHealth.MAJOR, health(StatusPlatform.ATLASSIAN, """{"status":{"indicator":"critical"}}"""))
         assertEquals(ServiceHealth.MAINTENANCE, health(StatusPlatform.ATLASSIAN, """{"status":{"indicator":"maintenance"}}"""))
         assertEquals(ServiceHealth.UNKNOWN, health(StatusPlatform.ATLASSIAN, """{"status":{"indicator":"weird"}}"""))
-        assertEquals(ServiceHealth.UNKNOWN, health(StatusPlatform.ATLASSIAN, "{}"))
-        assertEquals(ServiceHealth.UNKNOWN, health(StatusPlatform.ATLASSIAN, "not json"))
+        assertNull(health(StatusPlatform.ATLASSIAN, "{}"))
+        assertNull(health(StatusPlatform.ATLASSIAN, "not json"))
     }
 
     @Test
@@ -24,7 +25,7 @@ class ServiceStatusParserTest {
         assertEquals(ServiceHealth.DEGRADED, health(StatusPlatform.INSTATUS, """{"page":{"status":"HASISSUES"}}"""))
         assertEquals(ServiceHealth.MAINTENANCE, health(StatusPlatform.INSTATUS, """{"page":{"status":"UNDERMAINTENANCE"}}"""))
         assertEquals(ServiceHealth.MAJOR, health(StatusPlatform.INSTATUS, """{"page":{"status":"DOWN"}}"""))
-        assertEquals(ServiceHealth.UNKNOWN, health(StatusPlatform.INSTATUS, """{"page":{}}"""))
+        assertNull(health(StatusPlatform.INSTATUS, """{"page":{}}"""))
     }
 
     @Test
@@ -33,9 +34,9 @@ class ServiceStatusParserTest {
         assertEquals(ServiceHealth.DEGRADED, health(StatusPlatform.BETTERSTACK, """{"data":{"attributes":{"aggregate_state":"degraded"}}}"""))
         assertEquals(ServiceHealth.MAJOR, health(StatusPlatform.BETTERSTACK, """{"data":{"attributes":{"aggregate_state":"downtime"}}}"""))
         assertEquals(ServiceHealth.MAINTENANCE, health(StatusPlatform.BETTERSTACK, """{"data":{"attributes":{"aggregate_state":"maintenance"}}}"""))
-        assertEquals(ServiceHealth.UNKNOWN, health(StatusPlatform.BETTERSTACK, """{"data":{"attributes":{}}}"""))
+        assertNull(health(StatusPlatform.BETTERSTACK, """{"data":{"attributes":{}}}"""))
     }
 
-    private fun health(platform: StatusPlatform, json: String): ServiceHealth =
+    private fun health(platform: StatusPlatform, json: String): ServiceHealth? =
         ServiceStatusParser.parse(platform, json.toByteArray())
 }

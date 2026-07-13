@@ -14,9 +14,17 @@ class OpenRouterUsageClient(
 
     override fun mapSuccessfulBody(body: String): List<UsageWindow> {
         val response = checkNotNull(apiKeyProviderMoshi.adapter(Response::class.java).fromJson(body))
-        val remaining = (response.data?.total_credits ?: 0.0) - (response.data?.total_usage ?: 0.0)
-        val value = String.format(Locale.US, "%.2f credits left", remaining.coerceAtLeast(0.0))
-        return listOf(balanceWindow("Credits", value))
+        val total = response.data?.total_credits ?: 0.0
+        val remaining = (total - (response.data?.total_usage ?: 0.0)).coerceAtLeast(0.0)
+        val value = String.format(Locale.US, "%.2f credits left", remaining)
+        return listOf(
+            balanceWindow(
+                label = "Credits",
+                valueText = value,
+                balanceRemaining = remaining,
+                balanceTotal = total,
+            ),
+        )
     }
 
     private data class Response(val data: Credits? = null)

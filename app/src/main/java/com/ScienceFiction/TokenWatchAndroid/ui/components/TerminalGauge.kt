@@ -13,10 +13,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -39,8 +41,9 @@ import kotlin.math.max
 import kotlin.math.roundToInt
 
 /**
- * Continuous usage gauge: dotted track, solid used fill, optional elapsed-time
- * marker, and a hopping slime when the displayed value rounds to 100%.
+ * Continuous usage gauge: dotted track, solid fill, optional elapsed-time marker, and a hopping
+ * slime when the consumed value rounds to 100%. Credit gauges keep [usedFraction] as consumption
+ * but set [fillsRemaining] so the visible fill runs in the opposite direction.
  */
 @Composable
 fun TerminalGauge(
@@ -48,19 +51,27 @@ fun TerminalGauge(
     fillColor: Color,
     elapsedFraction: Double?,
     modifier: Modifier = Modifier,
+    fillsRemaining: Boolean = false,
     height: Dp = 14.dp,
     bracketSize: TextUnit = 13.sp,
     gaugeCritterEnabled: Boolean = true,
     reduceMotion: Boolean = !ValueAnimator.areAnimatorsEnabled(),
     usedContentDescription: (Int) -> String = { "$it% used" },
+    remainingContentDescription: (Int) -> String = { "$it% left" },
 ) {
     val used = usedFraction.coerceIn(0.0, 1.0)
+    val fill = TerminalGaugeMath.fillFraction(used = used, fillsRemaining = fillsRemaining)
     val elapsed = elapsedFraction?.coerceIn(0.0, 1.0)
+    val showCritter = gaugeCritterEnabled && used >= GaugeCritterMath.Threshold
     Row(
         modifier = modifier
             .fillMaxWidth()
             .clearAndSetSemantics {
-                contentDescription = usedContentDescription((used * 100.0).roundToInt())
+                contentDescription = if (fillsRemaining) {
+                    remainingContentDescription(((1.0 - used) * 100.0).roundToInt())
+                } else {
+                    usedContentDescription((used * 100.0).roundToInt())
+                }
             },
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -77,7 +88,7 @@ fun TerminalGauge(
                 drawRect(
                     color = fillColor,
                     size = Size(
-                        width = (size.width * used).toFloat().coerceAtLeast(0f),
+                        width = (size.width * fill).toFloat().coerceAtLeast(0f),
                         height = size.height,
                     ),
                 )
@@ -86,14 +97,66 @@ fun TerminalGauge(
                 }
             }
 
-            if (gaugeCritterEnabled && used >= GaugeCritterMath.Threshold) {
-                GaugeCritter(
-                    modifier = Modifier.fillMaxSize(),
-                    reduceMotion = reduceMotion,
-                )
-            }
+            AnimatedGaugeCritter(
+                visible = showCritter,
+                modifier = Modifier.fillMaxSize(),
+                reduceMotion = reduceMotion,
+            )
         }
         GaugeBracket("]", bracketSize)
+    }
+}
+
+/** Pure fill-direction arithmetic shared with unit tests. */
+object TerminalGaugeMath {
+    fun fillFraction(used: Double, fillsRemaining: Boolean): Double {
+        val clamped = used.coerceIn(0.0, 1.0)
+        return if (fillsRemaining) 1.0 - clamped else clamped
+    }
+}
+
+/** Keeps the stepped fade local to the slime overlay so usage-fill changes remain immediate. */
+@Composable
+private fun AnimatedGaugeCritter(
+    visible: Boolean,
+    modifier: Modifier = Modifier,
+    reduceMotion: Boolean,
+) {
+    var rendered by remember { mutableStateOf(false) }
+    var opacityStep by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(visible, reduceMotion) {
+        if (reduceMotion) {
+            opacityStep = if (visible) GaugeCritterMath.OpacitySteps else 0
+            rendered = visible
+            return@LaunchedEffect
+        }
+
+        val stepDelay = GaugeCritterMath.FadeDurationMillis / GaugeCritterMath.OpacitySteps
+        if (visible) {
+            rendered = true
+            for (step in opacityStep..GaugeCritterMath.OpacitySteps) {
+                opacityStep = step
+                if (step < GaugeCritterMath.OpacitySteps) delay(stepDelay)
+            }
+        } else {
+            for (step in opacityStep downTo 0) {
+                opacityStep = step
+                if (step > 0) delay(stepDelay)
+            }
+            rendered = false
+        }
+    }
+
+    if (rendered) {
+        GaugeCritter(
+            modifier = modifier.alpha(
+                GaugeCritterMath.steppedOpacity(
+                    opacityStep.toDouble() / GaugeCritterMath.OpacitySteps,
+                ).toFloat(),
+            ),
+            reduceMotion = reduceMotion,
+        )
     }
 }
 
@@ -149,8 +212,16 @@ object GaugeCritterMath {
     const val Threshold = 0.995
     const val TickMillis = 250L
     const val HopCells = 4
+    const val OpacitySteps = 8
+    const val FadeDurationMillis = 600L
 
     fun frameIndex(tick: Int): Int = (abs(tick.toLong()) % 2L).toInt()
+
+    /** Quantizes a clamped 0...1 animation progress to eighth-step opacity levels. */
+    fun steppedOpacity(progress: Double): Double {
+        val clamped = progress.coerceIn(0.0, 1.0)
+        return kotlin.math.floor(clamped * OpacitySteps) / OpacitySteps
+    }
 
     fun offsetX(
         tick: Int,

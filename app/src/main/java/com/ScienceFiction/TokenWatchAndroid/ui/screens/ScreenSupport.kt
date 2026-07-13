@@ -58,6 +58,12 @@ internal fun serviceHealthColor(health: ServiceHealth): Color = when (health) {
     ServiceHealth.UNKNOWN -> Term.Dim
 }
 
+/** Unknown is a valid-but-unrecognized status, so keep its dot deliberately quieter than failures. */
+internal fun serviceHealthDotColor(health: ServiceHealth): Color = when (health) {
+    ServiceHealth.UNKNOWN -> Term.Dim.copy(alpha = 0.4f)
+    else -> serviceHealthColor(health)
+}
+
 @Composable
 internal fun TerminalTextButton(
     text: String,

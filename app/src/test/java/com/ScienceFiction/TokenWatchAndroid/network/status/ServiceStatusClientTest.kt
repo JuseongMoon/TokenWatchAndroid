@@ -35,22 +35,30 @@ class ServiceStatusClientTest {
     }
 
     @Test
-    fun absorbsHttpNetworkAndDecodeFailures() = runBlocking {
-        assertEquals(
-            ServiceHealth.UNKNOWN,
+    fun returnsNullForHttpNetworkAndDecodeFailures() = runBlocking {
+        assertNull(
             ServiceStatusClient(RecordingTransport(NetworkResponse(503, emptyMap(), ByteArray(0))))
                 .fetch(source),
         )
-        assertEquals(
-            ServiceHealth.UNKNOWN,
-            ServiceStatusClient(NetworkTransport { throw IOException("offline") }).fetch(source),
-        )
-        assertEquals(
-            ServiceHealth.UNKNOWN,
+        assertNull(ServiceStatusClient(NetworkTransport { throw IOException("offline") }).fetch(source))
+        assertNull(
             ServiceStatusClient(
                 RecordingTransport(NetworkResponse(200, emptyMap(), "not-json".toByteArray())),
             ).fetch(source),
         )
+    }
+
+    @Test
+    fun parsedUnsupportedStatusRemainsUnknownRatherThanFetchFailure() = runBlocking {
+        val transport = RecordingTransport(
+            NetworkResponse(
+                statusCode = 200,
+                headers = emptyMap(),
+                body = """{"status":{"indicator":"future-value"}}""".toByteArray(),
+            ),
+        )
+
+        assertEquals(ServiceHealth.UNKNOWN, ServiceStatusClient(transport).fetch(source))
     }
 
     private class RecordingTransport(

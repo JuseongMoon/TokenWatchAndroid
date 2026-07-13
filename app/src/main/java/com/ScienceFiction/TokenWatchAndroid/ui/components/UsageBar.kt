@@ -58,6 +58,11 @@ fun UsageBar(
 
         when (window.style) {
             UsageStyle.BALANCE -> BalanceValue(window.valueText)
+            UsageStyle.CREDIT_GAUGE -> CreditGaugeValue(
+                window = window,
+                loc = loc,
+                gaugeCritterEnabled = gaugeCritterEnabled,
+            )
             UsageStyle.GAUGE -> GaugeValue(
                 window = window,
                 loc = loc,
@@ -122,6 +127,39 @@ private fun GaugeValue(
         )
         Text(
             text = String.format(Locale.US, "%3d%% used", window.usedPercent.roundToInt()),
+            color = statusColor,
+            maxLines = 1,
+            style = terminalTextStyle(12),
+        )
+    }
+}
+
+@Composable
+private fun CreditGaugeValue(
+    window: UsageWindow,
+    loc: L10n,
+    gaugeCritterEnabled: Boolean,
+) {
+    val statusColor = Term.statusColor(window.remainingPercent)
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        TerminalGauge(
+            usedFraction = window.usedPercent / 100.0,
+            fillColor = statusColor,
+            elapsedFraction = null,
+            fillsRemaining = true,
+            modifier = Modifier.weight(1f),
+            height = 14.dp,
+            bracketSize = 13.sp,
+            gaugeCritterEnabled = gaugeCritterEnabled,
+            usedContentDescription = loc::a11yUsed,
+            remainingContentDescription = loc::a11yRemaining,
+        )
+        Text(
+            text = "${if (window.estimatedTotal) "~" else ""}${window.valueText ?: "—"}",
             color = statusColor,
             maxLines = 1,
             style = terminalTextStyle(12),

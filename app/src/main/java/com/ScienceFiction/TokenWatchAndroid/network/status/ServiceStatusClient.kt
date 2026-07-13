@@ -7,11 +7,14 @@ import com.ScienceFiction.TokenWatchAndroid.network.parsing.ServiceStatusParser
 import kotlinx.coroutines.CancellationException
 import okhttp3.Request
 
-/** Fetches a provider's public status endpoint without allowing failures to disturb usage data. */
+/**
+ * Fetches a provider's public status endpoint without allowing failures to disturb usage data.
+ * Null is a transient fetch/parse failure; UNKNOWN is a successfully parsed unsupported value.
+ */
 class ServiceStatusClient(
     private val transport: NetworkTransport,
 ) {
-    suspend fun fetch(source: ServiceStatusSource): ServiceHealth = try {
+    suspend fun fetch(source: ServiceStatusSource): ServiceHealth? = try {
         val response = transport.execute(
             Request.Builder()
                 .url(source.jsonUrl)
@@ -20,12 +23,12 @@ class ServiceStatusClient(
                 .header("User-Agent", USER_AGENT)
                 .build(),
         )
-        if (response.statusCode !in 200..299) ServiceHealth.UNKNOWN
+        if (response.statusCode !in 200..299) null
         else ServiceStatusParser.parse(source.platform, response.body)
     } catch (cancelled: CancellationException) {
         throw cancelled
     } catch (_: Throwable) {
-        ServiceHealth.UNKNOWN
+        null
     }
 
     companion object {

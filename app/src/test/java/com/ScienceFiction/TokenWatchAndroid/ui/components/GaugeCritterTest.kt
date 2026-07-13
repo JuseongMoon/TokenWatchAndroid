@@ -1,10 +1,30 @@
 package com.ScienceFiction.TokenWatchAndroid.ui.components
 
+import androidx.compose.ui.graphics.Color
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class GaugeCritterTest {
+    @Test
+    fun terminalGaugeFillDirectionMatchesUsageStyle() {
+        assertEquals(0.0, TerminalGaugeMath.fillFraction(used = 0.0, fillsRemaining = false), 0.0)
+        assertEquals(0.25, TerminalGaugeMath.fillFraction(used = 0.25, fillsRemaining = false), 0.0)
+        assertEquals(1.0, TerminalGaugeMath.fillFraction(used = 1.0, fillsRemaining = false), 0.0)
+
+        assertEquals(1.0, TerminalGaugeMath.fillFraction(used = 0.0, fillsRemaining = true), 0.0)
+        assertEquals(0.75, TerminalGaugeMath.fillFraction(used = 0.25, fillsRemaining = true), 0.0)
+        assertEquals(0.0, TerminalGaugeMath.fillFraction(used = 1.0, fillsRemaining = true), 0.0)
+    }
+
+    @Test
+    fun terminalGaugeFillClampsOutOfRangeConsumption() {
+        assertEquals(0.0, TerminalGaugeMath.fillFraction(used = -1.0, fillsRemaining = false), 0.0)
+        assertEquals(1.0, TerminalGaugeMath.fillFraction(used = 2.0, fillsRemaining = false), 0.0)
+        assertEquals(1.0, TerminalGaugeMath.fillFraction(used = -1.0, fillsRemaining = true), 0.0)
+        assertEquals(0.0, TerminalGaugeMath.fillFraction(used = 2.0, fillsRemaining = true), 0.0)
+    }
+
     @Test
     fun framesAlternatePerTick() {
         assertEquals(0, GaugeCritterMath.frameIndex(0))
@@ -61,8 +81,31 @@ class GaugeCritterTest {
         assertEquals(0.995, GaugeCritterMath.Threshold, 0.0)
         assertEquals(250L, GaugeCritterMath.TickMillis)
         assertEquals(4, GaugeCritterMath.HopCells)
+        assertEquals(8, GaugeCritterMath.OpacitySteps)
+        assertEquals(600L, GaugeCritterMath.FadeDurationMillis)
         assertTrue(0.994 < GaugeCritterMath.Threshold)
         assertTrue(1.0 >= GaugeCritterMath.Threshold)
+    }
+
+    @Test
+    fun steppedOpacityQuantizesToEighthsAndClamps() {
+        assertEquals(0.0, GaugeCritterMath.steppedOpacity(-0.5), 0.0)
+        assertEquals(0.0, GaugeCritterMath.steppedOpacity(0.1), 0.0)
+        assertEquals(0.125, GaugeCritterMath.steppedOpacity(0.2), 0.0)
+        assertEquals(0.5, GaugeCritterMath.steppedOpacity(0.5), 0.0)
+        assertEquals(0.875, GaugeCritterMath.steppedOpacity(0.99), 0.0)
+        assertEquals(1.0, GaugeCritterMath.steppedOpacity(1.5), 0.0)
+    }
+
+    @Test
+    fun steppedOpacityWalksOnlyEightSteps() {
+        val levels = (0..100)
+            .map { GaugeCritterMath.steppedOpacity(it / 100.0) }
+            .toSet()
+
+        assertEquals(9, levels.size)
+        assertTrue(0.0 in levels)
+        assertTrue(1.0 in levels)
     }
 
     @Test
@@ -86,6 +129,7 @@ class GaugeCritterTest {
                 row.forEach { value -> assertTrue(value in allowed) }
             }
         }
+        assertEquals(Color(0xFF29A64A), slime.palette[3])
     }
 
     @Test

@@ -48,11 +48,18 @@ abstract class ApiKeyUsageClientBase protected constructor(
     }
 }
 
-internal fun balanceWindow(label: String, valueText: String) = UsageWindow(
+internal fun balanceWindow(
+    label: String,
+    valueText: String,
+    balanceRemaining: Double? = null,
+    balanceTotal: Double? = null,
+) = UsageWindow(
     label = label,
     usedPercent = 0.0,
     resetsAt = null,
     kind = com.ScienceFiction.TokenWatchAndroid.domain.WindowKind.WEEKLY,
     style = com.ScienceFiction.TokenWatchAndroid.domain.UsageStyle.BALANCE,
     valueText = valueText,
+    balanceRemaining = balanceRemaining,
+    balanceTotal = balanceTotal,
 )

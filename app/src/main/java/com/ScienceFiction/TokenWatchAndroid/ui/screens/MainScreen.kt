@@ -2,6 +2,7 @@ package com.ScienceFiction.TokenWatchAndroid.ui.screens
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -33,6 +35,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.text.font.FontFamily
@@ -46,7 +49,6 @@ import com.ScienceFiction.TokenWatchAndroid.domain.Agent
 import com.ScienceFiction.TokenWatchAndroid.domain.AgentProvider
 import com.ScienceFiction.TokenWatchAndroid.domain.AgentSnapshot
 import com.ScienceFiction.TokenWatchAndroid.domain.ServiceHealth
-import com.ScienceFiction.TokenWatchAndroid.domain.UsageStyle
 import com.ScienceFiction.TokenWatchAndroid.localization.L10n
 import com.ScienceFiction.TokenWatchAndroid.ui.components.BlinkingCursor
 import com.ScienceFiction.TokenWatchAndroid.ui.components.BlinkingHeart
@@ -405,16 +407,26 @@ private fun ReorderArrow(
     label: String,
     onClick: () -> Unit,
 ) {
-    TerminalTextButton(
-        text = glyph,
-        color = Term.Green,
-        enabled = enabled,
-        onClick = onClick,
-        accessibilityLabel = label,
-        size = 11.sp,
-        weight = FontWeight.Normal,
-        modifier = Modifier.padding(horizontal = 6.dp),
-    )
+    val interactionSource = remember { MutableInteractionSource() }
+    Box(
+        modifier = Modifier
+            .size(width = 26.dp, height = 20.dp)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                enabled = enabled,
+                role = Role.Button,
+                onClick = onClick,
+            )
+            .semantics { contentDescription = label },
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = glyph,
+            color = if (enabled) Term.Green else Term.Dim.copy(alpha = 0.3f),
+            style = terminalTextStyle(16.5.sp),
+        )
+    }
 }
 
 @Composable
@@ -449,7 +461,7 @@ internal fun trackedUsedPercent(
         agents.forEach { agent ->
             snapshots[agent.id]?.windows.orEmpty().forEach { window ->
                 val id = "${agent.id}|${window.label}"
-                if (window.style == UsageStyle.GAUGE && id in targetIds) add(window.usedPercent)
+                if (window.isGaugeLike && id in targetIds) add(window.usedPercent)
             }
         }
     }

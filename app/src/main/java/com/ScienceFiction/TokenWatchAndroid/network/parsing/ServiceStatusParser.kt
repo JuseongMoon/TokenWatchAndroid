@@ -9,8 +9,9 @@ import com.squareup.moshi.Moshi
 object ServiceStatusParser {
     private val jsonAdapter: JsonAdapter<Any> = Moshi.Builder().build().adapter(Any::class.java)
 
-    fun parse(platform: StatusPlatform, data: ByteArray): ServiceHealth {
-        val root = parseObject(data) ?: return ServiceHealth.UNKNOWN
+    /** Null means malformed/missing status data; UNKNOWN means a parsed but unsupported value. */
+    fun parse(platform: StatusPlatform, data: ByteArray): ServiceHealth? {
+        val root = parseObject(data) ?: return null
         return when (platform) {
             StatusPlatform.ATLASSIAN -> parseAtlassian(root)
             StatusPlatform.INSTATUS -> parseInstatus(root)
@@ -18,9 +19,9 @@ object ServiceStatusParser {
         }
     }
 
-    private fun parseAtlassian(root: Map<*, *>): ServiceHealth {
+    private fun parseAtlassian(root: Map<*, *>): ServiceHealth? {
         val indicator = root.nestedString("status", "indicator")?.lowercase()
-            ?: return ServiceHealth.UNKNOWN
+            ?: return null
         return when (indicator) {
             "none" -> ServiceHealth.OPERATIONAL
             "minor" -> ServiceHealth.DEGRADED
@@ -30,9 +31,9 @@ object ServiceStatusParser {
         }
     }
 
-    private fun parseInstatus(root: Map<*, *>): ServiceHealth {
+    private fun parseInstatus(root: Map<*, *>): ServiceHealth? {
         val status = root.nestedString("page", "status")?.uppercase()
-            ?: return ServiceHealth.UNKNOWN
+            ?: return null
         return when (status) {
             "UP" -> ServiceHealth.OPERATIONAL
             "HASISSUES" -> ServiceHealth.DEGRADED
@@ -42,9 +43,9 @@ object ServiceStatusParser {
         }
     }
 
-    private fun parseBetterStack(root: Map<*, *>): ServiceHealth {
+    private fun parseBetterStack(root: Map<*, *>): ServiceHealth? {
         val state = root.nestedString("data", "attributes", "aggregate_state")?.lowercase()
-            ?: return ServiceHealth.UNKNOWN
+            ?: return null
         return when (state) {
             "operational" -> ServiceHealth.OPERATIONAL
             "degraded" -> ServiceHealth.DEGRADED

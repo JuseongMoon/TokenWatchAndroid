@@ -23,20 +23,20 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ScienceFiction.TokenWatchAndroid.data.AppSettings
 import com.ScienceFiction.TokenWatchAndroid.domain.Agent
 import com.ScienceFiction.TokenWatchAndroid.domain.AgentSnapshot
-import com.ScienceFiction.TokenWatchAndroid.domain.UsageStyle
 import com.ScienceFiction.TokenWatchAndroid.domain.UsageWindow
 import com.ScienceFiction.TokenWatchAndroid.localization.AppLanguage
 import com.ScienceFiction.TokenWatchAndroid.localization.L10n
+import com.ScienceFiction.TokenWatchAndroid.ui.components.AnimatedPixelSpriteView
 import com.ScienceFiction.TokenWatchAndroid.ui.components.KvRow
 import com.ScienceFiction.TokenWatchAndroid.ui.components.PixelHeart
 import com.ScienceFiction.TokenWatchAndroid.ui.components.PixelSprite
-import com.ScienceFiction.TokenWatchAndroid.ui.components.PixelSpriteView
 import com.ScienceFiction.TokenWatchAndroid.ui.components.TerminalBox
 import com.ScienceFiction.TokenWatchAndroid.ui.theme.Term
 import java.util.UUID
@@ -87,6 +87,7 @@ fun SettingsScreen(
         Column(
             modifier = Modifier
                 .weight(1f)
+                .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
                 .navigationBarsPadding()
                 .padding(16.dp),
@@ -250,9 +251,8 @@ private fun DisplaySection(
                 help = loc.settingsGaugeCritterHelp,
                 onClick = { onSettingsChange(settings.copy(gaugeCritter = !settings.gaugeCritter)) },
                 trailing = {
-                    PixelSpriteView(
+                    AnimatedPixelSpriteView(
                         sprite = PixelSprite.Slime,
-                        frameIndex = 1,
                         cell = 2.dp,
                         flatColor = if (settings.gaugeCritter) null else Term.Dim,
                     )
@@ -374,7 +374,7 @@ private fun GraphOptionRow(graph: GraphOption, selected: Boolean, onClick: () ->
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            text = if (selected) "[x]" else "[ ]",
+            text = if (selected) "[v]" else "[ ]",
             color = if (selected) Term.Green else Term.Dim,
             style = terminalTextStyle(12.sp),
         )
@@ -473,6 +473,7 @@ private fun SegmentButton(
         text = title,
         color = if (selected) Term.Green else Term.Dim,
         maxLines = 1,
+        textAlign = TextAlign.Center,
         style = terminalTextStyle(
             size = 13.sp,
             weight = if (selected) FontWeight.Bold else FontWeight.Normal,
@@ -496,7 +497,7 @@ internal fun trackableGraphOptions(
     snapshots[agent.id]
         ?.windows
         .orEmpty()
-        .filter { it.style == UsageStyle.GAUGE }
+        .filter(UsageWindow::isGaugeLike)
         .map { GraphOption(agent = agent, window = it) }
 }
 

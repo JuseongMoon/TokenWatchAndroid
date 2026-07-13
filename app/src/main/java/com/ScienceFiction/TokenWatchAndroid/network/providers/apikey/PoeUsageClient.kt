@@ -14,8 +14,15 @@ class PoeUsageClient(
 
     override fun mapSuccessfulBody(body: String): List<UsageWindow> {
         val response = checkNotNull(apiKeyProviderMoshi.adapter(Response::class.java).fromJson(body))
-        val value = String.format(Locale.US, "%,d pts", response.current_point_balance ?: 0L)
-        return listOf(balanceWindow("Compute points", value))
+        val points = response.current_point_balance ?: 0L
+        val value = String.format(Locale.US, "%,d pts", points)
+        return listOf(
+            balanceWindow(
+                label = "Compute points",
+                valueText = value,
+                balanceRemaining = points.toDouble(),
+            ),
+        )
     }
 
     private data class Response(val current_point_balance: Long? = null)

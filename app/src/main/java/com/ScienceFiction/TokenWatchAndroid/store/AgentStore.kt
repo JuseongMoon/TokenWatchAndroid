@@ -9,9 +9,10 @@ import com.ScienceFiction.TokenWatchAndroid.data.SettingsRepository
 import com.ScienceFiction.TokenWatchAndroid.domain.Agent
 import com.ScienceFiction.TokenWatchAndroid.domain.AgentProvider
 import com.ScienceFiction.TokenWatchAndroid.domain.AgentSnapshot
+import com.ScienceFiction.TokenWatchAndroid.domain.CreditGaugePolicy
 import com.ScienceFiction.TokenWatchAndroid.domain.ServiceHealth
 import com.ScienceFiction.TokenWatchAndroid.domain.ServiceStatusSource
-import com.ScienceFiction.TokenWatchAndroid.domain.UsageStyle
+import com.ScienceFiction.TokenWatchAndroid.domain.UsageWindow
 import com.ScienceFiction.TokenWatchAndroid.domain.refresh.AutoRefreshPolicy
 import com.ScienceFiction.TokenWatchAndroid.network.orchestration.UsageGateway
 import com.ScienceFiction.TokenWatchAndroid.network.status.ServiceStatusClient
@@ -39,6 +40,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -74,18 +76,20 @@ fun interface StoreSleeper {
  */
 data class AgentStoreDependencies(
     val agentUpdates: Flow<List<Agent>>,
+    val creditPeakUpdates: Flow<Map<String, Double>>,
     val settingsUpdates: Flow<AppSettings>,
     val persistAgents: suspend (List<Agent>) -> Unit,
+    val persistCreditPeaks: suspend (Map<String, Double>) -> Unit,
     val persistSettings: suspend (AppSettings) -> Unit,
     val saveTokens: suspend (UUID, OAuthTokens) -> Unit,
     val loadTokens: suspend (UUID) -> OAuthTokens?,
     val deleteTokens: suspend (UUID) -> Unit,
     val fetchSnapshot: suspend (AgentProvider, UUID) -> AgentSnapshot,
-    val fetchStatus: suspend (ServiceStatusSource) -> ServiceHealth,
+    val fetchStatus: suspend (ServiceStatusSource) -> ServiceHealth?,
 )
 
 /**
- * Foreground application state and refresh controller, ported through iOS commit `e7d1715`.
+ * Foreground application state and refresh controller, ported through iOS commit `565cfff`.
  *
  * It deliberately has no ViewModel or Android lifecycle dependency. The owner supplies a scope,
  * calls [startAutoRefresh]/[stopAutoRefresh] with foreground transitions, and closes the store
@@ -111,8 +115,10 @@ class AgentStore(
         parentScope = scope,
         dependencies = AgentStoreDependencies(
             agentUpdates = agentRepository.agents,
+            creditPeakUpdates = agentRepository.creditPeaks,
             settingsUpdates = settingsRepository.settings,
             persistAgents = agentRepository::saveAgents,
+            persistCreditPeaks = agentRepository::saveCreditPeaks,
             persistSettings = settingsRepository::saveSettings,
             saveTokens = tokenStore::save,
             loadTokens = tokenStore::tokens,
@@ -129,11 +135,13 @@ class AgentStore(
     private val closed = AtomicBoolean(false)
 
     private val agentMutex = Mutex()
+    private val creditPeakMutex = Mutex()
     private val settingsMutex = Mutex()
     private val loadingMutex = Mutex()
     private val statusMutex = Mutex()
 
     private val agentsLoaded = CompletableDeferred<Unit>()
+    private val creditPeaksLoaded = CompletableDeferred<Unit>()
     private val settingsLoaded = CompletableDeferred<Unit>()
 
     private val _agents = MutableStateFlow<List<Agent>>(emptyList())
@@ -158,8 +166,11 @@ class AgentStore(
     )
     val autoIntervalSeconds: StateFlow<Int> = _autoIntervalSeconds.asStateFlow()
 
+    private var creditPeaks = emptyMap<String, Double>()
+    private var creditPeaksDirty = false
+
     private val statusFetchedAt = mutableMapOf<AgentProvider, Instant>()
-    private val statusInFlight = mutableMapOf<AgentProvider, CompletableDeferred<ServiceHealth>>()
+    private val statusInFlight = mutableMapOf<AgentProvider, CompletableDeferred<ServiceHealth?>>()
 
     private val lifecycleLock = Any()
     private var autoRefreshJob: Job? = null
@@ -171,6 +182,15 @@ class AgentStore(
     private var autoBaseline = emptyMap<String, Double>()
 
     init {
+        scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            try {
+                val value = dependencies.creditPeakUpdates.firstOrNull().orEmpty()
+                creditPeakMutex.withLock { creditPeaks = value }
+                creditPeaksLoaded.complete(Unit)
+            } finally {
+                creditPeaksLoaded.complete(Unit)
+            }
+        }
         scope.launch(start = CoroutineStart.UNDISPATCHED) {
             try {
                 dependencies.agentUpdates.collect { value ->
@@ -193,9 +213,10 @@ class AgentStore(
         }
     }
 
-    /** Waits until both asynchronous repository flows have supplied their initial value. */
+    /** Waits until all asynchronous repository flows have supplied their initial value. */
     suspend fun awaitInitialLoad() {
         agentsLoaded.await()
+        creditPeaksLoaded.await()
         settingsLoaded.await()
     }
 
@@ -244,7 +265,7 @@ class AgentStore(
                     throw error
                 }
             }
-            _snapshots.update { it - agent.id }
+            pruneCreditPeaks(agent.id)
             dependencies.deleteTokens(agent.id)
         }
     }
@@ -334,24 +355,8 @@ class AgentStore(
         awaitAgentsReady()
         if (!beginRefresh(agent.id)) return
         try {
-            val incoming = dependencies.fetchSnapshot(agent.provider, agent.id)
-            _snapshots.update { current ->
-                val previous = current[agent.id]
-                val applied = if (
-                    incoming.error != null && incoming.windows.isEmpty() &&
-                    previous != null && previous.windows.isNotEmpty()
-                ) {
-                    AgentSnapshot(
-                        windows = previous.windows,
-                        planLabel = previous.planLabel,
-                        fetchedAt = previous.fetchedAt,
-                        error = incoming.error,
-                    )
-                } else {
-                    incoming
-                }
-                current + (agent.id to applied)
-            }
+            val fetched = dependencies.fetchSnapshot(agent.provider, agent.id)
+            val incoming = applyIncomingSnapshot(agent.id, fetched)
 
             if (incoming.planLabel != null) {
                 enrichAccountLabel(agent.id, incoming.planLabel)
@@ -363,6 +368,129 @@ class AgentStore(
             withContext(NonCancellable) { finishRefresh(agent.id) }
         }
     }
+
+    /**
+     * Promotes raw prepaid balances and applies the resulting snapshot while holding the same
+     * mutex used by refresh, reset, and removal. This prevents concurrent refreshAll children
+     * from overwriting each other's peak updates.
+     */
+    private suspend fun applyIncomingSnapshot(
+        agentID: UUID,
+        incoming: AgentSnapshot,
+    ): AgentSnapshot {
+        creditPeaksLoaded.await()
+        return withContext(NonCancellable) {
+            creditPeakMutex.withLock {
+                // A provider request can finish after its account was removed. Never let that
+                // late response recreate an orphan snapshot or persisted peak.
+                if (_agents.value.none { agent -> agent.id == agentID }) return@withLock incoming
+
+                val promotion = promoteCreditWindows(incoming.windows, agentID, creditPeaks)
+                commitCreditPeaksIfChanged(promotion.peaks)
+                val promoted = incoming.copy(windows = promotion.windows)
+                _snapshots.update { current ->
+                    val previous = current[agentID]
+                    val applied = if (
+                        promoted.error != null && promoted.windows.isEmpty() &&
+                        previous != null && previous.windows.isNotEmpty()
+                    ) {
+                        AgentSnapshot(
+                            windows = previous.windows,
+                            planLabel = previous.planLabel,
+                            fetchedAt = previous.fetchedAt,
+                            error = promoted.error,
+                        )
+                    } else {
+                        promoted
+                    }
+                    current + (agentID to applied)
+                }
+                promoted
+            }
+        }
+    }
+
+    /** Re-baselines an estimated credit gauge from its current snapshot without network I/O. */
+    suspend fun resetCreditPeak(agentID: UUID, windowLabel: String) {
+        awaitAgentsReady()
+        withContext(NonCancellable) {
+            creditPeakMutex.withLock {
+                val key = creditPeakKey(agentID, windowLabel)
+                if (key !in creditPeaks) return@withLock
+
+                val withoutPeak = creditPeaks - key
+                val snapshot = _snapshots.value[agentID]
+                val promotion = if (snapshot == null) {
+                    CreditPromotion(emptyList(), withoutPeak)
+                } else {
+                    promoteCreditWindows(snapshot.windows, agentID, withoutPeak)
+                }
+                commitCreditPeaksIfChanged(promotion.peaks)
+                if (snapshot != null) {
+                    _snapshots.update { current ->
+                        current + (agentID to snapshot.copy(windows = promotion.windows))
+                    }
+                }
+            }
+        }
+    }
+
+    private suspend fun pruneCreditPeaks(agentID: UUID) {
+        creditPeaksLoaded.await()
+        creditPeakMutex.withLock {
+            val prefix = "${agentID}|"
+            val pruned = creditPeaks.filterKeys { key -> !key.startsWith(prefix) }
+            commitCreditPeaksIfChanged(pruned)
+            _snapshots.update { it - agentID }
+        }
+    }
+
+    private fun promoteCreditWindows(
+        windows: List<UsageWindow>,
+        agentID: UUID,
+        storedPeaks: Map<String, Double>,
+    ): CreditPromotion {
+        val nextPeaks = storedPeaks.toMutableMap()
+        val promoted = windows.map { window ->
+            val remaining = window.balanceRemaining ?: return@map window
+            val total: Double
+            val estimated: Boolean
+            if (window.balanceTotal != null && window.balanceTotal > 0.0) {
+                total = window.balanceTotal
+                estimated = false
+            } else {
+                val key = creditPeakKey(agentID, window.label)
+                total = CreditGaugePolicy.newPeak(nextPeaks[key], remaining)
+                nextPeaks[key] = total
+                estimated = true
+            }
+            val used = CreditGaugePolicy.usedPercent(remaining, total) ?: return@map window
+            window.promotedToCreditGauge(usedPercent = used, estimatedTotal = estimated)
+        }
+        return CreditPromotion(promoted, nextPeaks)
+    }
+
+    private suspend fun commitCreditPeaksIfChanged(next: Map<String, Double>) {
+        if (next != creditPeaks) {
+            creditPeaks = next.toMap()
+            creditPeaksDirty = true
+        }
+        if (!creditPeaksDirty) return
+        // UserDefaults persistence in iOS is best-effort. Preserve the in-memory scale if the
+        // device cannot write DataStore so usage rendering itself never disappears, and retry the
+        // same value on the next promotion/reset/remove instead of silently treating it as saved.
+        if (runCatching { dependencies.persistCreditPeaks(creditPeaks) }.isSuccess) {
+            creditPeaksDirty = false
+        }
+    }
+
+    private fun creditPeakKey(agentID: UUID, windowLabel: String): String =
+        "$agentID|$windowLabel"
+
+    private data class CreditPromotion(
+        val windows: List<UsageWindow>,
+        val peaks: Map<String, Double>,
+    )
 
     private suspend fun enrichAccountLabel(agentId: UUID, plan: String) {
         withContext(NonCancellable) {
@@ -415,8 +543,9 @@ class AgentStore(
     }
 
     /**
-     * Refreshes public service status no more than once per provider per minute. A timestamp and
-     * in-flight gate are installed before suspension, so concurrent accounts never duplicate it.
+     * Refreshes public service status no more than once per provider per minute after success.
+     * Transient failures preserve last-good state and are immediately retryable; a store-owned
+     * in-flight gate still joins concurrent accounts into one network request.
      */
     suspend fun refreshStatus(
         provider: AgentProvider,
@@ -432,9 +561,8 @@ class AgentStore(
             if (!force && last != null && Duration.between(last, observedNow) < STATUS_MIN_INTERVAL) {
                 return@withLock null
             }
-            statusFetchedAt[provider] = observedNow
             created = true
-            CompletableDeferred<ServiceHealth>().also { statusInFlight[provider] = it }
+            CompletableDeferred<ServiceHealth?>().also { statusInFlight[provider] = it }
         } ?: return _serviceStatus.value[provider]
 
         if (created) {
@@ -443,22 +571,35 @@ class AgentStore(
             scope.launch {
                 try {
                     val health = dependencies.fetchStatus(source)
-                    _serviceStatus.update { it + (provider to health) }
-                    request.complete(health)
+                    if (health != null) {
+                        _serviceStatus.update { it + (provider to health) }
+                    }
+                    finishStatusRequest(provider, request, health?.let { observedNow })
+                    request.complete(health ?: _serviceStatus.value[provider])
                 } catch (cancelled: CancellationException) {
+                    finishStatusRequest(provider, request, successfulAt = null)
                     request.cancel(cancelled)
                     throw cancelled
                 } catch (_: Throwable) {
-                    _serviceStatus.update { it + (provider to ServiceHealth.UNKNOWN) }
-                    request.complete(ServiceHealth.UNKNOWN)
-                } finally {
-                    statusMutex.withLock {
-                        if (statusInFlight[provider] === request) statusInFlight.remove(provider)
-                    }
+                    finishStatusRequest(provider, request, successfulAt = null)
+                    request.complete(_serviceStatus.value[provider])
                 }
             }
         }
         return request.await()
+    }
+
+    private suspend fun finishStatusRequest(
+        provider: AgentProvider,
+        request: CompletableDeferred<ServiceHealth?>,
+        successfulAt: Instant?,
+    ) = withContext(NonCancellable) {
+        statusMutex.withLock {
+            if (statusInFlight[provider] === request) {
+                if (successfulAt != null) statusFetchedAt[provider] = successfulAt
+                statusInFlight.remove(provider)
+            }
+        }
     }
 
     /** Starts foreground refresh. Zero means one immediate pass; -1 selects adaptive mode. */
@@ -471,6 +612,10 @@ class AgentStore(
             resetRefreshJob?.cancel()
             resetRefreshJob = null
             scheduledResetRefreshAt = null
+            if (interval == AutoRefreshPolicy.sentinel) {
+                autoLadderIndex = AutoRefreshPolicy.baseIndex
+                _autoIntervalSeconds.value = AutoRefreshPolicy.ladder[autoLadderIndex]
+            }
             foregroundRefreshStarted = true
             generation = ++autoGeneration
             job = scope.launch(start = CoroutineStart.LAZY) {
@@ -526,7 +671,7 @@ class AgentStore(
         for ((agentId, snapshot) in _snapshots.value) {
             if (snapshot.error != null) continue
             for (window in snapshot.windows) {
-                if (window.style == UsageStyle.GAUGE) {
+                if (window.isGaugeLike) {
                     put("$agentId|${window.label}", window.usedPercent)
                 }
             }
@@ -587,6 +732,7 @@ class AgentStore(
     private suspend fun awaitAgentsReady() {
         ensureOpen()
         agentsLoaded.await()
+        creditPeaksLoaded.await()
         ensureOpen()
     }
 
@@ -600,6 +746,7 @@ class AgentStore(
         if (!closed.compareAndSet(false, true)) return
         stopAutoRefresh()
         agentsLoaded.complete(Unit)
+        creditPeaksLoaded.complete(Unit)
         settingsLoaded.complete(Unit)
         scope.cancel()
     }

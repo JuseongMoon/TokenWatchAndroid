@@ -15,7 +15,15 @@ class DIDUsageClient(
     override fun mapSuccessfulBody(body: String): List<UsageWindow> {
         val response = checkNotNull(apiKeyProviderMoshi.adapter(Response::class.java).fromJson(body))
         val remaining = response.remaining ?: response.credits?.firstOrNull()?.remaining ?: 0.0
-        return listOf(balanceWindow("Credits", "${remaining.roundToInt()} credits"))
+        val total = response.total ?: response.credits?.firstOrNull()?.total
+        return listOf(
+            balanceWindow(
+                label = "Credits",
+                valueText = "${remaining.roundToInt()} credits",
+                balanceRemaining = remaining,
+                balanceTotal = total,
+            ),
+        )
     }
 
     private data class Response(

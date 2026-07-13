@@ -7,7 +7,7 @@ import kotlin.math.max
 /**
  * Pure policy for the adaptive usage refresh interval.
  *
- * This mirrors TokenWatch iOS commit 6df2689. Scheduling, persistence, and
+ * This mirrors TokenWatch iOS commit 565cfff. Scheduling, persistence, and
  * network work deliberately live outside this object.
  */
 object AutoRefreshPolicy {
@@ -15,10 +15,19 @@ object AutoRefreshPolicy {
     const val sentinel = -1
 
     /** Allowed adaptive intervals, in seconds, from fastest to slowest. */
-    val ladder = listOf(30, 60, 120, 300, 600)
+    val ladder = listOf(10, 20, 30, 60, 120, 180, 300)
 
     /** Adaptive mode starts from the 60-second interval. */
-    const val baseIndex = 1
+    const val baseIndex = 3
+
+    /** A moderate surge skips directly to the 30-second interval. */
+    const val quickIndex = 2
+
+    /** Usage changes at or above this threshold skip directly to 30 seconds. */
+    const val surgeToFast = 5.0
+
+    /** Usage changes at or above this threshold crash directly to 10 seconds. */
+    const val surgeToFastest = 10.0
 
     /** Grace period after a server-provided reset time. */
     val resetSlack: Duration = Duration.ofSeconds(1)
@@ -26,15 +35,19 @@ object AutoRefreshPolicy {
     /**
      * Selects the next interval index from the largest observed usage change.
      *
-     * A surge of at least 4 percentage points shortens by two steps, a change
-     * of at least 2 points shortens by one, and an idle change of at most 1
-     * point lengthens by one. The open interval (1, 2) is the hysteresis band.
-     * A null signal preserves the supplied index exactly, matching iOS.
+     * A surge of at least 10 percentage points crashes directly to 10 seconds,
+     * and one of at least 5 points skips directly to 30 seconds unless already
+     * faster. Otherwise at least 4 points shortens by two steps, at least 2
+     * points shortens by one, and an idle change of at most 1 point lengthens
+     * by one. The open interval (1, 2) is the hysteresis band. A null signal
+     * preserves the supplied index exactly, matching iOS.
      */
     fun nextLadderIndex(from: Int, maxDelta: Double?): Int {
         if (maxDelta == null) return from
 
         val next = when {
+            maxDelta >= surgeToFastest -> 0
+            maxDelta >= surgeToFast -> minOf(from, quickIndex)
             maxDelta >= 4.0 -> from - 2
             maxDelta >= 2.0 -> from - 1
             maxDelta <= 1.0 -> from + 1

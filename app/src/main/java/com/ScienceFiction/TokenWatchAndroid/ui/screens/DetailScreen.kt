@@ -20,6 +20,10 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -72,6 +76,7 @@ fun DetailScreen(
     onBack: () -> Unit,
     onRefresh: () -> Unit,
     onOpenStatusPage: (String) -> Unit,
+    onResetCreditPeak: (String) -> Unit,
     onLogoutRequest: () -> Unit,
     onLogoutConfirm: () -> Unit,
     onLogoutDismiss: () -> Unit,
@@ -127,6 +132,7 @@ fun DetailScreen(
                     gaugeCritterEnabled = gaugeCritterEnabled,
                     loc = loc,
                     nowOverride = now,
+                    onResetCreditPeak = onResetCreditPeak,
                 )
                 StatusCard(
                     agent = agent,
@@ -207,6 +213,7 @@ private fun DetailUsageCard(
     gaugeCritterEnabled: Boolean,
     loc: L10n,
     nowOverride: Instant?,
+    onResetCreditPeak: (String) -> Unit,
 ) {
     val now = rememberMinuteInstant(nowOverride)
     TerminalBox(title = "USAGE") {
@@ -238,6 +245,7 @@ private fun DetailUsageCard(
                                 loc = loc,
                                 gaugeCritterEnabled = gaugeCritterEnabled,
                                 now = now,
+                                onResetCreditPeak = onResetCreditPeak,
                             )
                         }
                     }
@@ -291,15 +299,102 @@ private fun DetailUsageRow(
     loc: L10n,
     gaugeCritterEnabled: Boolean,
     now: Instant,
+    onResetCreditPeak: (String) -> Unit,
 ) {
-    if (window.style == UsageStyle.BALANCE) {
-        BalanceDetailRow(window = window, loc = loc, now = now)
-    } else {
-        GaugeDetailRow(
+    when (window.style) {
+        UsageStyle.BALANCE -> BalanceDetailRow(window = window, loc = loc, now = now)
+        UsageStyle.CREDIT_GAUGE -> CreditGaugeDetailRow(
+            window = window,
+            loc = loc,
+            gaugeCritterEnabled = gaugeCritterEnabled,
+            onResetPeak = if (window.estimatedTotal) {
+                { onResetCreditPeak(window.label) }
+            } else {
+                null
+            },
+        )
+        UsageStyle.GAUGE -> GaugeDetailRow(
             window = window,
             loc = loc,
             now = now,
             gaugeCritterEnabled = gaugeCritterEnabled,
+        )
+    }
+}
+
+@Composable
+private fun CreditGaugeDetailRow(
+    window: UsageWindow,
+    loc: L10n,
+    gaugeCritterEnabled: Boolean,
+    onResetPeak: (() -> Unit)?,
+) {
+    val statusColor = Term.statusColor(window.remainingPercent)
+    var showResetConfirmation by rememberSaveable(window.label) { mutableStateOf(false) }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(modifier = Modifier.fillMaxWidth()) {
+            Text(
+                text = window.label.uppercase(loc.dateLocale),
+                color = Term.Cyan,
+                style = terminalTextStyle(12.sp, FontWeight.SemiBold),
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                text = "${if (window.estimatedTotal) "~" else ""}${window.remainingPercent.roundToInt()}% left",
+                color = statusColor,
+                style = terminalTextStyle(12.sp),
+            )
+        }
+        TerminalGauge(
+            usedFraction = window.usedPercent / 100.0,
+            fillColor = statusColor,
+            elapsedFraction = null,
+            fillsRemaining = true,
+            height = 20.dp,
+            bracketSize = 15.sp,
+            gaugeCritterEnabled = gaugeCritterEnabled,
+            usedContentDescription = loc::a11yUsed,
+            remainingContentDescription = loc::a11yRemaining,
+        )
+        KvRow(
+            key = "remaining",
+            value = window.valueText ?: "—",
+            valueColor = statusColor,
+            keyWidth = 84.dp,
+        )
+        if (window.estimatedTotal) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = loc.creditApproxNote,
+                    color = Term.Dim,
+                    style = terminalTextStyle(11.sp),
+                    modifier = Modifier.weight(1f),
+                )
+                if (onResetPeak != null) {
+                    TerminalTextButton(
+                        text = loc.creditResetButton,
+                        color = Term.Yellow,
+                        size = 11.sp,
+                        weight = FontWeight.Normal,
+                        onClick = { showResetConfirmation = true },
+                    )
+                }
+            }
+        }
+    }
+
+    if (showResetConfirmation) {
+        CreditResetConfirmationDialog(
+            loc = loc,
+            onConfirm = {
+                showResetConfirmation = false
+                onResetPeak?.invoke()
+            },
+            onDismiss = { showResetConfirmation = false },
         )
     }
 }
@@ -489,7 +584,7 @@ private fun ServiceStatusRow(
             modifier = Modifier.width(96.dp),
         )
         Text(text = ":", color = Term.Dim, style = terminalTextStyle(13.sp))
-        Text(text = "●", color = serviceHealthColor(serviceHealth), style = terminalTextStyle(11.sp))
+        Text(text = "●", color = serviceHealthDotColor(serviceHealth), style = terminalTextStyle(11.sp))
         Text(
             text = loc.serviceHealthLabel(serviceHealth),
             color = serviceHealthColor(serviceHealth),
@@ -560,6 +655,53 @@ private fun LogoutConfirmationDialog(
                     )
                     TerminalTextButton(
                         text = "[${loc.logout}]",
+                        color = Term.Red,
+                        onClick = onConfirm,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CreditResetConfirmationDialog(
+    loc: L10n,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.72f))
+                .padding(28.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            TerminalBox(
+                title = loc.creditResetTitle,
+                borderColor = Term.Yellow,
+                titleColor = Term.Yellow,
+            ) {
+                Text(
+                    text = loc.creditResetMessage,
+                    color = Term.Foreground,
+                    style = terminalTextStyle(12.sp),
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.End),
+                ) {
+                    TerminalTextButton(
+                        text = "[${loc.cancel}]",
+                        color = Term.Dim,
+                        onClick = onDismiss,
+                    )
+                    TerminalTextButton(
+                        text = "[${loc.creditResetConfirm}]",
                         color = Term.Red,
                         onClick = onConfirm,
                     )

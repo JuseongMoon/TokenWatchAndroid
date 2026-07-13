@@ -17,7 +17,13 @@ class RunwayUsageClient(
     override fun mapSuccessfulBody(body: String): List<UsageWindow> {
         val response = checkNotNull(apiKeyProviderMoshi.adapter(Response::class.java).fromJson(body))
         val credits = (response.creditBalance ?: 0.0).roundToInt()
-        return listOf(balanceWindow("Credits", "$credits credits"))
+        return listOf(
+            balanceWindow(
+                label = "Credits",
+                valueText = "$credits credits",
+                balanceRemaining = response.creditBalance,
+            ),
+        )
     }
 
     private data class Response(val creditBalance: Double? = null)
