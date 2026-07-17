@@ -7,6 +7,11 @@ import org.junit.Test
 
 class GaugeCritterTest {
     @Test
+    fun spinnerUsesTheSixFrameFourLitDotRotation() {
+        assertEquals(listOf("⠶", "⠧", "⠏", "⠛", "⠹", "⠼"), TerminalSpinnerFrames)
+    }
+
+    @Test
     fun terminalGaugeFillDirectionMatchesUsageStyle() {
         assertEquals(0.0, TerminalGaugeMath.fillFraction(used = 0.0, fillsRemaining = false), 0.0)
         assertEquals(0.25, TerminalGaugeMath.fillFraction(used = 0.25, fillsRemaining = false), 0.0)
@@ -77,9 +82,14 @@ class GaugeCritterTest {
     }
 
     @Test
-    fun thresholdAndTimingMatchIos() {
+    fun thresholdAndVariantTimingMatchIos() {
         assertEquals(0.995, GaugeCritterMath.Threshold, 0.0)
-        assertEquals(250L, GaugeCritterMath.TickMillis)
+        assertEquals(285L, GaugeCritterVariant.WEEKLY.baseTickMillis)
+        assertEquals(219L, GaugeCritterVariant.SESSION.baseTickMillis)
+        assertTrue(
+            GaugeCritterVariant.WEEKLY.baseTickMillis.toDouble() /
+                GaugeCritterVariant.SESSION.baseTickMillis > 1.3,
+        )
         assertEquals(4, GaugeCritterMath.HopCells)
         assertEquals(8, GaugeCritterMath.OpacitySteps)
         assertEquals(600L, GaugeCritterMath.FadeDurationMillis)
@@ -130,6 +140,12 @@ class GaugeCritterTest {
             }
         }
         assertEquals(Color(0xFF29A64A), slime.palette[3])
+    }
+
+    @Test
+    fun sessionSlimeReusesFramesWithSkyPalette() {
+        assertEquals(PixelSprite.Slime.frames, PixelSprite.SlimeSky.frames)
+        assertEquals(Color(0xFF4FBCFA), PixelSprite.SlimeSky.palette[1])
     }
 
     @Test

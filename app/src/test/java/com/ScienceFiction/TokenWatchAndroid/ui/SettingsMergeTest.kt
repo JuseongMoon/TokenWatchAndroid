@@ -3,6 +3,7 @@ package com.ScienceFiction.TokenWatchAndroid.ui
 import com.ScienceFiction.TokenWatchAndroid.data.AppSettings
 import com.ScienceFiction.TokenWatchAndroid.localization.AppLanguage
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -41,5 +42,20 @@ class SettingsMergeTest {
         assertTrue(merged.hideUnusedWindows)
         assertTrue(merged.keepScreenOn)
         assertTrue(merged.gaugeCritter)
+    }
+
+    @Test
+    fun notificationTogglesMergeWithoutRevertingOtherSettings() {
+        val base = AppSettings()
+        val current = base.copy(keepScreenOn = true)
+        val merged = mergeSettingsChange(
+            base = base,
+            proposed = base.copy(notifyWeeklyResets = false, notifySessionResets = true),
+            current = current,
+        )
+
+        assertFalse(merged.notifyWeeklyResets)
+        assertTrue(merged.notifySessionResets)
+        assertTrue(merged.keepScreenOn)
     }
 }

@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import com.ScienceFiction.TokenWatchAndroid.domain.Agent
+import com.ScienceFiction.TokenWatchAndroid.notifications.WindowObservation
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
@@ -21,6 +22,10 @@ class AgentRepository(
 
     val creditPeaks: Flow<Map<String, Double>> = dataStore.safeData
         .map { preferences -> CreditPeaksCodec.decode(preferences.safeGet(creditPeaksKey)) }
+        .distinctUntilChanged()
+
+    val resetBaseline: Flow<Map<String, WindowObservation>> = dataStore.safeData
+        .map { preferences -> ResetBaselineCodec.decode(preferences.safeGet(resetBaselineKey)) }
         .distinctUntilChanged()
 
     suspend fun saveAgents(agents: List<Agent>) {
@@ -49,8 +54,15 @@ class AgentRepository(
         }
     }
 
+    suspend fun saveResetBaseline(observations: Map<String, WindowObservation>) {
+        dataStore.edit { preferences ->
+            preferences[resetBaselineKey] = ResetBaselineCodec.encode(observations)
+        }
+    }
+
     private companion object {
         val agentsKey = stringPreferencesKey("tokenwatch.agents.v1")
         val creditPeaksKey = stringPreferencesKey("tokenwatch.creditPeaks.v1")
+        val resetBaselineKey = stringPreferencesKey("tokenwatch.resetBaseline.v1")
     }
 }

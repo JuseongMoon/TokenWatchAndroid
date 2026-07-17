@@ -50,6 +50,13 @@ class TokenStore(
         deleteFromVault(agentId)
     }
 
+    /** Updates only the cached account plan after a live Codex account lookup. */
+    suspend fun updatePlan(agentId: UUID, plan: String) = exclusive {
+        loadFromVault(agentId)?.let { stored ->
+            saveToVault(agentId, stored.copy(plan = plan))
+        }
+    }
+
     /** Returns stored credentials, refreshing an expired OAuth credential before use. */
     suspend fun validTokens(agentId: UUID, provider: AgentProvider): OAuthTokens = exclusive {
         val stored = loadFromVault(agentId) ?: throw OAuthException.NotAuthenticated()

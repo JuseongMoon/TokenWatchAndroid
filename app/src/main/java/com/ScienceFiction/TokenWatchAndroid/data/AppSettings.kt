@@ -10,6 +10,8 @@ data class AppSettings(
     val heartbeatCursor: Boolean = false,
     val heartbeatTracking: Boolean = false,
     val heartbeatTargets: Set<String> = emptySet(),
+    val notifySessionResets: Boolean = false,
+    val notifyWeeklyResets: Boolean = true,
     val language: AppLanguage = AppLanguage.SYSTEM,
 ) {
     companion object {
@@ -29,6 +31,8 @@ object AppSettingsCodec {
         heartbeatCursor: Boolean? = null,
         heartbeatTracking: Boolean? = null,
         heartbeatTargets: Set<String>? = null,
+        notifySessionResets: Boolean? = null,
+        notifyWeeklyResets: Boolean? = null,
         languageWireId: String? = null,
     ): AppSettings = normalize(
         AppSettings(
@@ -39,6 +43,8 @@ object AppSettingsCodec {
             heartbeatCursor = heartbeatCursor ?: false,
             heartbeatTracking = heartbeatTracking ?: false,
             heartbeatTargets = heartbeatTargets.orEmpty(),
+            notifySessionResets = notifySessionResets ?: false,
+            notifyWeeklyResets = notifyWeeklyResets ?: true,
             language = AppLanguage.fromWireId(languageWireId),
         ),
     )

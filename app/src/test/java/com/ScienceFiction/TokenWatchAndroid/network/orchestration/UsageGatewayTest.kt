@@ -12,6 +12,10 @@ import com.ScienceFiction.TokenWatchAndroid.localization.Lang
 import com.ScienceFiction.TokenWatchAndroid.network.core.NetworkTransport
 import com.ScienceFiction.TokenWatchAndroid.network.core.ProviderUsageClient
 import com.ScienceFiction.TokenWatchAndroid.network.core.UsageException
+import com.ScienceFiction.TokenWatchAndroid.network.providers.subscription.CodexAccountClient
+import com.ScienceFiction.TokenWatchAndroid.network.providers.subscription.RecordingTransport
+import com.ScienceFiction.TokenWatchAndroid.network.providers.subscription.jsonResponse
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import java.time.Instant
 import java.util.UUID
 import kotlinx.coroutines.runBlocking
@@ -182,14 +186,54 @@ class UsageGatewayTest {
         }
     }
 
+    @Test
+    fun manualCodexRefreshReadsAndPersistsLivePlanWhileAutomaticRefreshDoesNot() = runBlocking {
+        val id = UUID.randomUUID()
+        val vault = MemoryVault(id to OAuthTokens("token", plan = "Pro", accountId = "acct_1"))
+        val store = TokenStore(
+            vault = vault,
+            refresher = TokenRefresher { _, _ -> error("refresh not expected") },
+            now = { now },
+        )
+        val planTransport = RecordingTransport(
+            jsonResponse(
+                """{"accounts":{"acct_1":{"account":{"plan_type":"free"}}}}""",
+            ),
+        )
+        val codexAccountClient = CodexAccountClient(
+            planTransport,
+            "https://example.com/accounts/check".toHttpUrl(),
+        )
+        val gateway = gateway(
+            client = ProviderUsageClient { listOf(window()) },
+            store = store,
+            gate = RateLimitGate(now = { now }),
+            codexAccountClient = codexAccountClient,
+        )
+
+        assertEquals("Pro", gateway.fetchSnapshot(AgentProvider.CODEX, id).planLabel)
+        assertTrue(planTransport.requests.isEmpty())
+
+        assertEquals(
+            "Free",
+            gateway.fetchSnapshot(AgentProvider.CODEX, id, manual = true).planLabel,
+        )
+        assertEquals("Free", vault.load(id)?.plan)
+        assertEquals(1, planTransport.requests.size)
+    }
+
     private fun gateway(
         client: ProviderUsageClient,
         store: TokenStore,
         gate: RateLimitGate,
+        codexAccountClient: CodexAccountClient = CodexAccountClient(
+            NetworkTransport { error("Codex plan lookup not expected") },
+        ),
     ) = UsageGateway(
         registry = ProviderUsageRegistry(AgentProvider.entries.associateWith { client }),
         tokenStore = store,
         rateLimitGate = gate,
+        codexAccountClient = codexAccountClient,
         localization = { l10n },
         now = { now },
     )

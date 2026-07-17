@@ -1,7 +1,7 @@
 # TokenWatch Android
 
 TokenWatch iOS의 Android 동등 구현입니다. 현재 기준선은 iOS 저장소의 commit
-`fe5d972`이며, 기능 범위와 플랫폼별 대응은
+`08ac1ac`이며, 기능 범위와 플랫폼별 대응은
 [`docs/PARITY_BASELINE.md`](docs/PARITY_BASELINE.md)에 고정되어 있습니다.
 
 ## 주요 기능

@@ -30,8 +30,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import com.ScienceFiction.TokenWatchAndroid.domain.Agent
 import com.ScienceFiction.TokenWatchAndroid.domain.AgentSnapshot
 import com.ScienceFiction.TokenWatchAndroid.domain.ServiceHealth
@@ -41,8 +39,10 @@ import com.ScienceFiction.TokenWatchAndroid.localization.L10n
 import com.ScienceFiction.TokenWatchAndroid.localization.resetExactText
 import com.ScienceFiction.TokenWatchAndroid.localization.resetRemainingText
 import com.ScienceFiction.TokenWatchAndroid.ui.components.KvRow
+import com.ScienceFiction.TokenWatchAndroid.ui.components.GaugeCritterVariant
 import com.ScienceFiction.TokenWatchAndroid.ui.components.TerminalBox
 import com.ScienceFiction.TokenWatchAndroid.ui.components.TerminalButton
+import com.ScienceFiction.TokenWatchAndroid.ui.components.TerminalConfirmDialog
 import com.ScienceFiction.TokenWatchAndroid.ui.components.TerminalGauge
 import com.ScienceFiction.TokenWatchAndroid.ui.components.TerminalSpinner
 import com.ScienceFiction.TokenWatchAndroid.ui.components.rememberMinuteInstant
@@ -154,6 +154,7 @@ fun DetailScreen(
     if (showLogoutConfirmation) {
         LogoutConfirmationDialog(
             providerName = agent.provider.displayName,
+            accountLabel = account.email ?: agent.accountLabel,
             loc = loc,
             onConfirm = onLogoutConfirm,
             onDismiss = onLogoutDismiss,
@@ -352,6 +353,7 @@ private fun CreditGaugeDetailRow(
             fillsRemaining = true,
             height = 20.dp,
             bracketSize = 15.sp,
+            critterVariant = GaugeCritterVariant.from(window.kind),
             gaugeCritterEnabled = gaugeCritterEnabled,
             usedContentDescription = loc::a11yUsed,
             remainingContentDescription = loc::a11yRemaining,
@@ -449,6 +451,7 @@ private fun GaugeDetailRow(
             elapsedFraction = window.elapsedFraction(now),
             height = 20.dp,
             bracketSize = 15.sp,
+            critterVariant = GaugeCritterVariant.from(window.kind),
             gaugeCritterEnabled = gaugeCritterEnabled,
             usedContentDescription = loc::a11yUsed,
         )
@@ -619,49 +622,20 @@ private fun DetailPlaceholder(text: String) {
 @Composable
 private fun LogoutConfirmationDialog(
     providerName: String,
+    accountLabel: String?,
     loc: L10n,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false),
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.72f))
-                .padding(28.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            TerminalBox(
-                title = loc.logoutConfirmTitle.uppercase(loc.dateLocale),
-                borderColor = Term.Red,
-                titleColor = Term.Red,
-            ) {
-                Text(
-                    text = loc.logoutMessage(providerName),
-                    color = Term.Foreground,
-                    style = terminalTextStyle(12.sp),
-                )
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.End),
-                ) {
-                    TerminalTextButton(
-                        text = "[${loc.cancel}]",
-                        color = Term.Dim,
-                        onClick = onDismiss,
-                    )
-                    TerminalTextButton(
-                        text = "[${loc.logout}]",
-                        color = Term.Red,
-                        onClick = onConfirm,
-                    )
-                }
-            }
-        }
-    }
+    TerminalConfirmDialog(
+        title = loc.logoutConfirmTitle,
+        accountLabel = accountLabel,
+        message = loc.logoutMessage(providerName),
+        confirmLabel = "[ ${loc.logout} ]",
+        cancelLabel = "[ ${loc.cancel} ]",
+        onConfirm = onConfirm,
+        onDismiss = onDismiss,
+    )
 }
 
 @Composable
@@ -670,43 +644,15 @@ private fun CreditResetConfirmationDialog(
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false),
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.72f))
-                .padding(28.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            TerminalBox(
-                title = loc.creditResetTitle,
-                borderColor = Term.Yellow,
-                titleColor = Term.Yellow,
-            ) {
-                Text(
-                    text = loc.creditResetMessage,
-                    color = Term.Foreground,
-                    style = terminalTextStyle(12.sp),
-                )
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.End),
-                ) {
-                    TerminalTextButton(
-                        text = "[${loc.cancel}]",
-                        color = Term.Dim,
-                        onClick = onDismiss,
-                    )
-                    TerminalTextButton(
-                        text = "[${loc.creditResetConfirm}]",
-                        color = Term.Red,
-                        onClick = onConfirm,
-                    )
-                }
-            }
-        }
-    }
+    TerminalConfirmDialog(
+        title = loc.creditResetTitle,
+        message = loc.creditResetMessage,
+        confirmLabel = "[ ${loc.creditResetConfirm} ]",
+        cancelLabel = "[ ${loc.cancel} ]",
+        confirmColor = Term.Red,
+        borderColor = Term.Yellow,
+        titleColor = Term.Yellow,
+        onConfirm = onConfirm,
+        onDismiss = onDismiss,
+    )
 }

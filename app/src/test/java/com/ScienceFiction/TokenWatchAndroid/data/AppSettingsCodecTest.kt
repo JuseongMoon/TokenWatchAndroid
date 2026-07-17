@@ -18,6 +18,8 @@ class AppSettingsCodecTest {
                 heartbeatCursor = false,
                 heartbeatTracking = false,
                 heartbeatTargets = emptySet(),
+                notifySessionResets = false,
+                notifyWeeklyResets = true,
                 language = AppLanguage.SYSTEM,
             ),
             AppSettingsCodec.decode(),
@@ -34,6 +36,8 @@ class AppSettingsCodecTest {
             heartbeatCursor = true,
             heartbeatTracking = true,
             heartbeatTargets = setOf("agent|weekly", "agent|session"),
+            notifySessionResets = true,
+            notifyWeeklyResets = false,
             languageWireId = "korean",
         )
 
@@ -44,6 +48,8 @@ class AppSettingsCodecTest {
         assertTrue(settings.heartbeatCursor)
         assertTrue(settings.heartbeatTracking)
         assertEquals(setOf("agent|weekly", "agent|session"), settings.heartbeatTargets)
+        assertTrue(settings.notifySessionResets)
+        assertFalse(settings.notifyWeeklyResets)
         assertEquals(AppLanguage.KOREAN, settings.language)
     }
 

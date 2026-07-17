@@ -16,7 +16,10 @@ import com.ScienceFiction.TokenWatchAndroid.network.core.HttpTransport
 import com.ScienceFiction.TokenWatchAndroid.network.orchestration.ProviderUsageRegistry
 import com.ScienceFiction.TokenWatchAndroid.network.orchestration.RateLimitGate
 import com.ScienceFiction.TokenWatchAndroid.network.orchestration.UsageGateway
+import com.ScienceFiction.TokenWatchAndroid.network.providers.subscription.CodexAccountClient
 import com.ScienceFiction.TokenWatchAndroid.network.status.ServiceStatusClient
+import com.ScienceFiction.TokenWatchAndroid.notifications.BackgroundRefreshScheduler
+import com.ScienceFiction.TokenWatchAndroid.notifications.ResetNotificationManager
 import com.ScienceFiction.TokenWatchAndroid.store.AgentStore
 import java.io.Closeable
 import kotlinx.coroutines.CoroutineScope
@@ -62,11 +65,14 @@ class TokenWatchContainer(context: Context) : Closeable {
         registry = usageRegistry,
         tokenStore = tokenStore,
         rateLimitGate = RateLimitGate(),
+        codexAccountClient = CodexAccountClient(transport),
         localization = localeState::l10n,
     )
     private val serviceStatusClient = ServiceStatusClient(transport)
     private val agentRepository = AgentRepository(applicationContext)
     private val settingsRepository = SettingsRepository(applicationContext)
+    val resetNotificationManager = ResetNotificationManager(applicationContext, localeState::l10n)
+    val backgroundRefreshScheduler = BackgroundRefreshScheduler(applicationContext)
 
     val agentStore = AgentStore(
         scope = scope,
@@ -75,6 +81,7 @@ class TokenWatchContainer(context: Context) : Closeable {
         tokenStore = tokenStore,
         usageGateway = usageGateway,
         serviceStatusClient = serviceStatusClient,
+        resetNotificationManager = resetNotificationManager,
     )
 
     private val languageSyncJob = scope.launch {

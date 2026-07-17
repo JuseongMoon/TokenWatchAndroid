@@ -9,8 +9,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -27,7 +31,8 @@ enum class HeartPart {
 
 /**
  * Glossy 11x10 pixel heart. A flat tint is used by disabled previews, while
- * [outline] renders only the white edge for a fully depleted usage window.
+ * [outline] renders only the white edge for a fully depleted usage window. [rim] draws a thin
+ * inner silhouette line over a filled heart for an entirely unused usage window.
  */
 @Composable
 fun PixelHeart(
@@ -35,6 +40,7 @@ fun PixelHeart(
     flatColor: Color? = null,
     part: HeartPart = HeartPart.Full,
     outline: Boolean = false,
+    rim: Boolean = false,
     size: Dp = 11.dp,
 ) {
     val width = size * (PixelHeartData.columns.toFloat() / PixelHeartData.rows.toFloat())
@@ -44,6 +50,44 @@ fun PixelHeart(
             .clearAndSetSemantics { },
     ) {
         val cell = this.size.height / PixelHeartData.rows
+        if (rim) {
+            val silhouette = Path()
+            val edges = Path()
+            for ((rowIndex, row) in PixelHeartData.bitmap.withIndex()) {
+                for ((columnIndex, value) in row.withIndex()) {
+                    if (value == 0) continue
+                    val left = columnIndex * cell
+                    val top = rowIndex * cell
+                    val right = left + cell
+                    val bottom = top + cell
+                    silhouette.addRect(Rect(left, top, right, bottom))
+                    if (PixelHeartData.isEmpty(rowIndex - 1, columnIndex)) {
+                        edges.moveTo(left, top)
+                        edges.lineTo(right, top)
+                    }
+                    if (PixelHeartData.isEmpty(rowIndex + 1, columnIndex)) {
+                        edges.moveTo(left, bottom)
+                        edges.lineTo(right, bottom)
+                    }
+                    if (PixelHeartData.isEmpty(rowIndex, columnIndex - 1)) {
+                        edges.moveTo(left, top)
+                        edges.lineTo(left, bottom)
+                    }
+                    if (PixelHeartData.isEmpty(rowIndex, columnIndex + 1)) {
+                        edges.moveTo(right, top)
+                        edges.lineTo(right, bottom)
+                    }
+                }
+            }
+            clipPath(silhouette) {
+                drawPath(
+                    path = edges,
+                    color = PixelHeartData.rimColor,
+                    style = Stroke(width = cell * PixelHeartData.RimWidthRatio * 2f),
+                )
+            }
+            return@Canvas
+        }
         val centerColumn = PixelHeartData.columns / 2
         for ((rowIndex, row) in PixelHeartData.bitmap.withIndex()) {
             for ((columnIndex, value) in row.withIndex()) {
@@ -73,7 +117,8 @@ fun PixelHeart(
 
 /**
  * Up to five hearts representing remaining usage in half-heart (10%) steps.
- * Only the final half-heart blinks; at 100% used, a white outline blinks.
+ * Only the final half-heart blinks. At 0% used all five hearts remain filled while a thin rim
+ * blinks; at 100% used, a white outline blinks.
  */
 @Composable
 fun HeartHealthBar(
@@ -94,6 +139,19 @@ fun HeartHealthBar(
         if (halfHearts == 0) {
             TerminalBlink {
                 PixelHeart(outline = true, size = size)
+            }
+        } else if (usedPercent <= 0.0) {
+            repeat(5) {
+                Box(
+                    modifier = Modifier.requiredSize(
+                        width = size * (PixelHeartData.columns.toFloat() / PixelHeartData.rows),
+                        height = size,
+                    ),
+                    contentAlignment = Alignment.TopStart,
+                ) {
+                    PixelHeart(size = size)
+                    TerminalBlink { PixelHeart(rim = true, size = size) }
+                }
             }
         } else {
             val slots = (halfHearts + 1) / 2
@@ -131,6 +189,8 @@ private fun SplitBlinkingHeart(size: Dp) {
 }
 
 internal object PixelHeartData {
+    const val RimWidthRatio = 0.45f
+    val rimColor = Color(0xFFD9D9D9)
     val bitmap = listOf(
         listOf(0, 0, 1, 1, 0, 0, 0, 1, 1, 0, 0),
         listOf(0, 1, 2, 2, 1, 0, 1, 1, 1, 1, 0),
@@ -163,4 +223,9 @@ internal object PixelHeartData {
                 bitmap[neighborRow][neighborColumn] == 0
         }
     }
+
+    fun isEmpty(row: Int, column: Int): Boolean =
+        row !in bitmap.indices ||
+            column !in bitmap.first().indices ||
+            bitmap[row][column] == 0
 }

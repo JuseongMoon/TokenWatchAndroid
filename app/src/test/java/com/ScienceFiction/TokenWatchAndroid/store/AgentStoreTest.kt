@@ -10,6 +10,8 @@ import com.ScienceFiction.TokenWatchAndroid.domain.UsageStyle
 import com.ScienceFiction.TokenWatchAndroid.domain.UsageWindow
 import com.ScienceFiction.TokenWatchAndroid.domain.WindowKind
 import com.ScienceFiction.TokenWatchAndroid.domain.refresh.AutoRefreshPolicy
+import com.ScienceFiction.TokenWatchAndroid.notifications.ResetEvent
+import com.ScienceFiction.TokenWatchAndroid.notifications.WindowObservation
 import java.time.Duration
 import java.time.Instant
 import java.util.UUID
@@ -192,6 +194,86 @@ class AgentStoreTest {
         fixture.store.refresh(agent)
         assertEquals(2, fetches.get())
         assertEquals(2.0, fixture.store.snapshots.value.getValue(agent.id).windows.single().usedPercent, 0.0)
+        fixture.close()
+    }
+
+    @Test
+    fun `manual refresh bypasses spacing and replaces a stale non-email plan label`() = runBlocking {
+        val start = Instant.parse("2026-07-11T00:00:00Z")
+        val clock = AtomicReference(start)
+        val agent = Agent(AgentProvider.CODEX, accountLabel = "Pro")
+        val regularFetches = AtomicInteger(0)
+        val manualFetches = AtomicInteger(0)
+        val persisted = mutableListOf<List<Agent>>()
+        val fixture = fixture(
+            parentScope = this,
+            initialAgents = listOf(agent),
+            persistAgents = { persisted += it },
+            now = clock::get,
+            fetchSnapshot = { _, _ ->
+                regularFetches.incrementAndGet()
+                snapshot(percent = 5.0, plan = "Pro", fetchedAt = clock.get())
+            },
+            fetchManualSnapshot = { _, _ ->
+                manualFetches.incrementAndGet()
+                snapshot(percent = 6.0, plan = "Free", fetchedAt = clock.get())
+            },
+        )
+        fixture.store.awaitInitialLoad()
+
+        fixture.store.refresh(agent)
+        clock.set(start.plusSeconds(1))
+        fixture.store.refresh(agent)
+        assertEquals(1, regularFetches.get())
+
+        fixture.store.refresh(agent, manual = true)
+        assertEquals(1, manualFetches.get())
+        assertEquals("Free", fixture.store.agents.value.single().accountLabel)
+        assertEquals("Free", persisted.single().single().accountLabel)
+        fixture.close()
+    }
+
+    @Test
+    fun `refresh persists reset baseline and emits an early weekly reset event`() = runBlocking {
+        val observedNow = Instant.parse("2026-07-11T00:00:00Z")
+        val agent = Agent(AgentProvider.CODEX)
+        val key = "${agent.id}|Current week"
+        val previousReset = observedNow.plusSeconds(3_600)
+        val nextReset = previousReset.plusSeconds(604_800)
+        val persisted = mutableListOf<Map<String, WindowObservation>>()
+        val fired = mutableListOf<Pair<Agent, List<ResetEvent>>>()
+        val fixture = fixture(
+            parentScope = this,
+            initialAgents = listOf(agent),
+            initialResetBaseline = mapOf(
+                key to WindowObservation(previousReset, usedPercent = 72.0),
+            ),
+            persistResetBaseline = { persisted += it },
+            fireResetEvents = { eventAgent, events -> fired += eventAgent to events },
+            now = { observedNow },
+            fetchSnapshot = { _, _ ->
+                AgentSnapshot(
+                    windows = listOf(
+                        UsageWindow(
+                            label = "Current week",
+                            usedPercent = 0.0,
+                            resetsAt = nextReset,
+                            kind = WindowKind.WEEKLY,
+                        ),
+                    ),
+                    planLabel = null,
+                    fetchedAt = observedNow,
+                    error = null,
+                )
+            },
+        )
+        fixture.store.awaitInitialLoad()
+
+        fixture.store.refresh(agent)
+
+        assertEquals(nextReset, persisted.single().getValue(key).resetsAt)
+        assertEquals(agent, fired.single().first)
+        assertEquals(setOf(WindowKind.WEEKLY), fired.single().second.single().kinds)
         fixture.close()
     }
 
@@ -664,11 +746,17 @@ class AgentStoreTest {
         agentUpdates: Flow<List<Agent>> = MutableStateFlow(initialAgents),
         initialCreditPeaks: Map<String, Double> = emptyMap(),
         creditPeakUpdates: Flow<Map<String, Double>> = MutableStateFlow(initialCreditPeaks),
+        initialResetBaseline: Map<String, WindowObservation> = emptyMap(),
+        resetBaselineUpdates: Flow<Map<String, WindowObservation>> =
+            MutableStateFlow(initialResetBaseline),
         persistAgents: suspend (List<Agent>) -> Unit = {},
         persistCreditPeaks: suspend (Map<String, Double>) -> Unit = {},
+        persistResetBaseline: suspend (Map<String, WindowObservation>) -> Unit = {},
+        fireResetEvents: suspend (Agent, List<ResetEvent>) -> Unit = { _, _ -> },
         now: () -> Instant = { Instant.parse("2026-07-11T00:00:00Z") },
         sleeper: StoreSleeper = StoreSleeper.DEFAULT,
         fetchSnapshot: suspend (AgentProvider, UUID) -> AgentSnapshot = { _, _ -> snapshot(0.0) },
+        fetchManualSnapshot: (suspend (AgentProvider, UUID) -> AgentSnapshot)? = null,
         fetchStatus: suspend () -> ServiceHealth? = { ServiceHealth.OPERATIONAL },
     ): Fixture {
         val tokens = ConcurrentHashMap<UUID, OAuthTokens>()
@@ -680,11 +768,15 @@ class AgentStoreTest {
                 settingsUpdates = flowOf(AppSettings()),
                 persistAgents = persistAgents,
                 persistCreditPeaks = persistCreditPeaks,
+                resetBaselineUpdates = resetBaselineUpdates,
+                persistResetBaseline = persistResetBaseline,
+                fireResetEvents = fireResetEvents,
                 persistSettings = {},
                 saveTokens = { id, value -> tokens[id] = value },
                 loadTokens = { id -> tokens[id] },
                 deleteTokens = { id -> tokens.remove(id) },
                 fetchSnapshot = fetchSnapshot,
+                fetchManualSnapshot = fetchManualSnapshot,
                 fetchStatus = { fetchStatus() },
             ),
             now = now,

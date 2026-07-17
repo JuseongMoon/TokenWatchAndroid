@@ -1,9 +1,8 @@
 # TokenWatch Android parity baseline
 
-The Android release mirrors the iOS repository through commit `fe5d972`
-(`fix: 설정 시트 가로 스크롤 제거 + 타겟 선택 표식을 [v]로 구분`) on
-`feat/claude-token-watch`. Uncommitted iOS working-tree changes are deliberately
-not part of this baseline.
+The Android release mirrors the iOS repository through commit `08ac1ac`
+(`Update project.pbxproj`) on `dev`. Uncommitted iOS working-tree changes are
+deliberately not part of this baseline.
 
 ## Included behavior
 
@@ -29,13 +28,24 @@ not part of this baseline.
   lighter slime shadow palette.
 - A vertically constrained settings screen whose heartbeat target marker (`[v]`)
   is visually distinct from on/off toggles (`[x]`).
+- Manual Codex detail refresh reads the current plan from `accounts/check`,
+  persists plan changes, bypasses burst spacing, and refreshes account metadata.
+- Weekly gauges use the green slower slime, while session gauges use the faster
+  sky-blue slime; each spawn receives a small speed jitter.
+- Terminal-styled account-aware logout confirmation is shared by detail and
+  settings, and the loading spinner uses the six-frame four-lit-dot animation.
+- Hybrid reset notifications combine scheduled reset alarms with persisted
+  surprise-reset detection and best-effort background refresh. Weekly alerts
+  default on, session alerts default off.
+- Exactly unused heartbeat tracking shows five filled hearts with a blinking
+  thin inner rim.
 
 ## Android identity
 
 - Application ID/namespace: `com.ScienceFiction.TokenWatchAndroid`
 - Minimum SDK: 28
 - Target/compile SDK: 36
-- Version: 1.0 (1)
+- Version: 1.0 (5)
 
 ## Platform-specific parity adaptations
 
@@ -49,3 +59,9 @@ not part of this baseline.
   clears it only after entering the background.
 - Compose settings already use a vertical-only scroll container; the content is
   also width-constrained to prevent children from creating horizontal overflow.
+- Android maps iOS local notification scheduling and BG app refresh to
+  `AlarmManager` and a persisted, network-constrained `JobScheduler` job. The
+  Android 13+ runtime notification permission is requested after the first
+  account is added.
+- Phones allow portrait and reverse portrait like the current iPhone target;
+  Android tablets retain all orientations like the iPad target.

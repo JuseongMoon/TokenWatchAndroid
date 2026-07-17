@@ -122,6 +122,7 @@ private fun GaugeValue(
             modifier = Modifier.weight(1f),
             height = 14.dp,
             bracketSize = 13.sp,
+            critterVariant = GaugeCritterVariant.from(window.kind),
             gaugeCritterEnabled = gaugeCritterEnabled,
             usedContentDescription = loc::a11yUsed,
         )
@@ -154,6 +155,7 @@ private fun CreditGaugeValue(
             modifier = Modifier.weight(1f),
             height = 14.dp,
             bracketSize = 13.sp,
+            critterVariant = GaugeCritterVariant.from(window.kind),
             gaugeCritterEnabled = gaugeCritterEnabled,
             usedContentDescription = loc::a11yUsed,
             remainingContentDescription = loc::a11yRemaining,

@@ -101,4 +101,18 @@ class LocalizationTest {
         assertEquals(AppLanguage.SYSTEM, AppLanguage.fromWireId("unknown"))
         assertEquals(AppLanguage.SYSTEM, AppLanguage.fromWireId(null))
     }
+
+    @Test
+    fun resetNotificationsAreLocalizedAndAccountAware() {
+        val ko = L10n(Lang.KO)
+        val en = L10n(Lang.EN)
+        assertEquals("Codex · dev@example.com", ko.notifResetTitle("Codex", "dev@example.com"))
+        assertEquals("Codex", ko.notifResetTitle("Codex", null))
+        assertEquals("세션 한도가 리셋되었습니다. 다시 사용할 수 있어요.", ko.notifResetBody(true, false))
+        assertEquals(
+            "Your weekly limit has reset — you're good to go.",
+            en.notifResetBody(false, true),
+        )
+        assertTrue(ko.settingsNotifOpenSettings.contains("Android"))
+    }
 }

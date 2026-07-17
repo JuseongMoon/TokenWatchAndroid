@@ -89,6 +89,37 @@ data class L10n(val lang: Lang) {
         "Follow the system language or pick one manually.",
     )
 
+    val settingsNotifHelp get() = choose(
+        "사용량 한도가 리셋되면 알림을 보냅니다. 세션은 5시간마다 리셋되어 자주 올 수 있습니다.",
+        "Notifies you when a usage limit resets. Sessions reset every 5 hours, so they can be frequent.",
+    )
+    val settingsNotifDenied get() = choose(
+        "알림이 꺼져 있습니다. 아래에서 Android 설정을 열어 켜세요.",
+        "Notifications are off. Open Android Settings below to turn them on.",
+    )
+    val settingsNotifOpenSettings get() = choose(
+        "[ Android 설정 열기 ↗ ]",
+        "[ open Android Settings ↗ ]",
+    )
+
+    fun notifResetTitle(provider: String, account: String?): String =
+        account?.takeIf(String::isNotBlank)?.let { "$provider · $it" } ?: provider
+
+    fun notifResetBody(session: Boolean, weekly: Boolean): String = when (lang) {
+        Lang.KO -> when {
+            session && weekly -> "사용량 한도가 리셋되었습니다. 다시 사용할 수 있어요."
+            session -> "세션 한도가 리셋되었습니다. 다시 사용할 수 있어요."
+            else -> "주간 한도가 리셋되었습니다. 다시 사용할 수 있어요."
+        }
+        Lang.EN -> when {
+            session && weekly -> "Your usage limits have reset — you're good to go."
+            session -> "Your session limit has reset — you're good to go."
+            else -> "Your weekly limit has reset — you're good to go."
+        }
+    }
+
+    val notifDefaultTitle get() = "TokenWatch"
+
     val a11yBack get() = choose("뒤로", "Back")
     val a11yStatusPage get() = choose("서비스 상태 페이지 열기", "Open service status page")
     val logoutConfirmTitle get() = choose("로그아웃하시겠어요?", "Log out?")

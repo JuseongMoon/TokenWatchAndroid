@@ -41,6 +41,8 @@ class SettingsRepository(
         heartbeatCursor = safeGet(Keys.heartbeatCursor),
         heartbeatTracking = safeGet(Keys.heartbeatTracking),
         heartbeatTargets = safeGet(Keys.heartbeatTargets),
+        notifySessionResets = safeGet(Keys.notifySessionResets),
+        notifyWeeklyResets = safeGet(Keys.notifyWeeklyResets),
         languageWireId = safeGet(Keys.language),
     )
 
@@ -52,6 +54,8 @@ class SettingsRepository(
         this[Keys.heartbeatCursor] = settings.heartbeatCursor
         this[Keys.heartbeatTracking] = settings.heartbeatTracking
         this[Keys.heartbeatTargets] = settings.heartbeatTargets.toSet()
+        this[Keys.notifySessionResets] = settings.notifySessionResets
+        this[Keys.notifyWeeklyResets] = settings.notifyWeeklyResets
         this[Keys.language] = settings.language.wireId
     }
 
@@ -63,6 +67,8 @@ class SettingsRepository(
         val heartbeatCursor = booleanPreferencesKey("tokenwatch.heartbeatCursor")
         val heartbeatTracking = booleanPreferencesKey("tokenwatch.heartbeatTracking")
         val heartbeatTargets = stringSetPreferencesKey("tokenwatch.heartbeatTargets")
+        val notifySessionResets = booleanPreferencesKey("tokenwatch.notifySession")
+        val notifyWeeklyResets = booleanPreferencesKey("tokenwatch.notifyWeekly")
         val language = stringPreferencesKey(APP_LANGUAGE_STORAGE_KEY)
     }
 }

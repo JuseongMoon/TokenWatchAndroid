@@ -16,6 +16,12 @@ import com.ScienceFiction.TokenWatchAndroid.domain.UsageWindow
 import com.ScienceFiction.TokenWatchAndroid.domain.refresh.AutoRefreshPolicy
 import com.ScienceFiction.TokenWatchAndroid.network.orchestration.UsageGateway
 import com.ScienceFiction.TokenWatchAndroid.network.status.ServiceStatusClient
+import com.ScienceFiction.TokenWatchAndroid.notifications.ResetDetector
+import com.ScienceFiction.TokenWatchAndroid.notifications.ResetEvent
+import com.ScienceFiction.TokenWatchAndroid.notifications.ResetNotificationManager
+import com.ScienceFiction.TokenWatchAndroid.notifications.ResetSchedulePolicy
+import com.ScienceFiction.TokenWatchAndroid.notifications.ResetScheduleTarget
+import com.ScienceFiction.TokenWatchAndroid.notifications.WindowObservation
 import java.io.Closeable
 import java.time.Duration
 import java.time.Instant
@@ -86,6 +92,13 @@ data class AgentStoreDependencies(
     val deleteTokens: suspend (UUID) -> Unit,
     val fetchSnapshot: suspend (AgentProvider, UUID) -> AgentSnapshot,
     val fetchStatus: suspend (ServiceStatusSource) -> ServiceHealth?,
+    val fetchManualSnapshot: (suspend (AgentProvider, UUID) -> AgentSnapshot)? = null,
+    val resetBaselineUpdates: Flow<Map<String, WindowObservation>> =
+        kotlinx.coroutines.flow.flowOf(emptyMap()),
+    val persistResetBaseline: suspend (Map<String, WindowObservation>) -> Unit = {},
+    val fireResetEvents: suspend (Agent, List<ResetEvent>) -> Unit = { _, _ -> },
+    val applyResetSchedule: suspend (List<ResetScheduleTarget>, List<Agent>) -> Unit = { _, _ -> },
+    val removeResetNotifications: suspend (UUID) -> Unit = {},
 )
 
 /**
@@ -109,6 +122,7 @@ class AgentStore(
         tokenStore: TokenStore,
         usageGateway: UsageGateway,
         serviceStatusClient: ServiceStatusClient,
+        resetNotificationManager: ResetNotificationManager,
         now: () -> Instant = Instant::now,
         sleeper: StoreSleeper = StoreSleeper.DEFAULT,
     ) : this(
@@ -123,8 +137,18 @@ class AgentStore(
             saveTokens = tokenStore::save,
             loadTokens = tokenStore::tokens,
             deleteTokens = tokenStore::delete,
-            fetchSnapshot = usageGateway::fetchSnapshot,
+            fetchSnapshot = { provider, id -> usageGateway.fetchSnapshot(provider, id) },
             fetchStatus = serviceStatusClient::fetch,
+            fetchManualSnapshot = { provider, id ->
+                usageGateway.fetchSnapshot(provider, id, manual = true)
+            },
+            resetBaselineUpdates = agentRepository.resetBaseline,
+            persistResetBaseline = agentRepository::saveResetBaseline,
+            fireResetEvents = { agent, events -> resetNotificationManager.fire(agent, events) },
+            applyResetSchedule = { targets, agents ->
+                resetNotificationManager.applyScheduled(targets, agents)
+            },
+            removeResetNotifications = { id -> resetNotificationManager.removePending(id) },
         ),
         now = now,
         sleeper = sleeper,
@@ -139,10 +163,13 @@ class AgentStore(
     private val settingsMutex = Mutex()
     private val loadingMutex = Mutex()
     private val statusMutex = Mutex()
+    private val resetBaselineMutex = Mutex()
+    private val notificationScheduleMutex = Mutex()
 
     private val agentsLoaded = CompletableDeferred<Unit>()
     private val creditPeaksLoaded = CompletableDeferred<Unit>()
     private val settingsLoaded = CompletableDeferred<Unit>()
+    private val resetBaselineLoaded = CompletableDeferred<Unit>()
 
     private val _agents = MutableStateFlow<List<Agent>>(emptyList())
     val agents: StateFlow<List<Agent>> = _agents.asStateFlow()
@@ -168,6 +195,7 @@ class AgentStore(
 
     private var creditPeaks = emptyMap<String, Double>()
     private var creditPeaksDirty = false
+    private var resetBaseline = emptyMap<String, WindowObservation>()
 
     private val statusFetchedAt = mutableMapOf<AgentProvider, Instant>()
     private val statusInFlight = mutableMapOf<AgentProvider, CompletableDeferred<ServiceHealth?>>()
@@ -189,6 +217,15 @@ class AgentStore(
                 creditPeaksLoaded.complete(Unit)
             } finally {
                 creditPeaksLoaded.complete(Unit)
+            }
+        }
+        scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            try {
+                val value = dependencies.resetBaselineUpdates.firstOrNull().orEmpty()
+                resetBaselineMutex.withLock { resetBaseline = value }
+                resetBaselineLoaded.complete(Unit)
+            } finally {
+                resetBaselineLoaded.complete(Unit)
             }
         }
         scope.launch(start = CoroutineStart.UNDISPATCHED) {
@@ -218,6 +255,7 @@ class AgentStore(
         agentsLoaded.await()
         creditPeaksLoaded.await()
         settingsLoaded.await()
+        resetBaselineLoaded.await()
     }
 
     /** Saves credentials, appends the account, persists it, and performs its first refresh. */
@@ -266,7 +304,9 @@ class AgentStore(
                 }
             }
             pruneCreditPeaks(agent.id)
+            pruneResetBaseline(agent.id)
             dependencies.deleteTokens(agent.id)
+            dependencies.removeResetNotifications(agent.id)
         }
     }
 
@@ -312,6 +352,7 @@ class AgentStore(
                 }
             }
         }
+        rescheduleResetNotifications()
     }
 
     suspend fun updateSettings(transform: (AppSettings) -> AppSettings) {
@@ -329,6 +370,7 @@ class AgentStore(
                 }
             }
         }
+        rescheduleResetNotifications()
     }
 
     suspend fun accountInfo(agent: Agent): AccountInfo? = dependencies.loadTokens(agent.id)?.let {
@@ -349,13 +391,19 @@ class AgentStore(
         coroutineScope {
             current.map { agent -> async { refresh(agent) } }.awaitAll()
         }
+        rescheduleResetNotifications()
     }
 
-    suspend fun refresh(agent: Agent) {
+    suspend fun refresh(agent: Agent, manual: Boolean = false) {
         awaitAgentsReady()
-        if (!beginRefresh(agent.id)) return
+        if (!beginRefresh(agent.id, manual = manual)) return
         try {
-            val fetched = dependencies.fetchSnapshot(agent.provider, agent.id)
+            val fetched = if (manual) {
+                dependencies.fetchManualSnapshot?.invoke(agent.provider, agent.id)
+                    ?: dependencies.fetchSnapshot(agent.provider, agent.id)
+            } else {
+                dependencies.fetchSnapshot(agent.provider, agent.id)
+            }
             val incoming = applyIncomingSnapshot(agent.id, fetched)
 
             if (incoming.planLabel != null) {
@@ -363,6 +411,8 @@ class AgentStore(
             }
 
             scheduleResetRefresh()
+            detectAndNotifyResets(agent.id)
+            rescheduleResetNotifications()
             refreshStatus(agent.provider)
         } finally {
             withContext(NonCancellable) { finishRefresh(agent.id) }
@@ -445,6 +495,18 @@ class AgentStore(
         }
     }
 
+    private suspend fun pruneResetBaseline(agentID: UUID) {
+        resetBaselineLoaded.await()
+        resetBaselineMutex.withLock {
+            val prefix = "$agentID|"
+            val pruned = resetBaseline.filterKeys { key -> !key.startsWith(prefix) }
+            if (pruned != resetBaseline) {
+                resetBaseline = pruned
+                runCatching { dependencies.persistResetBaseline(pruned) }
+            }
+        }
+    }
+
     private fun promoteCreditWindows(
         windows: List<UsageWindow>,
         agentID: UUID,
@@ -497,7 +559,9 @@ class AgentStore(
             agentMutex.withLock {
                 val current = _agents.value
                 val index = current.indexOfFirst { it.id == agentId }
-                if (index < 0 || !current[index].accountLabel.isNullOrEmpty()) return@withLock
+                if (index < 0) return@withLock
+                val currentLabel = current[index].accountLabel.orEmpty()
+                if ('@' in currentLabel || currentLabel == plan) return@withLock
                 val next = current.toMutableList()
                 next[index] = next[index].copy(accountLabel = plan)
                 _agents.value = next
@@ -511,6 +575,88 @@ class AgentStore(
         }
     }
 
+    private suspend fun detectAndNotifyResets(agentID: UUID) {
+        resetBaselineLoaded.await()
+        val windows = _snapshots.value[agentID]?.windows.orEmpty()
+        if (windows.isEmpty()) return
+        val prefix = "$agentID|"
+        val kinds = windows.asSequence()
+            .filter { it.style == com.ScienceFiction.TokenWatchAndroid.domain.UsageStyle.GAUGE }
+            .associate { "$prefix${it.label}" to it.kind }
+        val current = windows.asSequence()
+            .filter { it.style == com.ScienceFiction.TokenWatchAndroid.domain.UsageStyle.GAUGE }
+            .associate { window ->
+                "$prefix${window.label}" to WindowObservation(
+                    resetsAt = window.resetsAt,
+                    usedPercent = window.usedPercent,
+                )
+            }
+        val events = resetBaselineMutex.withLock {
+            val previous = resetBaseline.filterKeys { it.startsWith(prefix) }
+            val result = ResetDetector.detect(
+                previous = previous,
+                current = current,
+                now = now(),
+                kindOf = { key -> kinds[key] ?: com.ScienceFiction.TokenWatchAndroid.domain.WindowKind.SESSION },
+            )
+            resetBaseline = resetBaseline
+                .filterKeys { !it.startsWith(prefix) }
+                .plus(result.baseline)
+            runCatching { dependencies.persistResetBaseline(resetBaseline) }
+            result.events.mapNotNull { event ->
+                val enabledKinds = event.kinds.filterTo(linkedSetOf()) { kind ->
+                    when (kind) {
+                        com.ScienceFiction.TokenWatchAndroid.domain.WindowKind.SESSION ->
+                            _settings.value.notifySessionResets
+                        com.ScienceFiction.TokenWatchAndroid.domain.WindowKind.WEEKLY ->
+                            _settings.value.notifyWeeklyResets
+                    }
+                }
+                event.takeIf { enabledKinds.isNotEmpty() }?.copy(kinds = enabledKinds)
+            }
+        }
+        if (events.isEmpty()) return
+        _agents.value.firstOrNull { it.id == agentID }?.let { agent ->
+            dependencies.fireResetEvents(agent, events)
+        }
+    }
+
+    suspend fun reapplyNotificationSchedule() {
+        awaitInitialLoad()
+        rescheduleResetNotifications()
+    }
+
+    private suspend fun rescheduleResetNotifications() {
+        if (!notificationScheduleMutex.tryLock()) return
+        try {
+            val observedNow = now()
+            val settings = _settings.value
+            val agents = _agents.value
+            val targets = agents.flatMap { agent ->
+                ResetSchedulePolicy.targets(
+                    agentId = agent.id,
+                    windows = _snapshots.value[agent.id]?.windows.orEmpty(),
+                    now = observedNow,
+                    sessionOn = settings.notifySessionResets,
+                    weeklyOn = settings.notifyWeeklyResets,
+                )
+            }
+            dependencies.applyResetSchedule(ResetSchedulePolicy.clampGlobal(targets), agents)
+        } finally {
+            notificationScheduleMutex.unlock()
+        }
+    }
+
+    suspend fun performBackgroundRefresh() {
+        awaitInitialLoad()
+        refreshAll()
+    }
+
+    fun nextResetInstant(after: Instant = now()): Instant? = AutoRefreshPolicy.nextResetDate(
+        _snapshots.value.values.flatMap { snapshot -> snapshot.windows.map(UsageWindow::resetsAt) },
+        after,
+    )
+
     /**
      * Claims an agent's usage refresh and records its start time as one atomic operation.
      *
@@ -519,13 +665,13 @@ class AgentStore(
      * deliberately retained after both success and failure, and an exact 20-second boundary is
      * allowed.
      */
-    private suspend fun beginRefresh(agentId: UUID): Boolean = loadingMutex.withLock {
+    private suspend fun beginRefresh(agentId: UUID, manual: Boolean): Boolean = loadingMutex.withLock {
         if (agentId in inFlightRefreshIDs) return@withLock false
 
         val startedAt = now()
         val previousStart = lastFetchAt[agentId]
         if (
-            previousStart != null &&
+            !manual && previousStart != null &&
             Duration.between(previousStart, startedAt) < USAGE_MIN_FETCH_SPACING
         ) {
             return@withLock false
@@ -733,6 +879,7 @@ class AgentStore(
         ensureOpen()
         agentsLoaded.await()
         creditPeaksLoaded.await()
+        resetBaselineLoaded.await()
         ensureOpen()
     }
 
@@ -748,6 +895,7 @@ class AgentStore(
         agentsLoaded.complete(Unit)
         creditPeaksLoaded.complete(Unit)
         settingsLoaded.complete(Unit)
+        resetBaselineLoaded.complete(Unit)
         scope.cancel()
     }
 

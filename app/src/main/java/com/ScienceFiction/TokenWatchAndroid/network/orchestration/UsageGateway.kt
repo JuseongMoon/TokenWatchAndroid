@@ -7,6 +7,7 @@ import com.ScienceFiction.TokenWatchAndroid.domain.AgentSnapshot
 import com.ScienceFiction.TokenWatchAndroid.localization.AppLanguage
 import com.ScienceFiction.TokenWatchAndroid.localization.L10n
 import com.ScienceFiction.TokenWatchAndroid.network.core.UsageException
+import com.ScienceFiction.TokenWatchAndroid.network.providers.subscription.CodexAccountClient
 import java.time.Duration
 import java.time.Instant
 import java.util.UUID
@@ -18,10 +19,15 @@ class UsageGateway(
     private val registry: ProviderUsageRegistry,
     private val tokenStore: TokenStore,
     private val rateLimitGate: RateLimitGate,
+    private val codexAccountClient: CodexAccountClient = CodexAccountClient(),
     private val localization: () -> L10n = { L10n(AppLanguage.SYSTEM.resolved()) },
     private val now: () -> Instant = Instant::now,
 ) {
-    suspend fun fetchSnapshot(provider: AgentProvider, agentId: UUID): AgentSnapshot {
+    suspend fun fetchSnapshot(
+        provider: AgentProvider,
+        agentId: UUID,
+        manual: Boolean = false,
+    ): AgentSnapshot {
         rateLimitGate.blocked(agentId)?.let { until ->
             return rateLimitedSnapshot(agentId, until)
         }
@@ -33,6 +39,16 @@ class UsageGateway(
             } catch (_: UsageException.Unauthorized) {
                 tokens = tokenStore.forceRefresh(agentId, provider)
                 registry.fetchWindows(provider, tokens)
+            }
+
+            if (provider == AgentProvider.CODEX && manual) {
+                runCatching { codexAccountClient.fetchPlan(tokens) }
+                    .getOrNull()
+                    ?.takeIf { it != tokens.plan }
+                    ?.let { livePlan ->
+                        tokens = tokens.copy(plan = livePlan)
+                        tokenStore.updatePlan(agentId, livePlan)
+                    }
             }
 
             AgentSnapshot(

@@ -34,5 +34,8 @@ class PixelHeartTest {
     fun edgeDetectionKeepsOutlineAndDropsInterior() {
         assertTrue(PixelHeartData.isEdge(row = 0, column = 2))
         assertFalse(PixelHeartData.isEdge(row = 3, column = 5))
+        assertTrue(PixelHeartData.isEmpty(row = -1, column = 2))
+        assertFalse(PixelHeartData.isEmpty(row = 3, column = 5))
+        assertEquals(0.45f, PixelHeartData.RimWidthRatio)
     }
 }

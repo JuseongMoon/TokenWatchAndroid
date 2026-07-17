@@ -73,7 +73,7 @@ fun BlinkingHeart(
     }
 }
 
-/** Eight-frame braille spinner, advanced every 100 ms like the iOS source. */
+/** Six-dot spinner whose two-dot gap rotates clockwise while four dots remain lit. */
 @Composable
 fun TerminalSpinner(
     modifier: Modifier = Modifier,
@@ -92,7 +92,7 @@ fun TerminalSpinner(
     )
 }
 
-private val TerminalSpinnerFrames = listOf("⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷")
+internal val TerminalSpinnerFrames = listOf("⠶", "⠧", "⠏", "⠛", "⠹", "⠼")
 
 @Composable
 internal fun rememberSteppedFrame(frameCount: Int, frameMillis: Long): Int {

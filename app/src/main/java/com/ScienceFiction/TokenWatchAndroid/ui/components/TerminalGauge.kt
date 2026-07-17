@@ -33,12 +33,28 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ScienceFiction.TokenWatchAndroid.ui.theme.Term
+import com.ScienceFiction.TokenWatchAndroid.domain.WindowKind
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.max
 import kotlin.math.roundToInt
+import kotlin.random.Random
+
+enum class GaugeCritterVariant(
+    val sprite: PixelSprite,
+    val baseTickMillis: Long,
+) {
+    WEEKLY(PixelSprite.Slime, 285L),
+    SESSION(PixelSprite.SlimeSky, 219L),
+    ;
+
+    companion object {
+        fun from(kind: WindowKind): GaugeCritterVariant =
+            if (kind == WindowKind.SESSION) SESSION else WEEKLY
+    }
+}
 
 /**
  * Continuous usage gauge: dotted track, solid fill, optional elapsed-time marker, and a hopping
@@ -54,6 +70,7 @@ fun TerminalGauge(
     fillsRemaining: Boolean = false,
     height: Dp = 14.dp,
     bracketSize: TextUnit = 13.sp,
+    critterVariant: GaugeCritterVariant = GaugeCritterVariant.WEEKLY,
     gaugeCritterEnabled: Boolean = true,
     reduceMotion: Boolean = !ValueAnimator.areAnimatorsEnabled(),
     usedContentDescription: (Int) -> String = { "$it% used" },
@@ -101,6 +118,7 @@ fun TerminalGauge(
                 visible = showCritter,
                 modifier = Modifier.fillMaxSize(),
                 reduceMotion = reduceMotion,
+                variant = critterVariant,
             )
         }
         GaugeBracket("]", bracketSize)
@@ -121,6 +139,7 @@ private fun AnimatedGaugeCritter(
     visible: Boolean,
     modifier: Modifier = Modifier,
     reduceMotion: Boolean,
+    variant: GaugeCritterVariant,
 ) {
     var rendered by remember { mutableStateOf(false) }
     var opacityStep by remember { mutableIntStateOf(0) }
@@ -156,6 +175,7 @@ private fun AnimatedGaugeCritter(
                 ).toFloat(),
             ),
             reduceMotion = reduceMotion,
+            variant = variant,
         )
     }
 }
@@ -164,15 +184,20 @@ private fun AnimatedGaugeCritter(
 @Composable
 fun GaugeCritter(
     modifier: Modifier = Modifier,
-    sprite: PixelSprite = PixelSprite.Slime,
+    variant: GaugeCritterVariant = GaugeCritterVariant.WEEKLY,
     reduceMotion: Boolean = !ValueAnimator.areAnimatorsEnabled(),
 ) {
-    var tick by remember(sprite, reduceMotion) { mutableIntStateOf(0) }
-    LaunchedEffect(sprite, reduceMotion) {
+    val sprite = variant.sprite
+    val speedFactor = remember(variant) { Random.nextDouble(0.95, 1.05) }
+    val tickMillis = remember(variant, speedFactor) {
+        (variant.baseTickMillis / speedFactor).toLong().coerceAtLeast(1L)
+    }
+    var tick by remember(variant, reduceMotion) { mutableIntStateOf(0) }
+    LaunchedEffect(variant, reduceMotion, tickMillis) {
         tick = 0
         if (!reduceMotion) {
             while (isActive) {
-                delay(GaugeCritterMath.TickMillis)
+                delay(tickMillis)
                 tick += 1
             }
         }
@@ -210,7 +235,6 @@ fun GaugeCritter(
 /** Pure iOS-compatible critter thresholds and hopping arithmetic. */
 object GaugeCritterMath {
     const val Threshold = 0.995
-    const val TickMillis = 250L
     const val HopCells = 4
     const val OpacitySteps = 8
     const val FadeDurationMillis = 600L

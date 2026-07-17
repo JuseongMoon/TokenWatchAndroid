@@ -17,7 +17,11 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -38,6 +42,7 @@ import com.ScienceFiction.TokenWatchAndroid.ui.components.KvRow
 import com.ScienceFiction.TokenWatchAndroid.ui.components.PixelHeart
 import com.ScienceFiction.TokenWatchAndroid.ui.components.PixelSprite
 import com.ScienceFiction.TokenWatchAndroid.ui.components.TerminalBox
+import com.ScienceFiction.TokenWatchAndroid.ui.components.TerminalConfirmDialog
 import com.ScienceFiction.TokenWatchAndroid.ui.theme.Term
 import java.util.UUID
 import kotlin.math.roundToInt
@@ -70,7 +75,13 @@ fun SettingsScreen(
     onLogoutAgent: (Agent) -> Unit,
     onDone: () -> Unit,
     modifier: Modifier = Modifier,
+    notificationDenied: Boolean = false,
+    onOpenNotificationSettings: () -> Unit = {},
 ) {
+    var pendingLogoutId by rememberSaveable { mutableStateOf<String?>(null) }
+    val pendingLogout = pendingLogoutId?.let { id ->
+        agents.firstOrNull { it.id.toString() == id }
+    }
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -93,7 +104,10 @@ fun SettingsScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            AccountsSection(agents = agents, onLogoutAgent = onLogoutAgent)
+            AccountsSection(
+                agents = agents,
+                onLogoutAgent = { pendingLogoutId = it.id.toString() },
+            )
             LanguageSection(
                 selected = settings.language,
                 loc = loc,
@@ -116,6 +130,13 @@ fun SettingsScreen(
                 loc = loc,
                 onSettingsChange = onSettingsChange,
             )
+            NotificationSection(
+                settings = settings,
+                loc = loc,
+                denied = notificationDenied,
+                onSettingsChange = onSettingsChange,
+                onOpenSettings = onOpenNotificationSettings,
+            )
             ScreenSection(
                 keepScreenOn = settings.keepScreenOn,
                 loc = loc,
@@ -125,6 +146,93 @@ fun SettingsScreen(
                 KvRow(key = "version", value = appVersion, keyWidth = 84.dp)
             }
         }
+    }
+
+    pendingLogout?.let { agent ->
+        TerminalConfirmDialog(
+            title = loc.logoutConfirmTitle,
+            accountLabel = agent.accountLabel,
+            message = loc.logoutMessage(agent.provider.displayName),
+            confirmLabel = "[ ${loc.logout} ]",
+            cancelLabel = "[ ${loc.cancel} ]",
+            onConfirm = {
+                pendingLogoutId = null
+                onLogoutAgent(agent)
+            },
+            onDismiss = { pendingLogoutId = null },
+        )
+    }
+}
+
+@Composable
+private fun NotificationSection(
+    settings: AppSettings,
+    loc: L10n,
+    denied: Boolean,
+    onSettingsChange: (AppSettings) -> Unit,
+    onOpenSettings: () -> Unit,
+) {
+    TerminalBox(title = "NOTIFICATIONS") {
+        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            SettingToggle(
+                checked = settings.notifySessionResets,
+                title = "session resets",
+                onClick = {
+                    onSettingsChange(
+                        settings.copy(notifySessionResets = !settings.notifySessionResets),
+                    )
+                },
+            )
+            SettingToggle(
+                checked = settings.notifyWeeklyResets,
+                title = "weekly resets",
+                onClick = {
+                    onSettingsChange(
+                        settings.copy(notifyWeeklyResets = !settings.notifyWeeklyResets),
+                    )
+                },
+            )
+            HelpText(loc.settingsNotifHelp)
+            if (denied) {
+                Text(
+                    text = loc.settingsNotifDenied,
+                    color = Term.Red,
+                    style = terminalTextStyle(10.sp),
+                )
+                TerminalTextButton(
+                    text = loc.settingsNotifOpenSettings,
+                    color = Term.Cyan,
+                    size = 12.sp,
+                    weight = FontWeight.Normal,
+                    onClick = onOpenSettings,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingToggle(checked: Boolean, title: String, onClick: () -> Unit) {
+    val interactionSource = remember { MutableInteractionSource() }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                role = Role.Checkbox,
+                onClick = onClick,
+            ),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = if (checked) "[x]" else "[ ]",
+            color = if (checked) Term.Green else Term.Dim,
+            style = terminalTextStyle(14.sp),
+        )
+        Text(text = title, color = Term.Foreground, style = terminalTextStyle(14.sp))
+        Spacer(modifier = Modifier.weight(1f))
     }
 }
 

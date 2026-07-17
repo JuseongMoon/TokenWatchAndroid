@@ -69,6 +69,17 @@ data class PixelSprite(
                 4 to Color(0xFF052614),
             ),
         )
+
+        /** Sky-blue session slime. It reuses the green slime frames with a distinct palette. */
+        val SlimeSky = PixelSprite(
+            frames = Slime.frames,
+            palette = mapOf(
+                1 to Color(0xFF4FBCFA),
+                2 to Color(0xFFCCF0FD),
+                3 to Color(0xFF2180C2),
+                4 to Color(0xFF051A29),
+            ),
+        )
     }
 }
 

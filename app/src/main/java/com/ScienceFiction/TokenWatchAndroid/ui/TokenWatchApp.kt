@@ -1,8 +1,14 @@
 package com.ScienceFiction.TokenWatchAndroid.ui
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
+import android.provider.Settings
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -11,6 +17,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -77,7 +84,16 @@ internal fun TokenWatchApp(
     var initialLoadFinished by remember { mutableStateOf(false) }
     var isForeground by remember { mutableStateOf(false) }
     var isRefreshingAll by remember { mutableStateOf(false) }
+    var notificationPermissionRevision by remember { mutableIntStateOf(0) }
     val mainStateHolder = rememberSaveableStateHolder()
+
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) {
+        container.resetNotificationManager.markPermissionAsked()
+        notificationPermissionRevision += 1
+        scope.launch { store.reapplyNotificationSchedule() }
+    }
 
     LaunchedEffect(store) {
         store.awaitInitialLoad()
@@ -88,11 +104,19 @@ internal fun TokenWatchApp(
         val lifecycle = lifecycleOwner.lifecycle
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
-                Lifecycle.Event.ON_START, Lifecycle.Event.ON_RESUME -> isForeground = true
+                Lifecycle.Event.ON_START -> {
+                    isForeground = true
+                    container.backgroundRefreshScheduler.cancel()
+                }
+                Lifecycle.Event.ON_RESUME -> isForeground = true
                 // Keep the screen-awake flag across ON_PAUSE (notification shade, permission UI,
                 // and other transient interruptions). ON_STOP is the actual background boundary,
                 // matching iOS c983971's active/inactive versus background distinction.
-                Lifecycle.Event.ON_STOP, Lifecycle.Event.ON_DESTROY -> isForeground = false
+                Lifecycle.Event.ON_STOP -> {
+                    isForeground = false
+                    container.backgroundRefreshScheduler.schedule(store.nextResetInstant())
+                }
+                Lifecycle.Event.ON_DESTROY -> isForeground = false
                 else -> Unit
             }
         }
@@ -180,7 +204,17 @@ internal fun TokenWatchApp(
                 providerAuth = container.providerAuth,
                 deviceFlow = container.deviceFlow,
                 loc = loc,
-                onAddAgent = { provider, tokens -> store.addAgent(provider, tokens) },
+                onAddAgent = { provider, tokens ->
+                    store.addAgent(provider, tokens)
+                    if (
+                        Build.VERSION.SDK_INT >= 33 &&
+                        context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
+                        PackageManager.PERMISSION_GRANTED &&
+                        !container.resetNotificationManager.permissionWasAsked()
+                    ) {
+                        notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                    }
+                },
                 onOpenUrl = openUrl,
                 onDismiss = {
                     addAgentFlow.cancelAndReset()
@@ -207,6 +241,17 @@ internal fun TokenWatchApp(
                     },
                     onLogoutAgent = { agent -> scope.launch { store.remove(agent) } },
                     onDone = { route = ROUTE_MAIN },
+                    notificationDenied = run {
+                        notificationPermissionRevision
+                        container.resetNotificationManager.isDenied()
+                    },
+                    onOpenNotificationSettings = {
+                        context.startActivity(
+                            Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                                putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                            },
+                        )
+                    },
                 )
             }
 
@@ -280,8 +325,9 @@ private fun AgentDetailRoute(
         onBack = onBack,
         onRefresh = {
             scope.launch {
-                store.refresh(agent)
+                store.refresh(agent, manual = true)
                 store.refreshStatus(agent.provider, force = true)
+                account = store.accountInfo(agent).toDetailUiState()
             }
         },
         onOpenStatusPage = onOpenUrl,
@@ -325,5 +371,11 @@ internal fun mergeSettingsChange(
         ?: current.heartbeatTracking,
     heartbeatTargets = proposed.heartbeatTargets.takeIf { it != base.heartbeatTargets }
         ?: current.heartbeatTargets,
+    notifySessionResets = proposed.notifySessionResets.takeIf {
+        it != base.notifySessionResets
+    } ?: current.notifySessionResets,
+    notifyWeeklyResets = proposed.notifyWeeklyResets.takeIf {
+        it != base.notifyWeeklyResets
+    } ?: current.notifyWeeklyResets,
     language = proposed.language.takeIf { it != base.language } ?: current.language,
 )
