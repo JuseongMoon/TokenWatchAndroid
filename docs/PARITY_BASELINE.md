@@ -1,6 +1,6 @@
 # TokenWatch Android parity baseline
 
-The Android release mirrors the iOS repository through commit `08ac1ac`
+The Android release mirrors the iOS repository through commit `cd7bc9f`
 (`Update project.pbxproj`) on `dev`. Uncommitted iOS working-tree changes are
 deliberately not part of this baseline.
 
@@ -19,10 +19,11 @@ deliberately not part of this baseline.
 - 429 `Retry-After` handling with five-minute fallback, last-good graphs, and a
   localized stale-data/retry notice.
 - Claude usage requests identified as `claude-code/2.1.0` with JSON headers.
-- Provider status polling that preserves the last good value and retries
-  immediately after transport or schema failure while keeping a valid unknown
-  provider status distinct.
-- Inline card-header service status, remaining-balance accessibility text, and
+- Provider status polling based on leaf-component counts, with operational,
+  caution, major, total-outage, and all-maintenance classifications. Transient
+  transport/schema failures preserve the last good value and retry immediately.
+- Inline card-header service status (major blinks, total outage remains static,
+  and all-maintenance uses text), remaining-balance accessibility text, and
   gauge-like heartbeat tracking for both subscription and credit gauges.
 - Eight-step gauge-slime entry/exit fades, an animated settings preview, and the
   lighter slime shadow palette.
@@ -45,7 +46,7 @@ deliberately not part of this baseline.
 - Application ID/namespace: `com.ScienceFiction.TokenWatchAndroid`
 - Minimum SDK: 28
 - Target/compile SDK: 36
-- Version: 1.0 (5)
+- Version: 1.0 (6)
 
 ## Platform-specific parity adaptations
 

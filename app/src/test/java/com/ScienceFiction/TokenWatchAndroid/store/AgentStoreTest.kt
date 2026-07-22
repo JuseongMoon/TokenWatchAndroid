@@ -498,7 +498,7 @@ class AgentStoreTest {
         val start = Instant.parse("2026-07-11T00:00:00Z")
         val clock = AtomicReference(start)
         val responses = ArrayDeque<ServiceHealth?>(
-            listOf(ServiceHealth.OPERATIONAL, null, ServiceHealth.DEGRADED),
+            listOf(ServiceHealth.OPERATIONAL, null, ServiceHealth.CAUTION),
         )
         val fetches = AtomicInteger(0)
         val fixture = fixture(
@@ -516,9 +516,9 @@ class AgentStoreTest {
         assertEquals(ServiceHealth.OPERATIONAL, fixture.store.refreshStatus(AgentProvider.CLAUDE))
         assertEquals(ServiceHealth.OPERATIONAL, fixture.store.serviceStatus.value[AgentProvider.CLAUDE])
 
-        assertEquals(ServiceHealth.DEGRADED, fixture.store.refreshStatus(AgentProvider.CLAUDE))
+        assertEquals(ServiceHealth.CAUTION, fixture.store.refreshStatus(AgentProvider.CLAUDE))
         assertEquals(3, fetches.get())
-        assertEquals(ServiceHealth.DEGRADED, fixture.store.serviceStatus.value[AgentProvider.CLAUDE])
+        assertEquals(ServiceHealth.CAUTION, fixture.store.serviceStatus.value[AgentProvider.CLAUDE])
         fixture.close()
     }
 

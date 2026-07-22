@@ -40,12 +40,12 @@ data class ServiceStatusSource(
 
 private fun atlassian(host: String) = ServiceStatusSource(
     platform = StatusPlatform.ATLASSIAN,
-    jsonUrl = "https://$host/api/v2/status.json",
+    jsonUrl = "https://$host/api/v2/components.json",
 )
 
 private fun instatus(host: String) = ServiceStatusSource(
     platform = StatusPlatform.INSTATUS,
-    jsonUrl = "https://$host/summary.json",
+    jsonUrl = "https://$host/v2/components.json",
 )
 
 /**

@@ -15,7 +15,7 @@ import org.junit.Test
 class ServiceStatusClientTest {
     private val source = ServiceStatusSource(
         platform = StatusPlatform.ATLASSIAN,
-        jsonUrl = "https://status.example.test/api/v2/status.json",
+        jsonUrl = "https://status.example.test/api/v2/components.json",
     )
 
     @Test
@@ -24,11 +24,11 @@ class ServiceStatusClientTest {
             NetworkResponse(
                 statusCode = 200,
                 headers = emptyMap(),
-                body = """{"status":{"indicator":"minor"}}""".toByteArray(),
+                body = """{"components":[{"status":"operational"},{"status":"partial_outage"},{"status":"operational"}]}""".toByteArray(),
             ),
         )
 
-        assertEquals(ServiceHealth.DEGRADED, ServiceStatusClient(transport).fetch(source))
+        assertEquals(ServiceHealth.CAUTION, ServiceStatusClient(transport).fetch(source))
         assertEquals("application/json", transport.request.header("Accept"))
         assertEquals(ServiceStatusClient.USER_AGENT, transport.request.header("User-Agent"))
         assertNull(transport.request.header("Authorization"))
@@ -49,16 +49,16 @@ class ServiceStatusClientTest {
     }
 
     @Test
-    fun parsedUnsupportedStatusRemainsUnknownRatherThanFetchFailure() = runBlocking {
+    fun unknownComponentValueIsCountedAsDown() = runBlocking {
         val transport = RecordingTransport(
             NetworkResponse(
                 statusCode = 200,
                 headers = emptyMap(),
-                body = """{"status":{"indicator":"future-value"}}""".toByteArray(),
+                body = """{"components":[{"status":"future-value"}]}""".toByteArray(),
             ),
         )
 
-        assertEquals(ServiceHealth.UNKNOWN, ServiceStatusClient(transport).fetch(source))
+        assertEquals(ServiceHealth.TOTAL_OUTAGE, ServiceStatusClient(transport).fetch(source))
     }
 
     private class RecordingTransport(

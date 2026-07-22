@@ -14,7 +14,7 @@ object Term {
     val Foreground = Color(0xFFD6DBD1)
     val Dim = Color(0xFF6B7A6B)
     val Cyan = Color(0xFF56D6D6)
-    val Green = Color(0xFF4CD07A)
+    val Green = Color(0xFF3DD199)
     val Yellow = Color(0xFFE6C34D)
     val Red = Color(0xFFF0574C)
     val Orange = Color(0xFFF2944D)
@@ -23,6 +23,8 @@ object Term {
     val Pink = Color(0xFFF273A6)
     val Teal = Color(0xFF4CC7B3)
     val Track = Color(0xFF242B21)
+    val GraveGray = Color(0xFF383838)
+    val SignalCaution = Color(0xFFFFD61A)
 
     fun statusColor(remainingPercent: Double): Color = when {
         remainingPercent < 10.0 -> Red

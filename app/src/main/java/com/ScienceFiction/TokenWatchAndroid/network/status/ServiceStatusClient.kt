@@ -9,7 +9,7 @@ import okhttp3.Request
 
 /**
  * Fetches a provider's public status endpoint without allowing failures to disturb usage data.
- * Null is a transient fetch/parse failure; UNKNOWN is a successfully parsed unsupported value.
+ * Null is a transient fetch/parse failure. UNKNOWN is retained only as a defensive UI fallback.
  */
 class ServiceStatusClient(
     private val transport: NetworkTransport,

@@ -27,6 +27,7 @@ import com.ScienceFiction.TokenWatchAndroid.domain.ServiceHealth
 import com.ScienceFiction.TokenWatchAndroid.domain.UsageWindow
 import com.ScienceFiction.TokenWatchAndroid.localization.L10n
 import com.ScienceFiction.TokenWatchAndroid.ui.components.TerminalBox
+import com.ScienceFiction.TokenWatchAndroid.ui.components.TerminalBlink
 import com.ScienceFiction.TokenWatchAndroid.ui.components.TerminalSpinner
 import com.ScienceFiction.TokenWatchAndroid.ui.components.UsageBar
 import com.ScienceFiction.TokenWatchAndroid.ui.components.rememberMinuteInstant
@@ -83,7 +84,7 @@ private fun AgentCardTitleBar(agent: Agent, serviceHealth: ServiceHealth?, loc: 
                 ),
             ),
         )
-        serviceHealth?.let { health ->
+        serviceHealth?.takeUnless { it == ServiceHealth.UNKNOWN }?.let { health ->
             ServiceHealthBadge(health = health, loc = loc)
         }
         agent.accountLabel
@@ -111,13 +112,26 @@ private fun ServiceHealthBadge(health: ServiceHealth, loc: L10n) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(text = "[", color = Term.Dim, style = terminalTextStyle(12.sp))
-        Box(
-            modifier = Modifier
-                .size(8.dp)
-                .background(serviceHealthDotColor(health), CircleShape),
-        )
+        when (health) {
+            ServiceHealth.MAINTENANCE -> Text(
+                text = loc.serviceMaintenanceBadge,
+                color = Term.Orange,
+                style = terminalTextStyle(10.sp, FontWeight.SemiBold),
+            )
+            ServiceHealth.MAJOR -> TerminalBlink { ServiceHealthDot(health) }
+            else -> ServiceHealthDot(health)
+        }
         Text(text = "]", color = Term.Dim, style = terminalTextStyle(12.sp))
     }
+}
+
+@Composable
+private fun ServiceHealthDot(health: ServiceHealth) {
+    Box(
+        modifier = Modifier
+            .size(8.dp)
+            .background(serviceHealthDotColor(health), CircleShape),
+    )
 }
 
 /** `[tag] NAME · plan`; account email is deliberately never exposed on the main screen. */

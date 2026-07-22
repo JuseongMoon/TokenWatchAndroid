@@ -41,6 +41,7 @@ import com.ScienceFiction.TokenWatchAndroid.localization.resetRemainingText
 import com.ScienceFiction.TokenWatchAndroid.ui.components.KvRow
 import com.ScienceFiction.TokenWatchAndroid.ui.components.GaugeCritterVariant
 import com.ScienceFiction.TokenWatchAndroid.ui.components.TerminalBox
+import com.ScienceFiction.TokenWatchAndroid.ui.components.TerminalBlink
 import com.ScienceFiction.TokenWatchAndroid.ui.components.TerminalButton
 import com.ScienceFiction.TokenWatchAndroid.ui.components.TerminalConfirmDialog
 import com.ScienceFiction.TokenWatchAndroid.ui.components.TerminalGauge
@@ -587,7 +588,11 @@ private fun ServiceStatusRow(
             modifier = Modifier.width(96.dp),
         )
         Text(text = ":", color = Term.Dim, style = terminalTextStyle(13.sp))
-        Text(text = "●", color = serviceHealthDotColor(serviceHealth), style = terminalTextStyle(11.sp))
+        if (serviceHealth == ServiceHealth.MAJOR) {
+            TerminalBlink { DetailServiceHealthDot(serviceHealth) }
+        } else {
+            DetailServiceHealthDot(serviceHealth)
+        }
         Text(
             text = loc.serviceHealthLabel(serviceHealth),
             color = serviceHealthColor(serviceHealth),
@@ -605,6 +610,15 @@ private fun ServiceStatusRow(
             )
         }
     }
+}
+
+@Composable
+private fun DetailServiceHealthDot(serviceHealth: ServiceHealth) {
+    Text(
+        text = "●",
+        color = serviceHealthDotColor(serviceHealth),
+        style = terminalTextStyle(11.sp),
+    )
 }
 
 @Composable

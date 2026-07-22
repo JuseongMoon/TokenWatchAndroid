@@ -77,11 +77,11 @@ class ProviderModelsTest {
         assertEquals(noMachineReadableSource, AgentProvider.entries.filter { it.statusSource == null }.toSet())
 
         assertEquals(
-            ServiceStatusSource(StatusPlatform.ATLASSIAN, "https://deepseek.statuspage.io/api/v2/status.json"),
+            ServiceStatusSource(StatusPlatform.ATLASSIAN, "https://deepseek.statuspage.io/api/v2/components.json"),
             AgentProvider.DEEPSEEK.statusSource,
         )
         assertEquals(
-            ServiceStatusSource(StatusPlatform.INSTATUS, "https://recraft.instatus.com/summary.json"),
+            ServiceStatusSource(StatusPlatform.INSTATUS, "https://recraft.instatus.com/v2/components.json"),
             AgentProvider.RECRAFT.statusSource,
         )
         assertEquals(
@@ -93,5 +93,13 @@ class ProviderModelsTest {
         assertEquals("https://status.x.ai", AgentProvider.GROK.statusPageUrl)
         assertNull(AgentProvider.LEONARDO.statusPageUrl)
         assertTrue(AgentProvider.entries.filterNot { it == AgentProvider.LEONARDO }.all { it.statusPageUrl != null })
+
+        AgentProvider.entries.mapNotNull { it.statusSource }.forEach { source ->
+            when (source.platform) {
+                StatusPlatform.ATLASSIAN -> assertTrue(source.jsonUrl.endsWith("/api/v2/components.json"))
+                StatusPlatform.INSTATUS -> assertTrue(source.jsonUrl.endsWith("/v2/components.json"))
+                StatusPlatform.BETTERSTACK -> assertTrue(source.jsonUrl.endsWith("/index.json"))
+            }
+        }
     }
 }

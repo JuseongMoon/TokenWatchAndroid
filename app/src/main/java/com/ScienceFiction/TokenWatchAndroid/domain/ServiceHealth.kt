@@ -1,10 +1,11 @@
 package com.ScienceFiction.TokenWatchAndroid.domain
 
-/** Normalized provider service status used by the iOS clean baseline. */
+/** Provider service status classified from the proportion of unhealthy leaf components. */
 enum class ServiceHealth {
     OPERATIONAL,
-    DEGRADED,
+    CAUTION,
     MAJOR,
+    TOTAL_OUTAGE,
     MAINTENANCE,
     UNKNOWN,
 }

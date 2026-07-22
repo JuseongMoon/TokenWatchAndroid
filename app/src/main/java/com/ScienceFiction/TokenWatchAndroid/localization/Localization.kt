@@ -248,11 +248,14 @@ data class L10n(val lang: Lang) {
 
     fun serviceHealthLabel(health: ServiceHealth) = when (health) {
         ServiceHealth.OPERATIONAL -> choose("정상", "operational")
-        ServiceHealth.DEGRADED -> choose("일부 저하", "degraded")
-        ServiceHealth.MAJOR -> choose("장애", "outage")
-        ServiceHealth.MAINTENANCE -> choose("점검 중", "maintenance")
+        ServiceHealth.CAUTION -> choose("주의", "caution")
+        ServiceHealth.MAJOR -> choose("이상", "outage")
+        ServiceHealth.TOTAL_OUTAGE -> choose("전체 이상", "total outage")
+        ServiceHealth.MAINTENANCE -> choose("전체 점검중", "under maintenance")
         ServiceHealth.UNKNOWN -> choose("알 수 없음", "unknown")
     }
+
+    val serviceMaintenanceBadge get() = choose("점검중", "maintenance")
 
     val dateLocale: Locale
         get() = Locale.forLanguageTag(if (lang == Lang.KO) "ko-KR" else "en-US")

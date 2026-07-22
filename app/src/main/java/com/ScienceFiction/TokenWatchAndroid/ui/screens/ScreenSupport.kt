@@ -52,9 +52,10 @@ internal fun AgentProvider.terminalColor(): Color = when (terminalColorKey) {
 
 internal fun serviceHealthColor(health: ServiceHealth): Color = when (health) {
     ServiceHealth.OPERATIONAL -> Term.Green
-    ServiceHealth.DEGRADED -> Term.Yellow
+    ServiceHealth.CAUTION -> Term.SignalCaution
     ServiceHealth.MAJOR -> Term.Red
-    ServiceHealth.MAINTENANCE -> Term.Blue
+    ServiceHealth.TOTAL_OUTAGE -> Term.GraveGray
+    ServiceHealth.MAINTENANCE -> Term.Orange
     ServiceHealth.UNKNOWN -> Term.Dim
 }
 
