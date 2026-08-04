@@ -16,8 +16,6 @@ object ServiceStatusParser {
         val root = parseObject(data) ?: return null
         val statuses = when (platform) {
             StatusPlatform.ATLASSIAN -> atlassianComponents(root)
-            StatusPlatform.INSTATUS -> instatusComponents(root)
-            StatusPlatform.BETTERSTACK -> betterStackComponents(root)
         } ?: return null
         return classify(statuses)
     }
@@ -43,41 +41,6 @@ object ServiceStatusParser {
                 when ((component["status"] as? String)?.lowercase()) {
                     "operational" -> ComponentStatus.OPERATIONAL
                     "under_maintenance" -> ComponentStatus.MAINTENANCE
-                    else -> ComponentStatus.DOWN
-                }
-            }
-    }
-
-    private fun instatusComponents(root: Map<*, *>): List<ComponentStatus>? {
-        val components = (root["components"] as? List<*>)
-            ?.mapNotNull { it as? Map<*, *> }
-            ?: return null
-        val parentIds = components.mapNotNull { component ->
-            (component["group"] as? Map<*, *>)?.get("id") as? String
-        }.toSet()
-        return components
-            .filter { component ->
-                val id = component["id"] as? String
-                id == null || id !in parentIds
-            }
-            .map { component ->
-                when ((component["status"] as? String)?.uppercase()) {
-                    "OPERATIONAL" -> ComponentStatus.OPERATIONAL
-                    "UNDERMAINTENANCE" -> ComponentStatus.MAINTENANCE
-                    else -> ComponentStatus.DOWN
-                }
-            }
-    }
-
-    private fun betterStackComponents(root: Map<*, *>): List<ComponentStatus>? {
-        val included = root["included"] as? List<*> ?: return null
-        return included.mapNotNull { it as? Map<*, *> }
-            .filter { it["type"] == "status_page_resource" }
-            .map { resource ->
-                val attributes = resource["attributes"] as? Map<*, *>
-                when ((attributes?.get("status") as? String)?.lowercase()) {
-                    "operational" -> ComponentStatus.OPERATIONAL
-                    "maintenance", "under_maintenance" -> ComponentStatus.MAINTENANCE
                     else -> ComponentStatus.DOWN
                 }
             }

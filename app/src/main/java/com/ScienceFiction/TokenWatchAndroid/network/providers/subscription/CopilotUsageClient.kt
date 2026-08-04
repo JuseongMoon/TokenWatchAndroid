@@ -7,7 +7,7 @@ import com.ScienceFiction.TokenWatchAndroid.network.core.HttpTransport
 import com.ScienceFiction.TokenWatchAndroid.network.core.NetworkTransport
 import com.ScienceFiction.TokenWatchAndroid.network.core.ProviderUsageClient
 import java.time.LocalDate
-import java.time.ZoneOffset
+import java.time.ZoneId
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Request
@@ -74,7 +74,7 @@ class CopilotUsageClient(
     }
 
     private fun parseResetDate(value: String?): java.time.Instant? = value?.let { date ->
-        runCatching { LocalDate.parse(date).atStartOfDay(ZoneOffset.UTC).toInstant() }.getOrNull()
+        runCatching { LocalDate.parse(date).atStartOfDay(ZoneId.systemDefault()).toInstant() }.getOrNull()
     }
 
     private fun Map<String, Any?>.optionalObject(key: String): Map<String, Any?>? {

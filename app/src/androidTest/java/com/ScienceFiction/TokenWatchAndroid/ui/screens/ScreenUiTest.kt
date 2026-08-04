@@ -60,7 +60,7 @@ class ScreenUiTest {
         composeRule.setContent {
             TokenWatchTheme {
                 AgentCard(
-                    agent = Agent(provider = AgentProvider.LEONARDO, accountLabel = "pro"),
+                    agent = Agent(provider = AgentProvider.OPENROUTER, accountLabel = "pro"),
                     snapshot = null,
                     isLoading = false,
                     serviceHealth = null,
@@ -70,7 +70,7 @@ class ScreenUiTest {
             }
         }
 
-        composeRule.onNodeWithText("[le] LEONARDO").assertIsDisplayed()
+        composeRule.onNodeWithText("[or] OPENROUTER").assertIsDisplayed()
         composeRule.onNodeWithText("· pro").assertIsDisplayed()
         composeRule.onNodeWithContentDescription("operational").assertDoesNotExist()
         composeRule.onNodeWithContentDescription("unknown").assertDoesNotExist()

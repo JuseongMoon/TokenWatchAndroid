@@ -1,13 +1,15 @@
 # TokenWatch Android
 
 TokenWatch iOS의 Android 동등 구현입니다. 현재 기준선은 iOS 저장소의 commit
-`cd7bc9f`이며, 기능 범위와 플랫폼별 대응은
+`bff4bc2`이며, 기능 범위와 플랫폼별 대응은
 [`docs/PARITY_BASELINE.md`](docs/PARITY_BASELINE.md)에 고정되어 있습니다.
 
 ## 주요 기능
 
-- Claude, Codex, Copilot, Cursor, Grok, Windsurf를 포함한 18개 서비스
-- OAuth code, OAuth device flow, 브라우저 session capture, API key 인증
+- 공식 API 또는 검증된 엔드포인트를 사용하는 7개 서비스
+- OAuth code, OAuth device flow, API key 인증
+- 로그인 없이 전체 UI를 둘러보는 격리된 데모 모드
+- 업무시간에만 진행하는 주간 게이지 현재시각 마커
 - 구독 게이지와 충전형 크레딧 역방향 게이지(API 총액 또는 최고 관측 잔액 기준)
 - Claude 추가 사용량(extra usage) 크레딧 표시
 - foreground 전용 고정/적응형 자동 새로고침(10초~5분 사다리, 급증 시 급강하)

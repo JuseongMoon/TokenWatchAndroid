@@ -88,7 +88,7 @@ internal class OAuthCallbackGate {
 }
 
 /**
- * Embedded login browser for OAuth redirects and browser-session capture.
+ * One-shot embedded login browser for OAuth redirects.
  *
  * [callbackParser] is deliberately injected from the provider's OAuth client. This view never
  * guesses callback hosts or validates OAuth state itself; it forwards the parsed code and state
@@ -199,7 +199,14 @@ private class LoginWebViewController {
             mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
             safeBrowsingEnabled = true
             setSupportMultipleWindows(false)
+            cacheMode = WebSettings.LOAD_NO_CACHE
         }
+        // OAuth browsers are one-shot. Clear the global WebView cookie jar before and after use so
+        // login cookies and DOM state do not survive logout or appear in a later account flow.
+        cookieManager.removeAllCookies(null)
+        cookieManager.flush()
+        view.clearCache(true)
+        view.clearFormData()
         cookieManager.setAcceptCookie(true)
         cookieManager.setAcceptThirdPartyCookies(view, true)
         view.webViewClient = LoginClient()
@@ -219,6 +226,11 @@ private class LoginWebViewController {
         localStorageEvaluationInFlight = false
         webView = null
         view.stopLoading()
+        view.clearHistory()
+        view.clearCache(true)
+        view.clearFormData()
+        cookieManager.removeAllCookies(null)
+        cookieManager.flush()
         view.webViewClient = WebViewClient()
         view.webChromeClient = null
         view.removeAllViews()

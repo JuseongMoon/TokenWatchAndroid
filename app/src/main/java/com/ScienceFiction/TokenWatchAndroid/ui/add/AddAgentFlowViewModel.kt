@@ -25,7 +25,6 @@ internal sealed interface AddAgentPhase {
     data class OAuthLogin(val provider: AgentProvider, val pkce: Pkce) : AddAgentPhase
     data class ApiKey(val provider: AgentProvider) : AddAgentPhase
     data class DeviceFlow(val provider: AgentProvider, val device: DeviceCode? = null) : AddAgentPhase
-    data class SessionLogin(val provider: AgentProvider) : AddAgentPhase
     data object Authenticating : AddAgentPhase
     data class Failed(val message: String) : AddAgentPhase
     data object Completed : AddAgentPhase
@@ -53,17 +52,10 @@ internal class AddAgentFlowViewModel : ViewModel() {
         phase = when (provider.authKind) {
             AuthKind.OAUTH_CODE -> AddAgentPhase.OAuthLogin(provider, Pkce.create())
             AuthKind.API_KEY -> AddAgentPhase.ApiKey(provider)
-            AuthKind.SESSION_CAPTURE -> AddAgentPhase.SessionLogin(provider)
             AuthKind.OAUTH_DEVICE_FLOW -> AddAgentPhase.DeviceFlow(provider)
         }
 
-        // Validate the session route before presenting a browser that cannot complete.
-        if (
-            phase is AddAgentPhase.SessionLogin &&
-            providerAuth.sessionLoginUrl(provider) == null
-        ) {
-            phase = AddAgentPhase.Failed(loc.errAuthMethodUnavailable)
-        } else if (phase is AddAgentPhase.DeviceFlow) {
+        if (phase is AddAgentPhase.DeviceFlow) {
             startDeviceFlow(provider, deviceFlow, loc, onAddAgent)
         }
     }
@@ -105,16 +97,6 @@ internal class AddAgentFlowViewModel : ViewModel() {
                 phase = AddAgentPhase.Failed(authErrorMessage(error, loc))
             }
         }
-    }
-
-    fun acceptSession(
-        provider: AgentProvider,
-        tokens: OAuthTokens,
-        loc: L10n,
-        onAddAgent: suspend (AgentProvider, OAuthTokens) -> Unit,
-    ) {
-        if ((phase as? AddAgentPhase.SessionLogin)?.provider != provider) return
-        addTokens(provider, tokens, loc, onAddAgent)
     }
 
     fun fail(message: String) {

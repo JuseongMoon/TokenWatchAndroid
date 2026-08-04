@@ -61,7 +61,7 @@ class ResetNotificationManager(
         val loc = localization()
         events.forEach { event ->
             val identifier =
-                "${ResetSchedulePolicy.IdPrefix}${agent.id}|fired|${event.fireTime.epochSecond / 60L}"
+                "${ResetDetector.FiredIdPrefix}${agent.id}|${event.fireTime.epochSecond / 60L}"
             post(
                 identifier = identifier,
                 title = loc.notifResetTitle(agent.provider.displayName, agent.accountLabel),

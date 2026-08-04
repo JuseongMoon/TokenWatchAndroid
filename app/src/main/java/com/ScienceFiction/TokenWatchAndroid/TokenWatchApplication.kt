@@ -84,6 +84,13 @@ class TokenWatchContainer(context: Context) : Closeable {
         resetNotificationManager = resetNotificationManager,
     )
 
+    private val providerMigrationJob = scope.launch {
+        agentRepository.migrateUnsupportedProviders { id ->
+            tokenStore.delete(id)
+            resetNotificationManager.removePending(id)
+        }
+    }
+
     private val languageSyncJob = scope.launch {
         agentStore.settings.collect { settings ->
             localeState.language = settings.language
@@ -92,6 +99,7 @@ class TokenWatchContainer(context: Context) : Closeable {
 
     override fun close() {
         languageSyncJob.cancel()
+        providerMigrationJob.cancel()
         agentStore.close()
         scope.cancel()
     }

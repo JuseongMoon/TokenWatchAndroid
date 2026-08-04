@@ -3,6 +3,8 @@ package com.ScienceFiction.TokenWatchAndroid.network.providers.subscription
 import com.ScienceFiction.TokenWatchAndroid.auth.OAuthTokens
 import com.ScienceFiction.TokenWatchAndroid.network.core.UsageException
 import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -49,7 +51,7 @@ class CopilotUsageClientTest {
         )
         assertEquals(listOf(30.0, 75.0, 0.0, 90.0), windows.map { it.usedPercent })
         windows.forEach { window ->
-            assertEquals(Instant.parse("2026-08-01T00:00:00Z"), window.resetsAt)
+            assertEquals(LocalDate.parse("2026-08-01").atStartOfDay(ZoneId.systemDefault()).toInstant(), window.resetsAt)
             assertNull(window.windowSeconds)
         }
     }

@@ -38,6 +38,7 @@ class SettingsRepository(
         keepScreenOn = safeGet(Keys.keepScreenOn),
         hideUnusedWindows = safeGet(Keys.hideUnusedWindows),
         gaugeCritter = safeGet(Keys.gaugeCritter),
+        workHours = safeGet(Keys.workHours),
         heartbeatCursor = safeGet(Keys.heartbeatCursor),
         heartbeatTracking = safeGet(Keys.heartbeatTracking),
         heartbeatTargets = safeGet(Keys.heartbeatTargets),
@@ -51,6 +52,7 @@ class SettingsRepository(
         this[Keys.keepScreenOn] = settings.keepScreenOn
         this[Keys.hideUnusedWindows] = settings.hideUnusedWindows
         this[Keys.gaugeCritter] = settings.gaugeCritter
+        this[Keys.workHours] = settings.workHours
         this[Keys.heartbeatCursor] = settings.heartbeatCursor
         this[Keys.heartbeatTracking] = settings.heartbeatTracking
         this[Keys.heartbeatTargets] = settings.heartbeatTargets.toSet()
@@ -64,6 +66,7 @@ class SettingsRepository(
         val keepScreenOn = booleanPreferencesKey("tokenwatch.keepScreenOn")
         val hideUnusedWindows = booleanPreferencesKey("tokenwatch.hideUnusedWindows")
         val gaugeCritter = booleanPreferencesKey("tokenwatch.gaugeCritter")
+        val workHours = stringPreferencesKey("tokenwatch.workHours")
         val heartbeatCursor = booleanPreferencesKey("tokenwatch.heartbeatCursor")
         val heartbeatTracking = booleanPreferencesKey("tokenwatch.heartbeatTracking")
         val heartbeatTargets = stringSetPreferencesKey("tokenwatch.heartbeatTargets")

@@ -66,6 +66,7 @@ fun TerminalGauge(
     usedFraction: Double,
     fillColor: Color,
     elapsedFraction: Double?,
+    markerPaused: Boolean = false,
     modifier: Modifier = Modifier,
     fillsRemaining: Boolean = false,
     height: Dp = 14.dp,
@@ -110,7 +111,7 @@ fun TerminalGauge(
                     ),
                 )
                 if (elapsed != null) {
-                    drawElapsedMarker(elapsed)
+                    drawElapsedMarker(elapsed, markerPaused)
                 }
             }
 
@@ -290,7 +291,10 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawDottedTrack(col
     }
 }
 
-private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawElapsedMarker(elapsed: Double) {
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawElapsedMarker(
+    elapsed: Double,
+    paused: Boolean,
+) {
     val markerWidth = 2.dp.toPx()
     val minimumCenter = 1.dp.toPx()
     val maximumCenter = (size.width - 1.dp.toPx()).coerceAtLeast(minimumCenter)
@@ -299,18 +303,17 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawElapsedMarker(e
 
     // Compact dark halo approximates the iOS 1.5pt shadow on either fill color.
     val halo = 1.5.dp.toPx()
-    drawRect(
-        color = Color.Black.copy(alpha = 0.5f),
-        topLeft = Offset(topLeft.x - halo / 2f, 0f),
+    if (!paused) drawRect(
+        color = Color.Black.copy(alpha = 0.5f), topLeft = Offset(topLeft.x - halo / 2f, 0f),
         size = Size(markerWidth + halo, size.height),
     )
     drawRect(
-        color = Color.White,
+        color = if (paused) Term.Dim.copy(alpha = 0.5f) else Color.White,
         topLeft = topLeft,
         size = Size(markerWidth, size.height),
     )
     drawRect(
-        color = Color.Black.copy(alpha = 0.45f),
+        color = Color.Black.copy(alpha = if (paused) 0.2f else 0.45f),
         topLeft = topLeft,
         size = Size(markerWidth, size.height),
         style = Stroke(width = 0.5.dp.toPx()),

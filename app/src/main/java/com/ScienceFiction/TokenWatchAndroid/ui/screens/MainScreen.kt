@@ -49,6 +49,7 @@ import com.ScienceFiction.TokenWatchAndroid.domain.Agent
 import com.ScienceFiction.TokenWatchAndroid.domain.AgentProvider
 import com.ScienceFiction.TokenWatchAndroid.domain.AgentSnapshot
 import com.ScienceFiction.TokenWatchAndroid.domain.ServiceHealth
+import com.ScienceFiction.TokenWatchAndroid.domain.WorkHoursSchedule
 import com.ScienceFiction.TokenWatchAndroid.localization.L10n
 import com.ScienceFiction.TokenWatchAndroid.ui.components.BlinkingCursor
 import com.ScienceFiction.TokenWatchAndroid.ui.components.BlinkingHeart
@@ -69,6 +70,7 @@ fun MainScreen(
     loc: L10n,
     appVersion: String,
     isRefreshingAll: Boolean,
+    isDemo: Boolean = false,
     onSettings: () -> Unit,
     onAddAgent: () -> Unit,
     onOpenAgent: (Agent) -> Unit,
@@ -77,6 +79,8 @@ fun MainScreen(
     onRefreshAgent: (Agent) -> Unit,
     onDeleteAgent: (Agent) -> Unit,
     onRefreshAll: () -> Unit,
+    onEnterDemo: () -> Unit = {},
+    onExitDemo: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -91,8 +95,10 @@ fun MainScreen(
             loc = loc,
             appVersion = appVersion,
             onSettings = onSettings,
+            isDemo = isDemo,
             modifier = Modifier.statusBarsPadding(),
         )
+        if (isDemo) DemoBanner(loc = loc, onExitDemo = onExitDemo)
 
         PullToRefreshBox(
             isRefreshing = isRefreshingAll,
@@ -135,12 +141,17 @@ fun MainScreen(
                 }
 
                 item(key = "add-agent") {
-                    TerminalButton(
-                        title = "[ + ADD AGENT ]",
-                        color = Term.Green,
-                        dashedBorder = true,
-                        onClick = onAddAgent,
-                    )
+                    if (isDemo) {
+                        TerminalButton("[ ■ EXIT DEMO ]", color = Term.Yellow, onClick = onExitDemo)
+                    } else {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            TerminalButton("[ + ADD AGENT ]", color = Term.Green, dashedBorder = true, onClick = onAddAgent)
+                            if (agents.isEmpty()) {
+                                TerminalButton("[ ▶ RUN DEMO ]", color = Term.Yellow, dashedBorder = true, onClick = onEnterDemo)
+                                Text(loc.demoHint, color = Term.Dim, style = terminalTextStyle(11.sp))
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -155,6 +166,7 @@ private fun MainHeader(
     loc: L10n,
     appVersion: String,
     onSettings: () -> Unit,
+    isDemo: Boolean,
     modifier: Modifier = Modifier,
 ) {
     Row(
@@ -179,6 +191,7 @@ private fun MainHeader(
                 ).takeIf { settings.heartbeatTracking },
                 settings = settings,
                 loc = loc,
+                demo = isDemo,
             )
         }
         TerminalTextButton(
@@ -242,8 +255,11 @@ private fun StatusPrompt(
     trackedUsedPercent: Double?,
     settings: AppSettings,
     loc: L10n,
+    demo: Boolean,
 ) {
-    val statusLine = if (agentCount == 0) {
+    val statusLine = if (demo) {
+        "demo mode · sample data"
+    } else if (agentCount == 0) {
         "no agents connected"
     } else {
         "watching $agentCount agent${if (agentCount == 1) "" else "s"}"
@@ -263,6 +279,18 @@ private fun StatusPrompt(
             )
             else -> BlinkingHeart(size = 11.dp)
         }
+    }
+}
+
+@Composable
+private fun DemoBanner(loc: L10n, onExitDemo: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("▶ DEMO", color = Term.Yellow, style = terminalTextStyle(12.sp, FontWeight.Bold))
+        Text(loc.demoBanner, color = Term.Dim, style = terminalTextStyle(11.sp), modifier = Modifier.weight(1f))
+        TerminalTextButton("[EXIT]", color = Term.Yellow, onClick = onExitDemo)
     }
 }
 
@@ -293,6 +321,7 @@ private fun AgentCardItem(
             serviceHealth = serviceHealth,
             hideUnusedWindows = settings.hideUnusedWindows,
             gaugeCritterEnabled = settings.gaugeCritter,
+            workHoursSchedule = WorkHoursSchedule.active(settings.workHours),
             loc = loc,
             modifier = Modifier.combinedClickable(
                 interactionSource = interactionSource,

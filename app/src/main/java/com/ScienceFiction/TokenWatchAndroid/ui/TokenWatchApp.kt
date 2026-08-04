@@ -78,6 +78,7 @@ internal fun TokenWatchApp(
     val serviceStatus by store.serviceStatus.collectAsStateWithLifecycle()
     val settings by store.settings.collectAsStateWithLifecycle()
     val autoIntervalSeconds by store.autoIntervalSeconds.collectAsStateWithLifecycle()
+    val isDemo by store.isDemo.collectAsStateWithLifecycle()
     val loc = remember(settings.language) { L10n(settings.language.resolved()) }
 
     var route by rememberSaveable { mutableStateOf(ROUTE_MAIN) }
@@ -174,8 +175,9 @@ internal fun TokenWatchApp(
                 serviceStatus = serviceStatus,
                 settings = settings,
                 loc = loc,
-                appVersion = BuildConfig.VERSION_NAME,
+                appVersion = "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
                 isRefreshingAll = isRefreshingAll,
+                isDemo = isDemo,
                 onSettings = { route = ROUTE_SETTINGS },
                 onAddAgent = { route = ROUTE_ADD },
                 onOpenAgent = { agent -> route = "$ROUTE_DETAIL_PREFIX${agent.id}" },
@@ -195,6 +197,8 @@ internal fun TokenWatchApp(
                         }
                     }
                 },
+                onEnterDemo = { scope.launch { store.enterDemo(); store.startAutoRefresh(settings.refreshInterval) } },
+                onExitDemo = { scope.launch { store.exitDemo(); store.startAutoRefresh(settings.refreshInterval) } },
             )
         }
 
@@ -240,6 +244,14 @@ internal fun TokenWatchApp(
                         }
                     },
                     onLogoutAgent = { agent -> scope.launch { store.remove(agent) } },
+                    isDemo = isDemo,
+                    onToggleDemo = {
+                        scope.launch {
+                            if (isDemo) store.exitDemo() else store.enterDemo()
+                            store.startAutoRefresh(settings.refreshInterval)
+                            route = ROUTE_MAIN
+                        }
+                    },
                     onDone = { route = ROUTE_MAIN },
                     notificationDenied = run {
                         notificationPermissionRevision
@@ -265,6 +277,8 @@ internal fun TokenWatchApp(
                     serviceHealth = serviceStatus[selectedAgent.provider] ?: ServiceHealth.UNKNOWN,
                     hideUnusedWindows = settings.hideUnusedWindows,
                     gaugeCritterEnabled = settings.gaugeCritter,
+                    workHours = settings.workHours,
+                    isDemo = isDemo,
                     onOpenUrl = openUrl,
                     onBack = { route = ROUTE_MAIN },
                     onLogout = {
@@ -295,6 +309,8 @@ private fun AgentDetailRoute(
     serviceHealth: ServiceHealth,
     hideUnusedWindows: Boolean,
     gaugeCritterEnabled: Boolean,
+    workHours: String,
+    isDemo: Boolean,
     onOpenUrl: (String) -> Unit,
     onBack: () -> Unit,
     onLogout: () -> Unit,
@@ -320,6 +336,8 @@ private fun AgentDetailRoute(
         serviceHealth = serviceHealth,
         hideUnusedWindows = hideUnusedWindows,
         gaugeCritterEnabled = gaugeCritterEnabled,
+        workHoursSchedule = com.ScienceFiction.TokenWatchAndroid.domain.WorkHoursSchedule.active(workHours),
+        isDemo = isDemo,
         loc = loc,
         showLogoutConfirmation = showLogoutConfirmation,
         onBack = onBack,
@@ -365,6 +383,7 @@ internal fun mergeSettingsChange(
         ?: current.hideUnusedWindows,
     gaugeCritter = proposed.gaugeCritter.takeIf { it != base.gaugeCritter }
         ?: current.gaugeCritter,
+    workHours = proposed.workHours.takeIf { it != base.workHours } ?: current.workHours,
     heartbeatCursor = proposed.heartbeatCursor.takeIf { it != base.heartbeatCursor }
         ?: current.heartbeatCursor,
     heartbeatTracking = proposed.heartbeatTracking.takeIf { it != base.heartbeatTracking }

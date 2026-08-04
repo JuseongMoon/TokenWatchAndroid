@@ -82,6 +82,25 @@ class ResetDetectorTest {
         assertTrue(result.baseline.isEmpty())
     }
 
+    @Test fun slidingUnusedResetTimeDoesNotFireRepeatedly() {
+        val week = 604_800.0
+        val reset = now.plusSeconds(604_800)
+        listOf(1L, 60L, 300L, 604_800L).forEach { slide ->
+            assertEquals(null, ResetDetector.resetBoundary(
+                WindowObservation(reset, 0.0, week),
+                WindowObservation(reset.plusSeconds(slide), 0.0, week), now,
+            ))
+        }
+    }
+
+    @Test fun realEarlyResetStillFires() {
+        val reset = now.plusSeconds(3600)
+        assertEquals(reset, ResetDetector.resetBoundary(
+            WindowObservation(reset, 12.0, 604_800.0),
+            WindowObservation(reset.plusSeconds(604_800), 0.0, 604_800.0), now,
+        ))
+    }
+
     private fun observation(reset: Instant?, used: Double) =
         WindowObservation(resetsAt = reset, usedPercent = used)
 }

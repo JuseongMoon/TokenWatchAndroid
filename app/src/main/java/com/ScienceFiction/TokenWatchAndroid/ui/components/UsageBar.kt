@@ -22,6 +22,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ScienceFiction.TokenWatchAndroid.domain.UsageStyle
 import com.ScienceFiction.TokenWatchAndroid.domain.UsageWindow
+import com.ScienceFiction.TokenWatchAndroid.domain.WindowKind
+import com.ScienceFiction.TokenWatchAndroid.domain.WorkHours
+import com.ScienceFiction.TokenWatchAndroid.domain.WorkHoursSchedule
 import com.ScienceFiction.TokenWatchAndroid.localization.L10n
 import com.ScienceFiction.TokenWatchAndroid.localization.resetSummary
 import com.ScienceFiction.TokenWatchAndroid.ui.theme.Term
@@ -40,6 +43,7 @@ fun UsageBar(
     modifier: Modifier = Modifier,
     now: Instant? = null,
     gaugeCritterEnabled: Boolean = true,
+    workHoursSchedule: WorkHoursSchedule? = null,
 ) {
     val currentNow = rememberMinuteInstant(now)
     Column(
@@ -68,6 +72,7 @@ fun UsageBar(
                 loc = loc,
                 now = currentNow,
                 gaugeCritterEnabled = gaugeCritterEnabled,
+                workHoursSchedule = workHoursSchedule,
             )
         }
 
@@ -108,8 +113,10 @@ private fun GaugeValue(
     loc: L10n,
     now: Instant,
     gaugeCritterEnabled: Boolean,
+    workHoursSchedule: WorkHoursSchedule?,
 ) {
     val statusColor = Term.statusColor(window.remainingPercent)
+    val weeklySchedule = workHoursSchedule.takeIf { window.kind == WindowKind.WEEKLY }
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
@@ -118,7 +125,8 @@ private fun GaugeValue(
         TerminalGauge(
             usedFraction = window.usedPercent / 100.0,
             fillColor = statusColor,
-            elapsedFraction = window.elapsedFraction(at = now),
+            elapsedFraction = window.markerFraction(at = now, schedule = weeklySchedule),
+            markerPaused = weeklySchedule?.let { !WorkHours.isWorkingTime(now, it) } ?: false,
             modifier = Modifier.weight(1f),
             height = 14.dp,
             bracketSize = 13.sp,

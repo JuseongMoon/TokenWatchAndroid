@@ -3,6 +3,7 @@ package com.ScienceFiction.TokenWatchAndroid.network.core
 import java.time.Instant
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class RetryAfterTest {
@@ -27,5 +28,15 @@ class RetryAfterTest {
         assertNull(parseRetryAfter(null, now))
         assertNull(parseRetryAfter("", now))
         assertNull(parseRetryAfter("later", now))
+        assertNull(parseRetryAfter("inf", now))
+        assertNull(parseRetryAfter("nan", now))
+        assertNull(parseRetryAfter("-1", now))
+    }
+
+    @Test fun clampsHugeValuesAndFarDatesToOneDay() {
+        listOf("99999999999999999999", "Fri, 01 Jan 2100 00:00:00 GMT").forEach { raw ->
+            val parsed = parseRetryAfter(raw, now)
+            assertTrue(parsed == null || !parsed.isAfter(now.plusSeconds(86_400)))
+        }
     }
 }

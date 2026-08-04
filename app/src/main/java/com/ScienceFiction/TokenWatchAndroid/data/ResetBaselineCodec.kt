@@ -18,6 +18,8 @@ object ResetBaselineCodec {
             writer.name("resetsAt")
             observation.resetsAt?.let { writer.value(it.epochSecond) } ?: writer.nullValue()
             writer.name("usedPercent").value(observation.usedPercent)
+            writer.name("windowSeconds")
+            observation.windowSeconds?.takeIf(Double::isFinite)?.let(writer::value) ?: writer.nullValue()
             writer.endObject()
         }
         writer.endObject()
@@ -51,6 +53,7 @@ object ResetBaselineCodec {
         }
         var resetsAt: Instant? = null
         var usedPercent: Double? = null
+        var windowSeconds: Double? = null
         reader.beginObject()
         while (reader.hasNext()) {
             when (reader.nextName()) {
@@ -63,11 +66,20 @@ object ResetBaselineCodec {
                     JsonReader.Token.NUMBER -> runCatching { reader.nextDouble() }.getOrNull()
                     else -> reader.skipValue().let { null }
                 }
+                "windowSeconds" -> windowSeconds = when (reader.peek()) {
+                    JsonReader.Token.NULL -> reader.nextNull<Unit>().let { null }
+                    JsonReader.Token.NUMBER -> runCatching { reader.nextDouble() }.getOrNull()
+                    else -> reader.skipValue().let { null }
+                }
                 else -> reader.skipValue()
             }
         }
         reader.endObject()
         val used = usedPercent?.takeIf(Double::isFinite) ?: return null
-        return WindowObservation(resetsAt = resetsAt, usedPercent = used)
+        return WindowObservation(
+            resetsAt = resetsAt,
+            usedPercent = used,
+            windowSeconds = windowSeconds?.takeIf { it.isFinite() && it > 0.0 },
+        )
     }
 }

@@ -10,6 +10,7 @@ import com.ScienceFiction.TokenWatchAndroid.domain.Agent
 import com.ScienceFiction.TokenWatchAndroid.domain.AgentProvider
 import com.ScienceFiction.TokenWatchAndroid.domain.AgentSnapshot
 import com.ScienceFiction.TokenWatchAndroid.domain.CreditGaugePolicy
+import com.ScienceFiction.TokenWatchAndroid.domain.DemoData
 import com.ScienceFiction.TokenWatchAndroid.domain.ServiceHealth
 import com.ScienceFiction.TokenWatchAndroid.domain.ServiceStatusSource
 import com.ScienceFiction.TokenWatchAndroid.domain.UsageWindow
@@ -185,6 +186,12 @@ class AgentStore(
     private val _serviceStatus = MutableStateFlow<Map<AgentProvider, ServiceHealth>>(emptyMap())
     val serviceStatus: StateFlow<Map<AgentProvider, ServiceHealth>> = _serviceStatus.asStateFlow()
 
+    private val _isDemo = MutableStateFlow(false)
+    val isDemo: StateFlow<Boolean> = _isDemo.asStateFlow()
+    private var backupAgents = emptyList<Agent>()
+    private var backupSnapshots = emptyMap<UUID, AgentSnapshot>()
+    private var backupServiceStatus = emptyMap<AgentProvider, ServiceHealth>()
+
     private val _settings = MutableStateFlow(AppSettings())
     val settings: StateFlow<AppSettings> = _settings.asStateFlow()
 
@@ -231,7 +238,7 @@ class AgentStore(
         scope.launch(start = CoroutineStart.UNDISPATCHED) {
             try {
                 dependencies.agentUpdates.collect { value ->
-                    agentMutex.withLock { _agents.value = value }
+                    agentMutex.withLock { if (!_isDemo.value) _agents.value = value }
                     agentsLoaded.complete(Unit)
                 }
             } finally {
@@ -260,6 +267,7 @@ class AgentStore(
 
     /** Saves credentials, appends the account, persists it, and performs its first refresh. */
     suspend fun addAgent(provider: AgentProvider, tokens: OAuthTokens): Agent {
+        check(!_isDemo.value) { "Accounts cannot be added in demo mode" }
         awaitAgentsReady()
         val agent = Agent(
             provider = provider,
@@ -291,6 +299,11 @@ class AgentStore(
 
     suspend fun remove(agent: Agent) {
         awaitAgentsReady()
+        if (_isDemo.value) {
+            agentMutex.withLock { _agents.value = _agents.value.filterNot { it.id == agent.id } }
+            _snapshots.update { it - agent.id }
+            return
+        }
         withContext(NonCancellable) {
             agentMutex.withLock {
                 val previous = _agents.value
@@ -373,7 +386,9 @@ class AgentStore(
         rescheduleResetNotifications()
     }
 
-    suspend fun accountInfo(agent: Agent): AccountInfo? = dependencies.loadTokens(agent.id)?.let {
+    suspend fun accountInfo(agent: Agent): AccountInfo? = if (_isDemo.value) {
+        DemoData.accountInfo(agent, now())
+    } else dependencies.loadTokens(agent.id)?.let {
         AccountInfo(
             email = it.accountEmail,
             plan = it.plan,
@@ -387,6 +402,10 @@ class AgentStore(
     /** Refreshes a stable copy of the current list concurrently. */
     suspend fun refreshAll() {
         awaitAgentsReady()
+        if (_isDemo.value) {
+            _snapshots.value = DemoData.advanced(_snapshots.value, now())
+            return
+        }
         val current = _agents.value
         coroutineScope {
             current.map { agent -> async { refresh(agent) } }.awaitAll()
@@ -396,6 +415,10 @@ class AgentStore(
 
     suspend fun refresh(agent: Agent, manual: Boolean = false) {
         awaitAgentsReady()
+        if (_isDemo.value) {
+            _snapshots.value = DemoData.advanced(_snapshots.value, now())
+            return
+        }
         if (!beginRefresh(agent.id, manual = manual)) return
         try {
             val fetched = if (manual) {
@@ -414,6 +437,9 @@ class AgentStore(
             detectAndNotifyResets(agent.id)
             rescheduleResetNotifications()
             refreshStatus(agent.provider)
+        } catch (cancelled: CancellationException) {
+            loadingMutex.withLock { lastFetchAt.remove(agent.id) }
+            throw cancelled
         } finally {
             withContext(NonCancellable) { finishRefresh(agent.id) }
         }
@@ -589,6 +615,7 @@ class AgentStore(
                 "$prefix${window.label}" to WindowObservation(
                     resetsAt = window.resetsAt,
                     usedPercent = window.usedPercent,
+                    windowSeconds = window.windowSeconds ?: window.kind.defaultSeconds,
                 )
             }
         val events = resetBaselineMutex.withLock {
@@ -649,11 +676,13 @@ class AgentStore(
 
     suspend fun performBackgroundRefresh() {
         awaitInitialLoad()
+        if (_isDemo.value) return
         refreshAll()
     }
 
     fun nextResetInstant(after: Instant = now()): Instant? = AutoRefreshPolicy.nextResetDate(
-        _snapshots.value.values.flatMap { snapshot -> snapshot.windows.map(UsageWindow::resetsAt) },
+        (if (_isDemo.value) backupSnapshots else _snapshots.value).values
+            .flatMap { snapshot -> snapshot.windows.map(UsageWindow::resetsAt) },
         after,
     )
 
@@ -698,6 +727,7 @@ class AgentStore(
         force: Boolean = false,
     ): ServiceHealth? {
         ensureOpen()
+        if (_isDemo.value) return _serviceStatus.value[provider]
         val source = provider.statusSource ?: return null
         val observedNow = now()
         var created = false
@@ -770,6 +800,35 @@ class AgentStore(
             autoRefreshJob = job
         }
         job.start()
+    }
+
+    suspend fun enterDemo() {
+        awaitInitialLoad()
+        if (_isDemo.value) return
+        stopAutoRefresh()
+        agentMutex.withLock {
+            backupAgents = _agents.value
+            backupSnapshots = _snapshots.value
+            backupServiceStatus = _serviceStatus.value
+            _isDemo.value = true
+            _agents.value = DemoData.agents()
+            _snapshots.value = DemoData.snapshots(now())
+            _serviceStatus.value = DemoData.serviceStatus()
+        }
+    }
+
+    suspend fun exitDemo() {
+        if (!_isDemo.value) return
+        stopAutoRefresh()
+        agentMutex.withLock {
+            _isDemo.value = false
+            _agents.value = backupAgents
+            _snapshots.value = backupSnapshots
+            _serviceStatus.value = backupServiceStatus
+            backupAgents = emptyList()
+            backupSnapshots = emptyMap()
+            backupServiceStatus = emptyMap()
+        }
     }
 
     fun stopAutoRefresh() {

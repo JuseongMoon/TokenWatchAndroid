@@ -10,6 +10,8 @@ import com.ScienceFiction.TokenWatchAndroid.notifications.WindowObservation
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.first
+import java.util.UUID
 
 class AgentRepository(
     private val dataStore: DataStore<Preferences>,
@@ -58,6 +60,25 @@ class AgentRepository(
         dataStore.edit { preferences ->
             preferences[resetBaselineKey] = ResetBaselineCodec.encode(observations)
         }
+    }
+
+    /** Removes persisted records belonging to providers no longer in the supported catalog. */
+    suspend fun migrateUnsupportedProviders(onDropped: suspend (UUID) -> Unit): List<UUID> {
+        val preferences = dataStore.safeData.first()
+        val decoded = AgentJsonCodec.decodeDetailed(preferences.safeGet(agentsKey))
+        if (decoded.droppedIds.isEmpty()) return emptyList()
+        val prefixes = decoded.droppedIds.map { "$it|" }
+        dataStore.edit { mutable ->
+            mutable[agentsKey] = AgentJsonCodec.encode(decoded.agents)
+            val peaks = CreditPeaksCodec.decode(mutable.safeGet(creditPeaksKey))
+                .filterKeys { key -> prefixes.none(key::startsWith) }
+            mutable[creditPeaksKey] = CreditPeaksCodec.encode(peaks)
+            val baseline = ResetBaselineCodec.decode(mutable.safeGet(resetBaselineKey))
+                .filterKeys { key -> prefixes.none(key::startsWith) }
+            mutable[resetBaselineKey] = ResetBaselineCodec.encode(baseline)
+        }
+        decoded.droppedIds.forEach { onDropped(it) }
+        return decoded.droppedIds
     }
 
     private companion object {

@@ -25,6 +25,7 @@ import com.ScienceFiction.TokenWatchAndroid.domain.Agent
 import com.ScienceFiction.TokenWatchAndroid.domain.AgentSnapshot
 import com.ScienceFiction.TokenWatchAndroid.domain.ServiceHealth
 import com.ScienceFiction.TokenWatchAndroid.domain.UsageWindow
+import com.ScienceFiction.TokenWatchAndroid.domain.WorkHoursSchedule
 import com.ScienceFiction.TokenWatchAndroid.localization.L10n
 import com.ScienceFiction.TokenWatchAndroid.ui.components.TerminalBox
 import com.ScienceFiction.TokenWatchAndroid.ui.components.TerminalBlink
@@ -42,6 +43,7 @@ fun AgentCard(
     hideUnusedWindows: Boolean,
     loc: L10n,
     gaugeCritterEnabled: Boolean = true,
+    workHoursSchedule: WorkHoursSchedule? = null,
     modifier: Modifier = Modifier,
 ) {
     TerminalBox(
@@ -58,6 +60,7 @@ fun AgentCard(
                 hideUnusedWindows = hideUnusedWindows,
                 loc = loc,
                 gaugeCritterEnabled = gaugeCritterEnabled,
+                workHoursSchedule = workHoursSchedule,
             )
         }
     }
@@ -160,6 +163,7 @@ private fun AgentUsageContent(
     hideUnusedWindows: Boolean,
     loc: L10n,
     gaugeCritterEnabled: Boolean,
+    workHoursSchedule: WorkHoursSchedule?,
 ) {
     when {
         snapshot != null && snapshot.windows.isNotEmpty() -> {
@@ -176,6 +180,7 @@ private fun AgentUsageContent(
                         loc = loc,
                         now = now,
                         gaugeCritterEnabled = gaugeCritterEnabled,
+                        workHoursSchedule = workHoursSchedule,
                     )
                 }
             }

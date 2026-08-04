@@ -35,6 +35,9 @@ import com.ScienceFiction.TokenWatchAndroid.domain.AgentSnapshot
 import com.ScienceFiction.TokenWatchAndroid.domain.ServiceHealth
 import com.ScienceFiction.TokenWatchAndroid.domain.UsageStyle
 import com.ScienceFiction.TokenWatchAndroid.domain.UsageWindow
+import com.ScienceFiction.TokenWatchAndroid.domain.WindowKind
+import com.ScienceFiction.TokenWatchAndroid.domain.WorkHours
+import com.ScienceFiction.TokenWatchAndroid.domain.WorkHoursSchedule
 import com.ScienceFiction.TokenWatchAndroid.localization.L10n
 import com.ScienceFiction.TokenWatchAndroid.localization.resetExactText
 import com.ScienceFiction.TokenWatchAndroid.localization.resetRemainingText
@@ -72,6 +75,8 @@ fun DetailScreen(
     serviceHealth: ServiceHealth,
     hideUnusedWindows: Boolean,
     gaugeCritterEnabled: Boolean,
+    workHoursSchedule: WorkHoursSchedule? = null,
+    isDemo: Boolean = false,
     loc: L10n,
     showLogoutConfirmation: Boolean,
     onBack: () -> Unit,
@@ -131,6 +136,7 @@ fun DetailScreen(
                     isLoading = isLoading,
                     hideUnusedWindows = hideUnusedWindows,
                     gaugeCritterEnabled = gaugeCritterEnabled,
+                    workHoursSchedule = workHoursSchedule,
                     loc = loc,
                     nowOverride = now,
                     onResetCreditPeak = onResetCreditPeak,
@@ -143,7 +149,7 @@ fun DetailScreen(
                     loc = loc,
                     onOpenStatusPage = onOpenStatusPage,
                 )
-                TerminalButton(
+                if (!isDemo) TerminalButton(
                     title = "[ LOGOUT ]",
                     color = Term.Red,
                     onClick = onLogoutRequest,
@@ -213,6 +219,7 @@ private fun DetailUsageCard(
     isLoading: Boolean,
     hideUnusedWindows: Boolean,
     gaugeCritterEnabled: Boolean,
+    workHoursSchedule: WorkHoursSchedule?,
     loc: L10n,
     nowOverride: Instant?,
     onResetCreditPeak: (String) -> Unit,
@@ -246,6 +253,7 @@ private fun DetailUsageCard(
                                 window = window,
                                 loc = loc,
                                 gaugeCritterEnabled = gaugeCritterEnabled,
+                                workHoursSchedule = workHoursSchedule,
                                 now = now,
                                 onResetCreditPeak = onResetCreditPeak,
                             )
@@ -300,6 +308,7 @@ private fun DetailUsageRow(
     window: UsageWindow,
     loc: L10n,
     gaugeCritterEnabled: Boolean,
+    workHoursSchedule: WorkHoursSchedule?,
     now: Instant,
     onResetCreditPeak: (String) -> Unit,
 ) {
@@ -320,6 +329,7 @@ private fun DetailUsageRow(
             loc = loc,
             now = now,
             gaugeCritterEnabled = gaugeCritterEnabled,
+            workHoursSchedule = workHoursSchedule,
         )
     }
 }
@@ -430,8 +440,10 @@ private fun GaugeDetailRow(
     loc: L10n,
     now: Instant,
     gaugeCritterEnabled: Boolean,
+    workHoursSchedule: WorkHoursSchedule?,
 ) {
     val statusColor = Term.statusColor(window.remainingPercent)
+    val weeklySchedule = workHoursSchedule.takeIf { window.kind == WindowKind.WEEKLY }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(modifier = Modifier.fillMaxWidth()) {
             Text(
@@ -449,7 +461,8 @@ private fun GaugeDetailRow(
         TerminalGauge(
             usedFraction = window.usedPercent / 100.0,
             fillColor = statusColor,
-            elapsedFraction = window.elapsedFraction(now),
+            elapsedFraction = window.markerFraction(now, weeklySchedule),
+            markerPaused = weeklySchedule?.let { !WorkHours.isWorkingTime(now, it) } ?: false,
             height = 20.dp,
             bracketSize = 15.sp,
             critterVariant = GaugeCritterVariant.from(window.kind),

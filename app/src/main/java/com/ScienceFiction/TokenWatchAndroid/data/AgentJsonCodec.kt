@@ -9,6 +9,7 @@ import okio.Buffer
 
 /** Ordered, defensive JSON codec for the non-secret portion of added agents. */
 object AgentJsonCodec {
+    data class DecodeResult(val agents: List<Agent>, val droppedIds: List<UUID>)
     fun encode(agents: List<Agent>): String {
         val buffer = Buffer()
         val writer = JsonWriter.of(buffer)
@@ -26,28 +27,35 @@ object AgentJsonCodec {
         return buffer.readUtf8()
     }
 
-    fun decode(json: String?): List<Agent> {
-        if (json.isNullOrBlank()) return emptyList()
+    fun decode(json: String?): List<Agent> = decodeDetailed(json).agents
+
+    fun decodeDetailed(json: String?): DecodeResult {
+        if (json.isNullOrBlank()) return DecodeResult(emptyList(), emptyList())
 
         val reader = JsonReader.of(Buffer().writeUtf8(json))
         val agents = mutableListOf<Agent>()
+        val dropped = mutableListOf<UUID>()
         try {
-            if (reader.peek() != JsonReader.Token.BEGIN_ARRAY) return emptyList()
+            if (reader.peek() != JsonReader.Token.BEGIN_ARRAY) return DecodeResult(emptyList(), emptyList())
             reader.beginArray()
             while (reader.hasNext()) {
-                readAgent(reader)?.let(agents::add)
+                val decoded = readAgent(reader)
+                decoded.agent?.let(agents::add)
+                decoded.droppedId?.let(dropped::add)
             }
             reader.endArray()
         } catch (_: Exception) {
             // Keep valid entries decoded before a malformed tail; never crash startup.
         }
-        return agents
+        return DecodeResult(agents, dropped)
     }
 
-    private fun readAgent(reader: JsonReader): Agent? {
+    private data class DecodedAgent(val agent: Agent? = null, val droppedId: UUID? = null)
+
+    private fun readAgent(reader: JsonReader): DecodedAgent {
         if (reader.peek() != JsonReader.Token.BEGIN_OBJECT) {
             reader.skipValue()
-            return null
+            return DecodedAgent()
         }
 
         var id: String? = null
@@ -64,14 +72,16 @@ object AgentJsonCodec {
         }
         reader.endObject()
 
-        val storedId = id ?: return null
+        val storedId = id ?: return DecodedAgent()
         val uuid = try {
             UUID.fromString(storedId)
         } catch (_: IllegalArgumentException) {
             null
-        } ?: return null
-        val provider = AgentProvider.fromWireId(providerId ?: return null) ?: return null
-        return Agent(provider = provider, id = uuid, accountLabel = accountLabel)
+        } ?: return DecodedAgent()
+        val rawProvider = providerId ?: return DecodedAgent()
+        val provider = AgentProvider.fromWireId(rawProvider)
+            ?: return DecodedAgent(droppedId = uuid)
+        return DecodedAgent(agent = Agent(provider = provider, id = uuid, accountLabel = accountLabel))
     }
 
     private fun JsonReader.readNullableString(): String? = when (peek()) {

@@ -35,6 +35,7 @@ import com.ScienceFiction.TokenWatchAndroid.data.AppSettings
 import com.ScienceFiction.TokenWatchAndroid.domain.Agent
 import com.ScienceFiction.TokenWatchAndroid.domain.AgentSnapshot
 import com.ScienceFiction.TokenWatchAndroid.domain.UsageWindow
+import com.ScienceFiction.TokenWatchAndroid.domain.WorkHoursSchedule
 import com.ScienceFiction.TokenWatchAndroid.localization.AppLanguage
 import com.ScienceFiction.TokenWatchAndroid.localization.L10n
 import com.ScienceFiction.TokenWatchAndroid.ui.components.AnimatedPixelSpriteView
@@ -42,6 +43,7 @@ import com.ScienceFiction.TokenWatchAndroid.ui.components.KvRow
 import com.ScienceFiction.TokenWatchAndroid.ui.components.PixelHeart
 import com.ScienceFiction.TokenWatchAndroid.ui.components.PixelSprite
 import com.ScienceFiction.TokenWatchAndroid.ui.components.TerminalBox
+import com.ScienceFiction.TokenWatchAndroid.ui.components.TerminalButton
 import com.ScienceFiction.TokenWatchAndroid.ui.components.TerminalConfirmDialog
 import com.ScienceFiction.TokenWatchAndroid.ui.theme.Term
 import java.util.UUID
@@ -73,12 +75,15 @@ fun SettingsScreen(
     loc: L10n,
     onSettingsChange: (AppSettings) -> Unit,
     onLogoutAgent: (Agent) -> Unit,
+    isDemo: Boolean = false,
+    onToggleDemo: () -> Unit = {},
     onDone: () -> Unit,
     modifier: Modifier = Modifier,
     notificationDenied: Boolean = false,
     onOpenNotificationSettings: () -> Unit = {},
 ) {
     var pendingLogoutId by rememberSaveable { mutableStateOf<String?>(null) }
+    var showingWorkHours by rememberSaveable { mutableStateOf(false) }
     val pendingLogout = pendingLogoutId?.let { id ->
         agents.firstOrNull { it.id.toString() == id }
     }
@@ -107,7 +112,9 @@ fun SettingsScreen(
             AccountsSection(
                 agents = agents,
                 onLogoutAgent = { pendingLogoutId = it.id.toString() },
+                showLogout = !isDemo,
             )
+            DemoSection(isDemo, loc, onToggleDemo)
             LanguageSection(
                 selected = settings.language,
                 loc = loc,
@@ -124,6 +131,7 @@ fun SettingsScreen(
                 loc = loc,
                 onSettingsChange = onSettingsChange,
             )
+            WorkHoursSection(settings, loc) { showingWorkHours = true }
             HeartbeatSection(
                 settings = settings,
                 graphs = trackableGraphOptions(agents, snapshots),
@@ -161,6 +169,33 @@ fun SettingsScreen(
             },
             onDismiss = { pendingLogoutId = null },
         )
+    }
+    if (showingWorkHours) WorkHoursEditor(
+        initial = WorkHoursSchedule.decode(settings.workHours), loc = loc,
+        onSave = { onSettingsChange(settings.copy(workHours = it.encoded)); showingWorkHours = false },
+        onDismiss = { showingWorkHours = false },
+    )
+}
+
+@Composable
+private fun DemoSection(isDemo: Boolean, loc: L10n, onToggle: () -> Unit) {
+    TerminalBox(title = "DEMO", titleColor = Term.Yellow) {
+        TerminalButton(if (isDemo) "[ ■ EXIT DEMO ]" else "[ ▶ RUN DEMO ]",
+            onClick = onToggle, color = Term.Yellow, dashedBorder = !isDemo)
+        HelpText(if (isDemo) loc.demoBanner else loc.demoHint)
+    }
+}
+
+@Composable
+private fun WorkHoursSection(settings: AppSettings, loc: L10n, onOpen: () -> Unit) {
+    val schedule = WorkHoursSchedule.decode(settings.workHours)
+    TerminalBox(title = "WORK HOURS") {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            TerminalTextButton(loc.workHoursButton, onClick = onOpen, color = Term.Green)
+            Text(if (schedule.isEmpty) loc.workHoursNotSet else loc.workHoursSummary(schedule.onHours),
+                color = Term.Dim, style = terminalTextStyle(11.sp))
+        }
+        HelpText(loc.settingsWorkHoursHelp)
     }
 }
 
@@ -237,7 +272,7 @@ private fun SettingToggle(checked: Boolean, title: String, onClick: () -> Unit) 
 }
 
 @Composable
-private fun AccountsSection(agents: List<Agent>, onLogoutAgent: (Agent) -> Unit) {
+private fun AccountsSection(agents: List<Agent>, onLogoutAgent: (Agent) -> Unit, showLogout: Boolean) {
     TerminalBox(title = "ACCOUNTS") {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             if (agents.isEmpty()) {
@@ -264,7 +299,7 @@ private fun AccountsSection(agents: List<Agent>, onLogoutAgent: (Agent) -> Unit)
                                 Text(text = label, color = Term.Dim, style = terminalTextStyle(10.sp))
                             }
                         }
-                        TerminalTextButton(
+                        if (showLogout) TerminalTextButton(
                             text = "[logout]",
                             color = Term.Red,
                             size = 12.sp,

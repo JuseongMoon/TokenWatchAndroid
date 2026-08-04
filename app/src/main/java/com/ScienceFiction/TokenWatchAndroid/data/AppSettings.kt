@@ -7,6 +7,7 @@ data class AppSettings(
     val keepScreenOn: Boolean = false,
     val hideUnusedWindows: Boolean = false,
     val gaugeCritter: Boolean = true,
+    val workHours: String = "",
     val heartbeatCursor: Boolean = false,
     val heartbeatTracking: Boolean = false,
     val heartbeatTargets: Set<String> = emptySet(),
@@ -28,6 +29,7 @@ object AppSettingsCodec {
         keepScreenOn: Boolean? = null,
         hideUnusedWindows: Boolean? = null,
         gaugeCritter: Boolean? = null,
+        workHours: String? = null,
         heartbeatCursor: Boolean? = null,
         heartbeatTracking: Boolean? = null,
         heartbeatTargets: Set<String>? = null,
@@ -40,6 +42,7 @@ object AppSettingsCodec {
             keepScreenOn = keepScreenOn ?: false,
             hideUnusedWindows = hideUnusedWindows ?: false,
             gaugeCritter = gaugeCritter ?: true,
+            workHours = WorkHoursSetting.normalize(workHours.orEmpty()),
             heartbeatCursor = heartbeatCursor ?: false,
             heartbeatTracking = heartbeatTracking ?: false,
             heartbeatTargets = heartbeatTargets.orEmpty(),
@@ -53,5 +56,12 @@ object AppSettingsCodec {
         refreshInterval = settings.refreshInterval.takeIf(supportedRefreshIntervals::contains)
             ?: AppSettings.DEFAULT_REFRESH_INTERVAL,
         heartbeatTargets = settings.heartbeatTargets.filterTo(linkedSetOf()) { it.isNotBlank() },
+        workHours = WorkHoursSetting.normalize(settings.workHours),
     )
+}
+
+private object WorkHoursSetting {
+    fun normalize(raw: String): String = raw.takeIf {
+        it.length == 168 && it.all { char -> char == '0' || char == '1' }
+    }.orEmpty()
 }

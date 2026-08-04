@@ -10,11 +10,11 @@ class CollectionLogicTest {
         val agents = agents()
 
         assertEquals(
-            listOf(AgentProvider.CODEX, AgentProvider.CLAUDE, AgentProvider.CURSOR),
+            listOf(AgentProvider.CODEX, AgentProvider.CLAUDE, AgentProvider.COPILOT),
             agents.reordered(agents[1].id, -1).map(Agent::provider),
         )
         assertEquals(
-            listOf(AgentProvider.CLAUDE, AgentProvider.CURSOR, AgentProvider.CODEX),
+            listOf(AgentProvider.CLAUDE, AgentProvider.COPILOT, AgentProvider.CODEX),
             agents.reordered(agents[1].id, 1).map(Agent::provider),
         )
     }
@@ -40,6 +40,6 @@ class CollectionLogicTest {
     private fun agents() = listOf(
         Agent(AgentProvider.CLAUDE, UUID.fromString("00000000-0000-0000-0000-000000000001")),
         Agent(AgentProvider.CODEX, UUID.fromString("00000000-0000-0000-0000-000000000002")),
-        Agent(AgentProvider.CURSOR, UUID.fromString("00000000-0000-0000-0000-000000000003")),
+        Agent(AgentProvider.COPILOT, UUID.fromString("00000000-0000-0000-0000-000000000003")),
     )
 }

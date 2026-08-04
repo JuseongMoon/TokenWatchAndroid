@@ -44,6 +44,25 @@ data class L10n(val lang: Lang) {
     val menuDelete get() = choose("삭제", "Delete")
     val a11yMoveUp get() = choose("위로 이동", "Move up")
     val a11yMoveDown get() = choose("아래로 이동", "Move down")
+    val demoHint get() = choose("계정 없이 표본 데이터로 앱을 둘러봅니다.", "Explore the app with sample data — no account needed.")
+    val demoBanner get() = choose("표본 데이터입니다. 실제 사용량이 아닙니다.", "Sample data — not your real usage.")
+    val a11yRunDemo get() = choose("데모 실행", "Run demo")
+    val a11yExitDemo get() = choose("데모 종료", "Exit demo")
+
+    val settingsWorkHoursHelp get() = choose(
+        "주간 그래프의 현재 시각 세로선이 설정한 업무시간에만 흐릅니다. 비워 두면 한 주 내내 균일하게 흐릅니다.",
+        "The current-time line on weekly graphs advances only during your work hours. Leave empty to flow evenly across the whole week.",
+    )
+    val workHoursButton get() = choose("[ 업무시간 설정 ]", "[ set work hours ]")
+    val workHoursNotSet get() = choose("설정 안 됨", "not set")
+    fun workHoursSummary(hours: Int) = choose("주 ${hours}시간", "$hours h/week")
+    val workHoursEditorHelp get() = choose("블록을 탭해 해당 시간을 켜거나 끕니다.", "Tap a block to toggle that hour.")
+    val workHoursSave get() = choose("[ 저장 ]", "[ save ]")
+    val workHoursCancel get() = choose("[ 취소 ]", "[ cancel ]")
+    val workHoursClear get() = choose("[ 지우기 ]", "[ clear ]")
+    fun weekdayShort(index: Int): String = if (lang == Lang.KO) {
+        listOf("월", "화", "수", "목", "금", "토", "일").getOrElse(index) { "" }
+    } else listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun").getOrElse(index) { "" }
 
     val settingsRefreshHelp: String
         get() = choose(

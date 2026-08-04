@@ -33,13 +33,13 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ScienceFiction.TokenWatchAndroid.auth.OAuthTokens
 import com.ScienceFiction.TokenWatchAndroid.auth.ProviderAuthRegistry
-import com.ScienceFiction.TokenWatchAndroid.auth.SessionCaptureMode
 import com.ScienceFiction.TokenWatchAndroid.auth.device.CopilotDeviceFlow
 import com.ScienceFiction.TokenWatchAndroid.auth.device.DeviceCode
 import com.ScienceFiction.TokenWatchAndroid.domain.AgentProvider
@@ -117,38 +117,6 @@ internal fun AddAgentScreen(
                 loc = loc,
                 onOpenUrl = onOpenUrl,
             )
-
-            is AddAgentPhase.SessionLogin -> {
-                val startUrl = providerAuth.sessionLoginUrl(current.provider)
-                if (startUrl == null) {
-                    LaunchedEffect(current.provider) { flowState.fail(loc.errAuthMethodUnavailable) }
-                } else {
-                    val mode = providerAuth.sessionCaptureMode(current.provider)
-                    LoginWebView(
-                        startUrl = startUrl,
-                        cookieProbeUrls = if (mode == SessionCaptureMode.COOKIE) {
-                            listOf(startUrl)
-                        } else {
-                            emptyList()
-                        },
-                        sessionProbe = if (mode == SessionCaptureMode.COOKIE) {
-                            { cookies -> providerAuth.sessionProbe(current.provider, cookies) }
-                        } else {
-                            null
-                        },
-                        localStorageProbe = if (mode == SessionCaptureMode.LOCAL_STORAGE) {
-                            { values -> providerAuth.localStorageProbe(current.provider, values) }
-                        } else {
-                            null
-                        },
-                        onSession = { tokens ->
-                            flowState.acceptSession(current.provider, tokens, loc, onAddAgent)
-                        },
-                        onError = flowState::fail,
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                }
-            }
 
             AddAgentPhase.Authenticating -> AuthenticatingContent()
             is AddAgentPhase.Failed -> FailureContent(current.message, flowState::retry)
@@ -261,6 +229,7 @@ private fun ApiKeyEntry(
             value = key,
             onValueChange = onKeyChange,
             singleLine = true,
+            visualTransformation = PasswordVisualTransformation(),
             textStyle = terminalStyle(14).copy(color = Term.Foreground),
             cursorBrush = SolidColor(Term.Green),
             keyboardOptions = KeyboardOptions(
@@ -435,9 +404,7 @@ private fun providerTerminalColor(provider: AgentProvider) = when (provider.term
     com.ScienceFiction.TokenWatchAndroid.domain.TerminalColorKey.CYAN -> Term.Cyan
     com.ScienceFiction.TokenWatchAndroid.domain.TerminalColorKey.ORANGE -> Term.Orange
     com.ScienceFiction.TokenWatchAndroid.domain.TerminalColorKey.MAGENTA -> Term.Magenta
-    com.ScienceFiction.TokenWatchAndroid.domain.TerminalColorKey.BLUE -> Term.Blue
     com.ScienceFiction.TokenWatchAndroid.domain.TerminalColorKey.GREEN -> Term.Green
     com.ScienceFiction.TokenWatchAndroid.domain.TerminalColorKey.PINK -> Term.Pink
     com.ScienceFiction.TokenWatchAndroid.domain.TerminalColorKey.TEAL -> Term.Teal
-    com.ScienceFiction.TokenWatchAndroid.domain.TerminalColorKey.FOREGROUND -> Term.Foreground
 }

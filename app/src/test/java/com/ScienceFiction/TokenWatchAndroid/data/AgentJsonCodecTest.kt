@@ -8,6 +8,14 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AgentJsonCodecTest {
+    @Test
+    fun unsupportedProviderIsDroppedWithoutLosingSupportedAccounts() {
+        val result = AgentJsonCodec.decodeDetailed(
+            """[{"id":"11111111-1111-1111-1111-111111111111","provider":"claude"},{"id":"22222222-2222-2222-2222-222222222222","provider":"cursor"},{"id":"33333333-3333-3333-3333-333333333333","provider":"codex"}]""",
+        )
+        assertEquals(listOf(AgentProvider.CLAUDE, AgentProvider.CODEX), result.agents.map { it.provider })
+        assertEquals(listOf(UUID.fromString("22222222-2222-2222-2222-222222222222")), result.droppedIds)
+    }
     private val firstId = UUID.fromString("00000000-0000-0000-0000-000000000001")
     private val secondId = UUID.fromString("00000000-0000-0000-0000-000000000002")
 

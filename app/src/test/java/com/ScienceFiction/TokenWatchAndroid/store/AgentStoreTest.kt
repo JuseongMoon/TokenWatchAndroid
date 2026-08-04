@@ -43,7 +43,7 @@ class AgentStoreTest {
         val updates = MutableSharedFlow<List<Agent>>()
         val one = Agent(AgentProvider.CLAUDE, UUID.fromString("00000000-0000-0000-0000-000000000001"))
         val two = Agent(AgentProvider.CODEX, UUID.fromString("00000000-0000-0000-0000-000000000002"))
-        val three = Agent(AgentProvider.GROK, UUID.fromString("00000000-0000-0000-0000-000000000003"))
+        val three = Agent(AgentProvider.OPENROUTER, UUID.fromString("00000000-0000-0000-0000-000000000003"))
         val persisted = mutableListOf<List<Agent>>()
         val fixture = fixture(
             parentScope = this,
@@ -68,7 +68,7 @@ class AgentStoreTest {
     fun `refresh preserves last-good windows and enriches an empty account label from plan`() = runBlocking {
         val fetchedAt = Instant.parse("2026-07-11T00:00:00Z")
         val clock = AtomicReference(fetchedAt)
-        val agent = Agent(AgentProvider.GROK, accountLabel = "")
+        val agent = Agent(AgentProvider.CLAUDE, accountLabel = "")
         val responses = ArrayDeque(
             listOf(
                 snapshot(percent = 24.0, plan = "Pro", fetchedAt = fetchedAt),
@@ -106,8 +106,8 @@ class AgentStoreTest {
 
     @Test
     fun `refreshAll starts provider fetches in parallel and reports all loading IDs`() = runBlocking {
-        val one = Agent(AgentProvider.GROK)
-        val two = Agent(AgentProvider.GROK)
+        val one = Agent(AgentProvider.CLAUDE)
+        val two = Agent(AgentProvider.CLAUDE)
         val started = AtomicInteger(0)
         val bothStarted = CompletableDeferred<Unit>()
         val release = CompletableDeferred<Unit>()
@@ -135,7 +135,7 @@ class AgentStoreTest {
 
     @Test
     fun `concurrent refreshes for the same agent share one in-flight fetch`() = runBlocking {
-        val agent = Agent(AgentProvider.GROK)
+        val agent = Agent(AgentProvider.CLAUDE)
         val fetches = AtomicInteger(0)
         val entered = CompletableDeferred<Unit>()
         val release = CompletableDeferred<Unit>()
@@ -169,7 +169,7 @@ class AgentStoreTest {
     fun `failed fetch start blocks at 19 seconds and exact 20 seconds is allowed`() = runBlocking {
         val start = Instant.parse("2026-07-11T00:00:00Z")
         val clock = AtomicReference(start)
-        val agent = Agent(AgentProvider.GROK)
+        val agent = Agent(AgentProvider.CLAUDE)
         val fetches = AtomicInteger(0)
         val fixture = fixture(
             parentScope = this,
@@ -279,7 +279,7 @@ class AgentStoreTest {
 
     @Test
     fun `first refresh waits for asynchronous credit peaks before promotion`() = runBlocking {
-        val agent = Agent(AgentProvider.GROK)
+        val agent = Agent(AgentProvider.CLAUDE)
         val peakUpdates = MutableSharedFlow<Map<String, Double>>()
         val fixture = fixture(
             parentScope = this,
@@ -303,7 +303,7 @@ class AgentStoreTest {
 
     @Test
     fun `provider total creates an exact credit gauge without an estimated peak`() = runBlocking {
-        val agent = Agent(AgentProvider.GROK)
+        val agent = Agent(AgentProvider.CLAUDE)
         val persistedPeaks = mutableListOf<Map<String, Double>>()
         val fixture = fixture(
             parentScope = this,
@@ -327,7 +327,7 @@ class AgentStoreTest {
     fun `estimated credit peak persists resets without network and is pruned on remove`() = runBlocking {
         val start = Instant.parse("2026-07-11T00:00:00Z")
         val clock = AtomicReference(start)
-        val agent = Agent(AgentProvider.GROK)
+        val agent = Agent(AgentProvider.CLAUDE)
         val fetches = AtomicInteger(0)
         val persistedPeaks = mutableListOf<Map<String, Double>>()
         val fixture = fixture(
@@ -366,8 +366,8 @@ class AgentStoreTest {
 
     @Test
     fun `parallel agent promotions serialize peak persistence without lost updates`() = runBlocking {
-        val one = Agent(AgentProvider.GROK)
-        val two = Agent(AgentProvider.GROK)
+        val one = Agent(AgentProvider.CLAUDE)
+        val two = Agent(AgentProvider.CLAUDE)
         val activePersists = AtomicInteger(0)
         val maxActivePersists = AtomicInteger(0)
         val persistedPeaks = mutableListOf<Map<String, Double>>()
@@ -399,7 +399,7 @@ class AgentStoreTest {
 
     @Test
     fun `late refresh cannot recreate snapshot or peak after agent removal`() = runBlocking {
-        val agent = Agent(AgentProvider.GROK)
+        val agent = Agent(AgentProvider.CLAUDE)
         val fetchEntered = CompletableDeferred<Unit>()
         val releaseFetch = CompletableDeferred<Unit>()
         val persistedPeaks = mutableListOf<Map<String, Double>>()
@@ -431,7 +431,7 @@ class AgentStoreTest {
     fun `failed peak persistence retries unchanged value on next refresh`() = runBlocking {
         val start = Instant.parse("2026-07-11T00:00:00Z")
         val clock = AtomicReference(start)
-        val agent = Agent(AgentProvider.GROK)
+        val agent = Agent(AgentProvider.CLAUDE)
         val attempts = AtomicInteger(0)
         val persisted = mutableListOf<Map<String, Double>>()
         val fixture = fixture(
@@ -582,7 +582,7 @@ class AgentStoreTest {
     fun `adaptive auto refresh feeds usage delta into clean policy ladder`() = runBlocking {
         val start = Instant.parse("2026-07-11T00:00:00Z")
         val clock = AtomicReference(start)
-        val agent = Agent(AgentProvider.GROK)
+        val agent = Agent(AgentProvider.CLAUDE)
         val fetches = AtomicInteger(0)
         val sleeper = ControlledSleeper()
         val fixture = fixture(
@@ -613,7 +613,7 @@ class AgentStoreTest {
     fun `reentering adaptive refresh resets displayed interval and ladder index to sixty seconds`() = runBlocking {
         val start = Instant.parse("2026-07-11T00:00:00Z")
         val clock = AtomicReference(start)
-        val agent = Agent(AgentProvider.GROK)
+        val agent = Agent(AgentProvider.CLAUDE)
         val fetches = AtomicInteger(0)
         val sleeper = ControlledSleeper()
         val fixture = fixture(
@@ -659,7 +659,7 @@ class AgentStoreTest {
     fun `zero interval refreshes immediately once and reset schedules one extra refresh at reset plus slack`() = runBlocking {
         val start = Instant.parse("2026-07-11T00:00:00Z")
         val clock = AtomicReference(start)
-        val agent = Agent(AgentProvider.GROK)
+        val agent = Agent(AgentProvider.CLAUDE)
         val fetches = AtomicInteger(0)
         val sleeper = ControlledSleeper()
         val fixture = fixture(
@@ -705,7 +705,7 @@ class AgentStoreTest {
             accountId = "acct_1",
         )
 
-        val agent = fixture.store.addAgent(AgentProvider.GROK, tokens)
+        val agent = fixture.store.addAgent(AgentProvider.CLAUDE, tokens)
         assertEquals("dev@example.com", fixture.store.agents.value.single().accountLabel)
         assertEquals(
             AccountInfo("dev@example.com", "Max", listOf("read", "profile"), expiry, true, "acct_1"),

@@ -1,12 +1,18 @@
 # TokenWatch Android parity baseline
 
-The Android release mirrors the iOS repository through commit `cd7bc9f`
+The Android release mirrors the iOS repository through functional commit `bff4bc2`
 (`Update project.pbxproj`) on `dev`. Uncommitted iOS working-tree changes are
 deliberately not part of this baseline.
 
 ## Included behavior
 
-- 18 providers and the four authentication families defined at `6df2689`.
+- Seven audited providers and three authentication families retained at `31a2e2c`.
+- Work-hour-aware weekly gauge markers with a persisted 7 x 24 schedule.
+- A side-effect-isolated demo mode with sample subscription and credit data.
+- Hardened Retry-After parsing, local-date Copilot resets, one-shot browser storage, masked API keys,
+  cancellation preservation, and empty-window failure handling from `d45432d`.
+- Surprise-reset detection rejects sliding unused reset timestamps and keeps fired notification IDs
+  outside the scheduled-notification namespace.
 - Subscription gauges, reverse-fill prepaid-credit gauges, and absolute balance
   fallback text.
 - Exact credit totals where providers expose them, observed-peak estimates where
@@ -46,7 +52,7 @@ deliberately not part of this baseline.
 - Application ID/namespace: `com.ScienceFiction.TokenWatchAndroid`
 - Minimum SDK: 28
 - Target/compile SDK: 36
-- Version: 1.0 (6)
+- Version: 1.0.0 (9)
 
 ## Platform-specific parity adaptations
 

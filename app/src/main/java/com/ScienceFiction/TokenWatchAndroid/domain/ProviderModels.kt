@@ -4,7 +4,6 @@ package com.ScienceFiction.TokenWatchAndroid.domain
 enum class AuthKind {
     OAUTH_CODE,
     OAUTH_DEVICE_FLOW,
-    SESSION_CAPTURE,
     API_KEY,
 }
 
@@ -20,18 +19,12 @@ enum class TerminalColorKey {
     CYAN,
     ORANGE,
     MAGENTA,
-    BLUE,
     GREEN,
     PINK,
     TEAL,
-    FOREGROUND,
 }
 
-enum class StatusPlatform {
-    ATLASSIAN,
-    INSTATUS,
-    BETTERSTACK,
-}
+enum class StatusPlatform { ATLASSIAN }
 
 data class ServiceStatusSource(
     val platform: StatusPlatform,
@@ -43,15 +36,12 @@ private fun atlassian(host: String) = ServiceStatusSource(
     jsonUrl = "https://$host/api/v2/components.json",
 )
 
-private fun instatus(host: String) = ServiceStatusSource(
-    platform = StatusPlatform.INSTATUS,
-    jsonUrl = "https://$host/v2/components.json",
-)
-
 /**
- * Provider catalog copied from the clean iOS baseline, commit 6df2689.
+ * Providers backed by an official documented API or a verified endpoint.
  *
- * URL values remain strings so the domain layer does not depend on Android's Uri type.
+ * Session-capture providers and ambiguous developer-credit integrations were removed in the
+ * iOS 31a2e2c audit. [fromWireId] deliberately returns null for their persisted wire IDs so an
+ * older installation keeps its supported accounts instead of losing the whole decoded list.
  */
 enum class AgentProvider(
     val wireId: String,
@@ -61,218 +51,50 @@ enum class AgentProvider(
     val authKind: AuthKind,
     val usageCategory: UsageCategory,
     val apiKeyUrl: String?,
-    val statusPageUrl: String?,
+    val statusPageUrl: String,
     val statusSource: ServiceStatusSource?,
 ) {
     CLAUDE(
-        wireId = "claude",
-        displayName = "Claude",
-        terminalTag = "[C]",
-        terminalColorKey = TerminalColorKey.YELLOW,
-        authKind = AuthKind.OAUTH_CODE,
-        usageCategory = UsageCategory.SUBSCRIPTION,
-        apiKeyUrl = null,
-        statusPageUrl = "https://status.claude.com",
-        statusSource = atlassian("status.claude.com"),
+        "claude", "Claude", "[C]", TerminalColorKey.YELLOW, AuthKind.OAUTH_CODE,
+        UsageCategory.SUBSCRIPTION, null, "https://status.claude.com",
+        atlassian("status.claude.com"),
     ),
     CODEX(
-        wireId = "codex",
-        displayName = "Codex",
-        terminalTag = "[X]",
-        terminalColorKey = TerminalColorKey.CYAN,
-        authKind = AuthKind.OAUTH_CODE,
-        usageCategory = UsageCategory.SUBSCRIPTION,
-        apiKeyUrl = null,
-        statusPageUrl = "https://status.openai.com",
-        statusSource = atlassian("status.openai.com"),
-    ),
-    ELEVENLABS(
-        wireId = "elevenlabs",
-        displayName = "ElevenLabs",
-        terminalTag = "[11]",
-        terminalColorKey = TerminalColorKey.ORANGE,
-        authKind = AuthKind.API_KEY,
-        usageCategory = UsageCategory.SUBSCRIPTION,
-        apiKeyUrl = "https://elevenlabs.io/app/settings/api-keys",
-        statusPageUrl = "https://status.elevenlabs.io",
-        statusSource = atlassian("status.elevenlabs.io"),
+        "codex", "Codex", "[X]", TerminalColorKey.CYAN, AuthKind.OAUTH_CODE,
+        UsageCategory.SUBSCRIPTION, null, "https://status.openai.com",
+        atlassian("status.openai.com"),
     ),
     COPILOT(
-        wireId = "copilot",
-        displayName = "Copilot",
-        terminalTag = "[cp]",
-        terminalColorKey = TerminalColorKey.MAGENTA,
-        authKind = AuthKind.OAUTH_DEVICE_FLOW,
-        usageCategory = UsageCategory.SUBSCRIPTION,
-        apiKeyUrl = null,
-        statusPageUrl = "https://www.githubstatus.com",
-        statusSource = atlassian("www.githubstatus.com"),
-    ),
-    CURSOR(
-        wireId = "cursor",
-        displayName = "Cursor",
-        terminalTag = "[cr]",
-        terminalColorKey = TerminalColorKey.BLUE,
-        authKind = AuthKind.SESSION_CAPTURE,
-        usageCategory = UsageCategory.SUBSCRIPTION,
-        apiKeyUrl = null,
-        statusPageUrl = "https://status.cursor.com",
-        statusSource = atlassian("status.cursor.com"),
+        "copilot", "Copilot", "[cp]", TerminalColorKey.MAGENTA, AuthKind.OAUTH_DEVICE_FLOW,
+        UsageCategory.SUBSCRIPTION, null, "https://www.githubstatus.com",
+        atlassian("www.githubstatus.com"),
     ),
     OPENROUTER(
-        wireId = "openrouter",
-        displayName = "OpenRouter",
-        terminalTag = "[or]",
-        terminalColorKey = TerminalColorKey.GREEN,
-        authKind = AuthKind.API_KEY,
-        usageCategory = UsageCategory.API_CREDIT,
-        apiKeyUrl = "https://openrouter.ai/settings/keys",
-        statusPageUrl = "https://status.openrouter.ai",
-        statusSource = null,
+        "openrouter", "OpenRouter", "[or]", TerminalColorKey.GREEN, AuthKind.API_KEY,
+        UsageCategory.API_CREDIT, "https://openrouter.ai/settings/keys",
+        "https://status.openrouter.ai", null,
     ),
     DEEPSEEK(
-        wireId = "deepseek",
-        displayName = "DeepSeek",
-        terminalTag = "[ds]",
-        terminalColorKey = TerminalColorKey.PINK,
-        authKind = AuthKind.API_KEY,
-        usageCategory = UsageCategory.API_CREDIT,
-        apiKeyUrl = "https://platform.deepseek.com/api_keys",
-        statusPageUrl = "https://status.deepseek.com",
-        statusSource = atlassian("deepseek.statuspage.io"),
+        "deepseek", "DeepSeek", "[ds]", TerminalColorKey.PINK, AuthKind.API_KEY,
+        UsageCategory.API_CREDIT, "https://platform.deepseek.com/api_keys",
+        "https://status.deepseek.com", atlassian("deepseek.statuspage.io"),
     ),
     POE(
-        wireId = "poe",
-        displayName = "Poe",
-        terminalTag = "[P]",
-        terminalColorKey = TerminalColorKey.TEAL,
-        authKind = AuthKind.API_KEY,
-        usageCategory = UsageCategory.SUBSCRIPTION,
-        apiKeyUrl = "https://poe.com/api_key",
-        statusPageUrl = "https://status.poe.com",
-        statusSource = atlassian("status.poe.com"),
+        "poe", "Poe", "[P]", TerminalColorKey.TEAL, AuthKind.API_KEY,
+        UsageCategory.SUBSCRIPTION, "https://poe.com/api_key", "https://status.poe.com",
+        atlassian("status.poe.com"),
     ),
-    FAL(
-        wireId = "fal",
-        displayName = "Fal",
-        terminalTag = "[fl]",
-        terminalColorKey = TerminalColorKey.MAGENTA,
-        authKind = AuthKind.API_KEY,
-        usageCategory = UsageCategory.API_CREDIT,
-        apiKeyUrl = "https://fal.ai/dashboard/keys",
-        statusPageUrl = "https://status.fal.ai",
-        statusSource = instatus("status.fal.ai"),
-    ),
-    STABILITY(
-        wireId = "stability",
-        displayName = "Stability",
-        terminalTag = "[st]",
-        terminalColorKey = TerminalColorKey.GREEN,
-        authKind = AuthKind.API_KEY,
-        usageCategory = UsageCategory.API_CREDIT,
-        apiKeyUrl = "https://platform.stability.ai/account/keys",
-        statusPageUrl = "https://status.stability.ai",
-        statusSource = atlassian("status.stability.ai"),
-    ),
-    RECRAFT(
-        wireId = "recraft",
-        displayName = "Recraft",
-        terminalTag = "[rc]",
-        terminalColorKey = TerminalColorKey.YELLOW,
-        authKind = AuthKind.API_KEY,
-        usageCategory = UsageCategory.API_CREDIT,
-        apiKeyUrl = "https://www.recraft.ai/profile/api",
-        statusPageUrl = "https://status.recraft.ai",
-        statusSource = instatus("recraft.instatus.com"),
-    ),
-    LUMA(
-        wireId = "luma",
-        displayName = "Luma",
-        terminalTag = "[lm]",
-        terminalColorKey = TerminalColorKey.CYAN,
-        authKind = AuthKind.API_KEY,
-        usageCategory = UsageCategory.API_CREDIT,
-        apiKeyUrl = "https://lumalabs.ai/dream-machine/api/keys",
-        statusPageUrl = "https://status.lumalabs.ai",
-        statusSource = ServiceStatusSource(
-            platform = StatusPlatform.BETTERSTACK,
-            jsonUrl = "https://status.lumalabs.ai/index.json",
-        ),
-    ),
-    RUNWAY(
-        wireId = "runway",
-        displayName = "Runway",
-        terminalTag = "[rw]",
-        terminalColorKey = TerminalColorKey.ORANGE,
-        authKind = AuthKind.API_KEY,
-        usageCategory = UsageCategory.API_CREDIT,
-        apiKeyUrl = "https://dev.runwayml.com/",
-        statusPageUrl = "https://status.runwayml.com",
-        statusSource = atlassian("status.runwayml.com"),
-    ),
-    DID(
-        wireId = "did",
-        displayName = "D-ID",
-        terminalTag = "[dd]",
-        terminalColorKey = TerminalColorKey.PINK,
-        authKind = AuthKind.API_KEY,
-        usageCategory = UsageCategory.API_CREDIT,
-        apiKeyUrl = "https://studio.d-id.com/account-settings",
-        statusPageUrl = "https://status.d-id.com",
-        statusSource = atlassian("status.d-id.com"),
-    ),
-    HEYGEN(
-        wireId = "heygen",
-        displayName = "HeyGen",
-        terminalTag = "[hg]",
-        terminalColorKey = TerminalColorKey.BLUE,
-        authKind = AuthKind.API_KEY,
-        usageCategory = UsageCategory.API_CREDIT,
-        apiKeyUrl = "https://app.heygen.com/settings",
-        statusPageUrl = "https://status.heygen.com",
-        statusSource = atlassian("status.heygen.com"),
-    ),
-    LEONARDO(
-        wireId = "leonardo",
-        displayName = "Leonardo",
-        terminalTag = "[le]",
-        terminalColorKey = TerminalColorKey.YELLOW,
-        authKind = AuthKind.API_KEY,
-        usageCategory = UsageCategory.API_CREDIT,
-        apiKeyUrl = "https://app.leonardo.ai/api-access",
-        statusPageUrl = null,
-        statusSource = null,
-    ),
-    GROK(
-        wireId = "grok",
-        displayName = "Grok",
-        terminalTag = "[gr]",
-        terminalColorKey = TerminalColorKey.FOREGROUND,
-        authKind = AuthKind.SESSION_CAPTURE,
-        usageCategory = UsageCategory.SUBSCRIPTION,
-        apiKeyUrl = null,
-        statusPageUrl = "https://status.x.ai",
-        statusSource = null,
-    ),
-    WINDSURF(
-        wireId = "windsurf",
-        displayName = "Windsurf",
-        terminalTag = "[ws]",
-        terminalColorKey = TerminalColorKey.TEAL,
-        authKind = AuthKind.SESSION_CAPTURE,
-        usageCategory = UsageCategory.SUBSCRIPTION,
-        apiKeyUrl = null,
-        statusPageUrl = "https://status.windsurf.com",
-        statusSource = atlassian("status.windsurf.com"),
+    ELEVENLABS(
+        "elevenlabs", "ElevenLabs", "[11]", TerminalColorKey.ORANGE, AuthKind.API_KEY,
+        UsageCategory.SUBSCRIPTION, "https://elevenlabs.io/app/settings/api-keys",
+        "https://status.elevenlabs.io", atlassian("status.elevenlabs.io"),
     ),
     ;
 
-    val id: String
-        get() = wireId
+    val id: String get() = wireId
 
     companion object {
         private val byWireId = entries.associateBy(AgentProvider::wireId)
-
         fun fromWireId(wireId: String): AgentProvider? = byWireId[wireId]
     }
 }

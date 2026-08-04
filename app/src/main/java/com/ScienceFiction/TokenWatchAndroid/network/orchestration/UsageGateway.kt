@@ -40,6 +40,7 @@ class UsageGateway(
                 tokens = tokenStore.forceRefresh(agentId, provider)
                 registry.fetchWindows(provider, tokens)
             }
+            if (windows.isEmpty()) throw UsageException.NoWindows()
 
             if (provider == AgentProvider.CODEX && manual) {
                 runCatching { codexAccountClient.fetchPlan(tokens) }

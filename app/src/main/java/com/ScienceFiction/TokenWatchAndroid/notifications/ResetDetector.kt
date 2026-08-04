@@ -7,6 +7,7 @@ import java.time.Instant
 data class WindowObservation(
     val resetsAt: Instant?,
     val usedPercent: Double,
+    val windowSeconds: Double? = null,
 )
 
 data class ResetEvent(
@@ -20,6 +21,11 @@ object ResetDetector {
     const val UsedDropThreshold = 20.0
     const val UsedLandingCeiling = 5.0
     val ClockSkew: Duration = Duration.ofSeconds(120)
+    const val MinAdvanceFloorSeconds = 300.0
+    const val FiredIdPrefix = "resetfired|"
+
+    fun minAdvanceSeconds(windowSeconds: Double?): Double =
+        maxOf(MinAdvanceFloorSeconds, (windowSeconds ?: 0.0) / 2.0)
 
     data class Result(
         val events: List<ResetEvent>,
@@ -68,7 +74,12 @@ object ResetDetector {
     ): Instant? {
         val previousReset = previous.resetsAt
         val currentReset = current.resetsAt
-        if (previousReset != null && currentReset != null && currentReset.isAfter(previousReset)) {
+        if (
+            previousReset != null && currentReset != null &&
+            Duration.between(previousReset, currentReset).toNanos() / 1_000_000_000.0 >=
+            minAdvanceSeconds(previous.windowSeconds) &&
+            current.usedPercent < previous.usedPercent
+        ) {
             return previousReset
         }
         if (

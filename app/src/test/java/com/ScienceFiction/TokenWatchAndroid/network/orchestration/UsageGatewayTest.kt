@@ -161,25 +161,14 @@ class UsageGatewayTest {
         val expectedClassNames = mapOf(
             AgentProvider.CLAUDE to "ClaudeUsageClient",
             AgentProvider.CODEX to "CodexUsageClient",
-            AgentProvider.ELEVENLABS to "ElevenLabsUsageClient",
             AgentProvider.COPILOT to "CopilotUsageClient",
-            AgentProvider.CURSOR to "CursorUsageClient",
             AgentProvider.OPENROUTER to "OpenRouterUsageClient",
             AgentProvider.DEEPSEEK to "DeepSeekUsageClient",
             AgentProvider.POE to "PoeUsageClient",
-            AgentProvider.FAL to "FalUsageClient",
-            AgentProvider.STABILITY to "StabilityUsageClient",
-            AgentProvider.RECRAFT to "RecraftUsageClient",
-            AgentProvider.LUMA to "LumaUsageClient",
-            AgentProvider.RUNWAY to "RunwayUsageClient",
-            AgentProvider.DID to "DIDUsageClient",
-            AgentProvider.HEYGEN to "HeyGenUsageClient",
-            AgentProvider.LEONARDO to "LeonardoUsageClient",
-            AgentProvider.GROK to "GrokUsageClient",
-            AgentProvider.WINDSURF to "WindsurfUsageClient",
+            AgentProvider.ELEVENLABS to "ElevenLabsUsageClient",
         )
 
-        assertEquals(18, AgentProvider.entries.size)
+        assertEquals(7, AgentProvider.entries.size)
         assertEquals(AgentProvider.entries.toSet(), registry.providers)
         expectedClassNames.forEach { (provider, expectedName) ->
             assertEquals(expectedName, registry.clientFor(provider)::class.java.simpleName)

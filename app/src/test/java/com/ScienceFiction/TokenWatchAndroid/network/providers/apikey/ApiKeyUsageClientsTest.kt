@@ -11,6 +11,7 @@ import java.time.Instant
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ApiKeyUsageClientsTest {
@@ -87,18 +88,19 @@ class ApiKeyUsageClientsTest {
 
     @Test
     fun everyClientMaps429AndRetryAfter() {
-        val retryAt = Instant.parse("2099-10-21T07:28:00Z")
         fixtures().forEach { fixture ->
+            val before = Instant.now()
             val transport = FakeNetworkTransport(
                 networkResponse(
                     statusCode = 429,
-                    headers = mapOf("retry-after" to listOf("Wed, 21 Oct 2099 07:28:00 GMT")),
+                    headers = mapOf("retry-after" to listOf("120")),
                 ),
             )
             val error = assertThrows("${fixture.id} 429", UsageException.RateLimited::class.java) {
                 runBlocking { fixture.create(transport, "https://fixture.invalid/${fixture.id}").fetch(tokens) }
             }
-            assertEquals("${fixture.id} Retry-After", retryAt, error.retryAfter)
+            val retryAt = error.retryAfter
+            assertTrue("${fixture.id} Retry-After", retryAt != null && !retryAt.isBefore(before.plusSeconds(119)) && !retryAt.isAfter(before.plusSeconds(125)))
         }
     }
 

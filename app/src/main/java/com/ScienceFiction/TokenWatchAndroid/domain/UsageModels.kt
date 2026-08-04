@@ -2,6 +2,7 @@ package com.ScienceFiction.TokenWatchAndroid.domain
 
 import java.time.Duration
 import java.time.Instant
+import java.time.ZoneId
 import kotlin.math.max
 
 enum class WindowKind(val defaultSeconds: Double) {
@@ -62,6 +63,26 @@ data class UsageWindow(
         val remaining = Duration.between(at, reset)
         val remainingSeconds = remaining.seconds.toDouble() + remaining.nano / 1_000_000_000.0
         return ((seconds - remainingSeconds) / seconds).coerceIn(0.0, 1.0)
+    }
+
+    /** Weekly marker position after excluding time outside the configured work-hour grid. */
+    fun markerFraction(
+        at: Instant = Instant.now(),
+        schedule: WorkHoursSchedule?,
+        zoneId: ZoneId = ZoneId.systemDefault(),
+    ): Double? {
+        val reset = resetsAt ?: return null
+        val seconds = windowSeconds?.takeIf { it > 0.0 } ?: return null
+        if (schedule != null && !schedule.isEmpty) {
+            WorkHours.markerFraction(
+                windowStart = reset.minusMillis((seconds * 1_000.0).toLong()),
+                windowEnd = reset,
+                now = at,
+                schedule = schedule,
+                zoneId = zoneId,
+            )?.let { return it }
+        }
+        return elapsedFraction(at)
     }
 
     /** Percentage-point difference between usage and elapsed time. */
