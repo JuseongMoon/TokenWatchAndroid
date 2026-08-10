@@ -9,6 +9,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.ScienceFiction.TokenWatchAndroid.domain.AgentProvider
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -20,10 +21,14 @@ class NavigationSmokeTest {
 
     @Test
     fun addProviderAndSettingsSurfacesAreReachable() {
+        val lastProvider = AgentProvider.entries.last()
+
         composeRule.onNodeWithText("[ + ADD AGENT ]").performClick()
         composeRule.onNodeWithText("ADD AGENT").assertIsDisplayed()
         composeRule.onNodeWithText("claude").assertIsDisplayed()
-        composeRule.onNodeWithText("windsurf").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText(lastProvider.displayName.lowercase())
+            .performScrollTo()
+            .assertIsDisplayed()
         composeRule.onNodeWithText("[esc]").performClick()
 
         composeRule.onNodeWithText("[SETTINGS]").performClick()

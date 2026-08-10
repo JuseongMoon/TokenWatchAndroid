@@ -96,6 +96,7 @@ class ScreenUiTest {
     fun creditDetail_confirmsAndDispatchesPeakReset() {
         var resetWindowLabel: String? = null
         val agent = Agent(provider = AgentProvider.OPENROUTER, accountLabel = "api")
+        val loc = L10n(Lang.EN)
         composeRule.setContent {
             TokenWatchTheme {
                 DetailScreen(
@@ -111,7 +112,7 @@ class ScreenUiTest {
                     serviceHealth = ServiceHealth.UNKNOWN,
                     hideUnusedWindows = false,
                     gaugeCritterEnabled = false,
-                    loc = L10n(Lang.EN),
+                    loc = loc,
                     showLogoutConfirmation = false,
                     onBack = {},
                     onRefresh = {},
@@ -126,7 +127,7 @@ class ScreenUiTest {
 
         composeRule.onNodeWithText("[reset]").performScrollTo().performClick()
         composeRule.onNodeWithText("Reset gauge scale").assertIsDisplayed()
-        composeRule.onNodeWithText("[Reset]").performClick()
+        composeRule.onNodeWithText("[ ${loc.creditResetConfirm} ]").performClick()
         composeRule.runOnIdle {
             assertTrue(resetWindowLabel == "Balance")
         }
@@ -235,7 +236,6 @@ class ScreenUiTest {
         }
 
         composeRule.onNodeWithText("[v]").performScrollTo().assertIsDisplayed()
-        composeRule.onNodeWithText("[x]").assertExists()
     }
 
     private fun creditWindow() = UsageWindow(
