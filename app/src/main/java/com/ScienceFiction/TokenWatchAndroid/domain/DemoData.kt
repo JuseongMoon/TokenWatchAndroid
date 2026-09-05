@@ -28,11 +28,11 @@ object DemoData {
             snapshot(1, "Max 20x",
                 UsageWindow("Current session", 68.0, now.plusSeconds(1.8.times(hour).toLong()), WindowKind.SESSION, WindowKind.SESSION.defaultSeconds),
                 UsageWindow("Current week (all models)", 43.0, now.plusSeconds((3.2 * day).toLong()), WindowKind.WEEKLY, WindowKind.WEEKLY.defaultSeconds),
-                UsageWindow("Current week (Opus)", 81.0, now.plusSeconds((3.2 * day).toLong()), WindowKind.WEEKLY, WindowKind.WEEKLY.defaultSeconds),
+                UsageWindow("Current week (Opus)", 100.0, now.plusSeconds((3.2 * day).toLong()), WindowKind.WEEKLY, WindowKind.WEEKLY.defaultSeconds),
             ),
             snapshot(2, "Plus",
                 UsageWindow("Current session", 22.0, now.plusSeconds((4.1 * hour).toLong()), WindowKind.SESSION, WindowKind.SESSION.defaultSeconds),
-                UsageWindow("Current week", 57.0, now.plusSeconds((4.6 * day).toLong()), WindowKind.WEEKLY, WindowKind.WEEKLY.defaultSeconds),
+                UsageWindow("Current week", 94.0, now.plusSeconds((4.6 * day).toLong()), WindowKind.WEEKLY, WindowKind.WEEKLY.defaultSeconds),
             ),
             snapshot(3, "Individual",
                 UsageWindow("Premium requests", 34.0, now.plusSeconds(11 * day), WindowKind.WEEKLY, 30.0 * day),
@@ -76,7 +76,11 @@ object DemoData {
             return window.copy(usedPercent = 0.0, resetsAt = next)
         }
         return when (window.style) {
-            UsageStyle.GAUGE -> window.copy(usedPercent = minOf(100.0, window.usedPercent + Random.nextDouble(0.2, 1.1)))
+            UsageStyle.GAUGE -> if (window.usedPercent >= 99.0) {
+                window
+            } else {
+                window.copy(usedPercent = minOf(99.0, window.usedPercent + Random.nextDouble(0.2, 1.1)))
+            }
             UsageStyle.CREDIT_GAUGE -> {
                 val total = window.balanceTotal ?: return window
                 val left = maxOf(0.0, (window.balanceRemaining ?: return window) - Random.nextDouble(0.01, 0.09))

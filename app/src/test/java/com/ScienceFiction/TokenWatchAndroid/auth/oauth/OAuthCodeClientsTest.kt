@@ -11,6 +11,7 @@ import okhttp3.Request
 import okio.Buffer
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -104,11 +105,27 @@ class OAuthCodeClientsTest {
         )
     }
 
-    private class FakeTransport(private val json: String) : NetworkTransport {
+    @Test
+    fun invalidGrantIsClassifiedAsPermanentRefreshRevocation() {
+        val tokens = OAuthTokens("old", refreshToken = "revoked")
+        listOf<OAuthCodeClient>(
+            ClaudeOAuthClient(FakeTransport("""{"error":"invalid_grant"}""", 400)),
+            CodexOAuthClient(FakeTransport("""{"error":"invalid_grant"}""", 401)),
+        ).forEach { client ->
+            assertThrows(OAuthException.RefreshRevoked::class.java) {
+                runBlocking { client.refresh(tokens) }
+            }
+        }
+    }
+
+    private class FakeTransport(
+        private val json: String,
+        private val statusCode: Int = 200,
+    ) : NetworkTransport {
         lateinit var lastRequest: Request
         override suspend fun execute(request: Request): NetworkResponse {
             lastRequest = request
-            return NetworkResponse(200, emptyMap(), json.toByteArray())
+            return NetworkResponse(statusCode, emptyMap(), json.toByteArray())
         }
     }
 

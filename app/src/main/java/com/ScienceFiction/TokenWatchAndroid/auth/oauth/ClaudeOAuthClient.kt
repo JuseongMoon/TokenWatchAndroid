@@ -70,8 +70,12 @@ class ClaudeOAuthClient(
             .build()
         val response = transport.execute(request)
         if (response.statusCode !in 200..299) {
-            val detail = "HTTP ${response.statusCode}: ${response.bodyText()}"
+            val responseBody = response.bodyText()
+            val detail = "HTTP ${response.statusCode}: $responseBody"
             if (exchange) throw OAuthException.ExchangeFailed(detail)
+            if (response.statusCode in listOf(400, 401) && "invalid_grant" in responseBody) {
+                throw OAuthException.RefreshRevoked()
+            }
             throw OAuthException.RefreshFailed(detail)
         }
         val json = JsonMap.decode(response.bodyText())

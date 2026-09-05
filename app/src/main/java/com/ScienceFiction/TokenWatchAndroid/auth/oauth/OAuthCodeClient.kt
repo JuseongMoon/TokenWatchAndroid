@@ -9,6 +9,7 @@ sealed class OAuthException(message: String, cause: Throwable? = null) : Excepti
     class StateMismatch : OAuthException("OAuth callback state did not match the request")
     class ExchangeFailed(detail: String) : OAuthException("Token exchange failed: $detail")
     class RefreshFailed(detail: String) : OAuthException("Token refresh failed: $detail")
+    class RefreshRevoked : OAuthException("Authentication expired. Please log in again.")
     class NotAuthenticated : OAuthException("Login required")
 }
 

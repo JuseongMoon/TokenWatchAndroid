@@ -1,14 +1,22 @@
 # TokenWatch Android parity baseline
 
-The Android release mirrors the iOS repository through functional commit `bff4bc2`
+The Android release mirrors the portable iOS patches through commit `8d7073e`
 (`Update project.pbxproj`) on `dev`. Uncommitted iOS working-tree changes are
 deliberately not part of this baseline.
+
+The Firebase Analytics patch (`480f00b`/`b336807`) still requires a separately registered Android
+Firebase app and its `google-services.json`; the iOS Firebase application identifier must not be
+reused. Analytics is therefore the sole intentionally deferred platform-specific item.
 
 ## Included behavior
 
 - Seven audited providers and three authentication families retained at `31a2e2c`.
 - Work-hour-aware weekly gauge markers with a persisted 7 x 24 schedule.
 - A side-effect-isolated demo mode with sample subscription and credit data.
+- Demo samples keep one exhausted gauge animated and one warning-red gauge visible, with the demo
+  notice colocated with the exit control instead of occupying a persistent top banner.
+- OAuth refresh-token rotation is caller-cancellation-safe, coalesced per account, persisted with a
+  retry, and permanently revoked refresh tokens are invalidated locally.
 - Hardened Retry-After parsing, local-date Copilot resets, one-shot browser storage, masked API keys,
   cancellation preservation, and empty-window failure handling from `d45432d`.
 - Surprise-reset detection rejects sliding unused reset timestamps and keeps fired notification IDs
@@ -52,7 +60,7 @@ deliberately not part of this baseline.
 - Application ID/namespace: `com.ScienceFiction.TokenWatchAndroid`
 - Minimum SDK: 28
 - Target/compile SDK: 36
-- Version: 1.0.0 (9)
+- Version: 1.0.1 (11)
 
 ## Platform-specific parity adaptations
 

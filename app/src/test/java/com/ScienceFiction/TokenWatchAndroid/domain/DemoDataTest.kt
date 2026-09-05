@@ -24,4 +24,16 @@ class DemoDataTest {
         assertTrue(after.values.flatMap { it.windows }.filter { it.resetsAt != null }.all { it.resetsAt!!.isAfter(later) })
         assertTrue(after.values.flatMap { it.windows }.any { it.usedPercent == 0.0 })
     }
+
+    @Test fun exhaustedAndWarningSamplesRemainVisuallyDistinct() {
+        val before = DemoData.snapshots(now)
+        val windows = before.values.flatMap { it.windows }
+        assertTrue(windows.any { it.usedPercent == 100.0 })
+        assertTrue(windows.any { it.usedPercent == 94.0 })
+
+        val after = DemoData.advanced(before, now.plusSeconds(1))
+        val advancedWindows = after.values.flatMap { it.windows }
+        assertTrue(advancedWindows.any { it.usedPercent == 100.0 })
+        assertTrue(advancedWindows.filter { it.style == UsageStyle.GAUGE }.all { it.usedPercent <= 100.0 })
+    }
 }

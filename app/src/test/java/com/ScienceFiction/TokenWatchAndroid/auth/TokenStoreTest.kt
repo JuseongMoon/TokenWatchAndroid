@@ -6,7 +6,12 @@ import com.ScienceFiction.TokenWatchAndroid.auth.oauth.OAuthException
 import com.ScienceFiction.TokenWatchAndroid.domain.AgentProvider
 import java.time.Instant
 import java.util.UUID
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertThrows
@@ -84,6 +89,46 @@ class TokenStoreTest {
     }
 
     @Test
+    fun callerCancellationDoesNotAbandonRotatedCredential(): Unit = runBlocking {
+        val id = UUID.randomUUID()
+        val stored = OAuthTokens("old", refreshToken = "refresh")
+        val rotated = OAuthTokens("new", refreshToken = "rotated")
+        val vault = MemoryVault(id to stored)
+        val started = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val store = TokenStore(vault, TokenRefresher { _, _ ->
+            started.complete(Unit)
+            release.await()
+            rotated
+        })
+
+        val caller = launch { store.forceRefresh(id, AgentProvider.CLAUDE) }
+        started.await()
+        caller.cancelAndJoin()
+        release.complete(Unit)
+
+        withTimeout(2_000) {
+            while (vault.load(id) != rotated) delay(10)
+        }
+        assertEquals(rotated, vault.load(id))
+    }
+
+    @Test
+    fun revokedRefreshTokenIsInvalidatedLocally(): Unit = runBlocking {
+        val id = UUID.randomUUID()
+        val stored = OAuthTokens("old", refreshToken = "revoked", plan = "Plus")
+        val vault = MemoryVault(id to stored)
+        val store = TokenStore(vault, TokenRefresher { _, _ -> throw OAuthException.RefreshRevoked() })
+
+        assertThrows(OAuthException.RefreshRevoked::class.java) {
+            runBlocking { store.forceRefresh(id, AgentProvider.CODEX) }
+        }
+        assertEquals(null, vault.load(id)?.refreshToken)
+        assertEquals("old", vault.load(id)?.accessToken)
+        assertEquals("Plus", vault.load(id)?.plan)
+    }
+
+    @Test
     fun providerRefresherSupportsOnlyClaudeAndCodex(): Unit = runBlocking {
         val input = OAuthTokens("old", refreshToken = "refresh")
         val claudeResult = OAuthTokens("claude")
@@ -103,13 +148,13 @@ class TokenStoreTest {
     private class MemoryVault(vararg initial: Pair<UUID, OAuthTokens>) : CredentialVault {
         private val values = initial.toMap().toMutableMap()
 
-        override fun save(agentId: UUID, tokens: OAuthTokens) {
+        @Synchronized override fun save(agentId: UUID, tokens: OAuthTokens) {
             values[agentId] = tokens
         }
 
-        override fun load(agentId: UUID): OAuthTokens? = values[agentId]
+        @Synchronized override fun load(agentId: UUID): OAuthTokens? = values[agentId]
 
-        override fun delete(agentId: UUID) {
+        @Synchronized override fun delete(agentId: UUID) {
             values.remove(agentId)
         }
     }

@@ -114,7 +114,7 @@ fun SettingsScreen(
                 onLogoutAgent = { pendingLogoutId = it.id.toString() },
                 showLogout = !isDemo,
             )
-            DemoSection(isDemo, loc, onToggleDemo)
+            if (agents.isEmpty()) DemoSection(isDemo, loc, onToggleDemo)
             LanguageSection(
                 selected = settings.language,
                 loc = loc,
@@ -150,6 +150,7 @@ fun SettingsScreen(
                 loc = loc,
                 onToggle = { onSettingsChange(settings.copy(keepScreenOn = !settings.keepScreenOn)) },
             )
+            if (agents.isNotEmpty()) DemoSection(isDemo, loc, onToggleDemo)
             TerminalBox(title = "INFO") {
                 KvRow(key = "version", value = appVersion, keyWidth = 84.dp)
             }

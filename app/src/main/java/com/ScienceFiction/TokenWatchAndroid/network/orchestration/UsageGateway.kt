@@ -102,6 +102,7 @@ class UsageGateway(
             is UsageException.Decode -> l10n.errDecode(error.message.orEmpty())
             is UsageException.NoWindows -> l10n.errNoWindows
             is OAuthException.NotAuthenticated -> l10n.errNotAuthenticated
+            is OAuthException.RefreshRevoked -> l10n.errAuthExpired
             is OAuthException.RefreshFailed -> l10n.errTokenRefresh(error.detailAfterPrefix())
             is OAuthException.ExchangeFailed -> l10n.errTokenExchange(error.detailAfterPrefix())
             is OAuthException.StateMismatch -> l10n.errTokenExchange(error.message.orEmpty())

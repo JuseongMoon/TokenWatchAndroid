@@ -40,6 +40,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -98,8 +99,6 @@ fun MainScreen(
             isDemo = isDemo,
             modifier = Modifier.statusBarsPadding(),
         )
-        if (isDemo) DemoBanner(loc = loc, onExitDemo = onExitDemo)
-
         PullToRefreshBox(
             isRefreshing = isRefreshingAll,
             onRefresh = onRefreshAll,
@@ -142,7 +141,16 @@ fun MainScreen(
 
                 item(key = "add-agent") {
                     if (isDemo) {
-                        TerminalButton("[ ■ EXIT DEMO ]", color = Term.Yellow, onClick = onExitDemo)
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            TerminalButton("[ ■ EXIT DEMO ]", color = Term.Yellow, onClick = onExitDemo)
+                            Text(
+                                loc.demoBanner,
+                                color = Term.Dim,
+                                style = terminalTextStyle(11.sp),
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
                     } else {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             TerminalButton("[ + ADD AGENT ]", color = Term.Green, dashedBorder = true, onClick = onAddAgent)
@@ -279,18 +287,6 @@ private fun StatusPrompt(
             )
             else -> BlinkingHeart(size = 11.dp)
         }
-    }
-}
-
-@Composable
-private fun DemoBanner(loc: L10n, onExitDemo: () -> Unit) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text("▶ DEMO", color = Term.Yellow, style = terminalTextStyle(12.sp, FontWeight.Bold))
-        Text(loc.demoBanner, color = Term.Dim, style = terminalTextStyle(11.sp), modifier = Modifier.weight(1f))
-        TerminalTextButton("[EXIT]", color = Term.Yellow, onClick = onExitDemo)
     }
 }
 
