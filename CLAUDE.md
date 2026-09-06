@@ -112,6 +112,10 @@ README에는 커밋 해시를 적지 않습니다 — 동기화할 때마다 손
   값은 **`local.properties`** 에만 두고 저장소에는 `*.example`만 올린다.
   소스·plist·manifest·주석·커밋 메시지 어디에도 값을 쓰지 않는다.
   이미 올렸다면 되돌리는 것으로 끝내지 말고 **키를 폐기·재발급**한다.
+  **예외** — Firebase 클라이언트 설정(`GoogleService-Info.plist`, `google-services.json`, `AIzaSy…`)과
+  OAuth public client ID는 Google이 앱 바이너리 내장을 전제로 문서화한 **식별자**이며 비밀이 아니다.
+  커밋해도 되고 재발급 대상이 아니다. 접근 통제는 Firestore 보안 규칙과 API 키의 `apiTargets`·앱 제한이 담당한다.
+  **단 서비스 계정 키·Admin SDK 자격증명·서명 키는 이 예외에 해당하지 않는다.**
 - **내부 정보 금지** — 로컬 절대경로(`/Users/…`), 저장소 밖 파일 참조, 관리자 URL,
   인프라 식별자(버킷·배포 ID·계정 번호), 개인 기기 식별자(UDID·시리얼),
   릴리스 진행 상태와 스토어 콘솔 절차는 문서에 남기지 않는다.
