@@ -1,3 +1,17 @@
+import java.util.Properties
+
+// Machine-local configuration. `local.properties` is gitignored: nothing here reaches the
+// repository. Missing values fall back to "", which disables the announcement feed quietly
+// (see AnnouncementFeedClient.feedUrl) instead of shipping a half-configured build.
+val localProperties = Properties().apply {
+    val file = rootProject.file("local.properties")
+    if (file.exists()) {
+        file.inputStream().use(::load)
+    }
+}
+
+fun localProperty(name: String): String = localProperties.getProperty(name)?.trim().orEmpty()
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -17,17 +31,14 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        // Announcement feed (Firestore REST, no Firebase SDK). The key is an Android-only
-        // client identifier restricted to the Firestore API; access is governed by the
-        // Firestore security rules, and the feed document is public by design.
-        buildConfigField("String", "ANNOUNCEMENT_PROJECT_ID", "\"tokenwatch-app\"")
-        buildConfigField(
-            "String",
-            "ANNOUNCEMENT_API_KEY",
-            "\"AIzaSyBiC3NxeGkvd6_IfoxITe0DPx-E2OTocbY\"",
-        )
-        // Kept configurable so the feed can be pointed elsewhere without editing app code.
-        buildConfigField("String", "ANNOUNCEMENT_FEED_DOC", "\"android\"")
+        // Announcement feed (Firestore REST, no Firebase SDK). The key is an Android client
+        // identifier restricted to the Firestore API and the feed document is public by design,
+        // but it is still an account-scoped credential, so it lives in local.properties rather
+        // than in the repository. Set ANNOUNCEMENT_PROJECT_ID / ANNOUNCEMENT_API_KEY /
+        // ANNOUNCEMENT_FEED_DOC there; leaving them unset disables announcements.
+        buildConfigField("String", "ANNOUNCEMENT_PROJECT_ID", "\"${localProperty("ANNOUNCEMENT_PROJECT_ID")}\"")
+        buildConfigField("String", "ANNOUNCEMENT_API_KEY", "\"${localProperty("ANNOUNCEMENT_API_KEY")}\"")
+        buildConfigField("String", "ANNOUNCEMENT_FEED_DOC", "\"${localProperty("ANNOUNCEMENT_FEED_DOC")}\"")
     }
 
     buildTypes {

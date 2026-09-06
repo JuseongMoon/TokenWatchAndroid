@@ -1,5 +1,9 @@
 # TokenWatch Android parity baseline
 
+> This document is the public feature-comparison table between the iOS and Android apps,
+> and the single place recording how far Android has been synced. Pricing strategy,
+> unreleased plans and operational procedures do not belong in this repository's `docs/`.
+
 The Android release mirrors the portable iOS patches through commit `719142a`
 (`chore: 마케팅 버전 1.1.0 · 빌드 12로 올림`) on `dev`. Uncommitted iOS working-tree changes are
 deliberately not part of this baseline.
@@ -95,14 +99,15 @@ reused. Analytics is therefore the sole intentionally deferred platform-specific
 - The announcement feed is read from `feeds/android`, a separate materialized document, and the
   client accepts only `platform` values `android` and `all`. Both a 404 and a seeded empty feed
   mean "no announcements" and must stay silent.
-- Firestore credentials arrive through `buildConfigField` rather than `google-services.json`;
-  no Firebase SDK or Gradle plugin is applied. The Android app is registered in the
-  `tokenwatch-app` project (`1:913259208794:android:987cb354982006fad5f863`), so adding Analytics
-  later needs no new registration.
-- That API key is restricted to `firestore.googleapis.com` alone. **Adding Analytics requires
+- Firestore credentials arrive through `buildConfigField`, injected from `local.properties`,
+  rather than `google-services.json`; no Firebase SDK or Gradle plugin is applied. Leaving the
+  properties unset disables announcements quietly instead of failing the build. The Android app
+  is already registered in the Firebase project, so adding Analytics later needs no new
+  registration.
+- The feed API key is restricted to `firestore.googleapis.com` alone. **Adding Analytics requires
   widening its `apiTargets` first**, otherwise the SDK fails with 403s and no other symptom.
-  No app restriction (SHA-1) is set; adding one would require `X-Android-Package` and
-  `X-Android-Cert` headers on the feed request, which Firestore REST does not enforce today.
+  Tightening it with an app (SHA-1) restriction would additionally require `X-Android-Package`
+  and `X-Android-Cert` headers on the feed request.
 - Announcement analytics events are not implemented, following the deferred-Analytics rule above.
 - `versionInRange` compares version segments numerically, padding missing segments with zero and
   degrading a non-numeric segment to zero. iOS uses a numeric string comparison, which differs

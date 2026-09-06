@@ -1,8 +1,9 @@
 # TokenWatch Android
 
-TokenWatch iOS의 Android 동등 구현입니다. 현재 기준선은 iOS 저장소의 commit
-`719142a`이며, 기능 범위와 플랫폼별 대응은
-[`docs/PARITY_BASELINE.md`](docs/PARITY_BASELINE.md)에 고정되어 있습니다.
+[TokenWatch iOS](https://github.com/JuseongMoon/TokenWatch)의 Android 네이티브 구현입니다.
+두 앱은 동일한 7개 서비스·인증 방식·게이지 정책을 공유하고, 플랫폼별 대응 차이는
+[docs/PARITY_BASELINE.md](docs/PARITY_BASELINE.md)에 정리했습니다.
+어느 iOS 커밋까지 맞췄는지도 같은 문서에 기록하며, 동기화 커밋에서 함께 갱신합니다.
 
 ## 주요 기능
 
@@ -47,3 +48,6 @@ Release 빌드는 R8/minify까지 검증하지만 배포 서명 키는 저장소
 - 자격증명 암호화 키는 Android Keystore 밖으로 내보내지 않습니다.
 - 앱 데이터는 cloud backup 및 device transfer 대상에서 제외됩니다.
 - keystore, 비밀번호, `local.properties`는 Git에 커밋하지 않습니다.
+- 공지 피드용 Firestore 설정(`ANNOUNCEMENT_PROJECT_ID` / `ANNOUNCEMENT_API_KEY` /
+  `ANNOUNCEMENT_FEED_DOC`)은 `local.properties`에서 `BuildConfig`로 주입합니다.
+  값이 없으면 공지 기능이 조용히 꺼질 뿐 빌드는 정상 동작합니다.
