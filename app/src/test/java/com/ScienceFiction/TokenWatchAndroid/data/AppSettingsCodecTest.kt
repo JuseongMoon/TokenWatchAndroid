@@ -3,6 +3,7 @@ package com.ScienceFiction.TokenWatchAndroid.data
 import com.ScienceFiction.TokenWatchAndroid.localization.AppLanguage
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -69,5 +70,21 @@ class AppSettingsCodecTest {
     @Test
     fun refreshOptionsMatchCleanBaseline() {
         assertEquals(setOf(-1, 0, 30, 60, 300), AppSettingsCodec.supportedRefreshIntervals)
+    }
+
+    @Test
+    fun workHoursFlagKeepsItsThreeStates() {
+        // Absent stays absent so it can still be derived from the schedule.
+        assertNull(AppSettingsCodec.decode().workHoursEnabled)
+        assertEquals(
+            false,
+            AppSettingsCodec.decode(
+                workHours = "1".repeat(168),
+                workHoursEnabled = false,
+            ).workHoursEnabled,
+        )
+        assertEquals(true, AppSettingsCodec.decode(workHoursEnabled = true).workHoursEnabled)
+        // normalize() must not coerce it either.
+        assertNull(AppSettingsCodec.normalize(AppSettings(workHours = "1".repeat(168))).workHoursEnabled)
     }
 }

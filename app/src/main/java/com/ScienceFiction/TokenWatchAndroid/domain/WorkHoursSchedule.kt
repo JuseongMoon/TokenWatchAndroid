@@ -40,7 +40,19 @@ data class WorkHoursSchedule private constructor(private val slots: List<Boolean
         } else {
             WorkHoursSchedule()
         }
-        fun active(raw: String): WorkHoursSchedule? = decode(raw).takeUnless { it.isEmpty }
+
+        /**
+         * Effective on/off. The flag is tri-state: absent means "derive from the schedule", so an
+         * existing user with painted hours keeps the feature after updating.
+         */
+        fun isEnabled(raw: String, enabled: Boolean?): Boolean = enabled ?: !decode(raw).isEmpty
+
+        /**
+         * Schedule to drive weekly markers with, or null to fall back to a uniform flow. There is no
+         * single-argument overload on purpose so every call site has to state the flag.
+         */
+        fun active(raw: String, enabled: Boolean?): WorkHoursSchedule? =
+            if (!isEnabled(raw, enabled)) null else decode(raw).takeUnless { it.isEmpty }
     }
 }
 

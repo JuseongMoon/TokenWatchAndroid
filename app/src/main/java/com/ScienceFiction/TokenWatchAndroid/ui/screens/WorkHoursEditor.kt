@@ -34,6 +34,7 @@ import com.ScienceFiction.TokenWatchAndroid.ui.theme.Term
 @Composable
 internal fun WorkHoursEditor(
     initial: WorkHoursSchedule,
+    enabled: Boolean,
     loc: L10n,
     onSave: (WorkHoursSchedule) -> Unit,
     onDismiss: () -> Unit,
@@ -41,7 +42,7 @@ internal fun WorkHoursEditor(
     var draft by remember(initial) { mutableStateOf(initial) }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Box(Modifier.padding(20.dp).background(Term.Background)) {
-            TerminalBox(title = "WORK HOURS") {
+            TerminalBox(title = if (enabled) "WORK HOURS" else "WORK HOURS [off]") {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(loc.workHoursEditorHelp, color = Term.Dim, fontFamily = FontFamily.Monospace, fontSize = 10.sp)
                     Row(Modifier.fillMaxWidth()) {

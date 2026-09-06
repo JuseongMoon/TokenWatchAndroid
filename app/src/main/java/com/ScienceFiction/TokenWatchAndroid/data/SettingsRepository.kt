@@ -39,6 +39,7 @@ class SettingsRepository(
         hideUnusedWindows = safeGet(Keys.hideUnusedWindows),
         gaugeCritter = safeGet(Keys.gaugeCritter),
         workHours = safeGet(Keys.workHours),
+        workHoursEnabled = safeGet(Keys.workHoursEnabled),
         heartbeatCursor = safeGet(Keys.heartbeatCursor),
         heartbeatTracking = safeGet(Keys.heartbeatTracking),
         heartbeatTargets = safeGet(Keys.heartbeatTargets),
@@ -53,6 +54,11 @@ class SettingsRepository(
         this[Keys.hideUnusedWindows] = settings.hideUnusedWindows
         this[Keys.gaugeCritter] = settings.gaugeCritter
         this[Keys.workHours] = settings.workHours
+        // Absent must stay absent: writing false here would switch work hours off for
+        // existing users the first time any unrelated setting is saved.
+        settings.workHoursEnabled
+            ?.let { this[Keys.workHoursEnabled] = it }
+            ?: remove(Keys.workHoursEnabled)
         this[Keys.heartbeatCursor] = settings.heartbeatCursor
         this[Keys.heartbeatTracking] = settings.heartbeatTracking
         this[Keys.heartbeatTargets] = settings.heartbeatTargets.toSet()
@@ -67,6 +73,7 @@ class SettingsRepository(
         val hideUnusedWindows = booleanPreferencesKey("tokenwatch.hideUnusedWindows")
         val gaugeCritter = booleanPreferencesKey("tokenwatch.gaugeCritter")
         val workHours = stringPreferencesKey("tokenwatch.workHours")
+        val workHoursEnabled = booleanPreferencesKey("tokenwatch.workHoursEnabled")
         val heartbeatCursor = booleanPreferencesKey("tokenwatch.heartbeatCursor")
         val heartbeatTracking = booleanPreferencesKey("tokenwatch.heartbeatTracking")
         val heartbeatTargets = stringSetPreferencesKey("tokenwatch.heartbeatTargets")

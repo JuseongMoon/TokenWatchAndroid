@@ -1,7 +1,7 @@
 # TokenWatch Android parity baseline
 
-The Android release mirrors the portable iOS patches through commit `8d7073e`
-(`Update project.pbxproj`) on `dev`. Uncommitted iOS working-tree changes are
+The Android release mirrors the portable iOS patches through commit `719142a`
+(`chore: 마케팅 버전 1.1.0 · 빌드 12로 올림`) on `dev`. Uncommitted iOS working-tree changes are
 deliberately not part of this baseline.
 
 The Firebase Analytics patch (`480f00b`/`b336807`) still requires a separately registered Android
@@ -54,13 +54,25 @@ reused. Analytics is therefore the sole intentionally deferred platform-specific
   default on, session alerts default off.
 - Exactly unused heartbeat tracking shows five filled hearts with a blinking
   thin inner rim.
+- A startup announcement/patch-note popup driven by a server feed, plus an inbox that lists
+  delivered announcements. The popup and the list disagree on purpose: the list keeps items that
+  have been taken down, fall outside this build's version range, or were dismissed, because it is
+  history rather than an interruption. Closing hides an announcement for one launch, dismissing
+  excludes it permanently, and reading in the list never switches the popup off. Unread badges
+  count only currently live announcements.
+- Feed fetches are throttled to one hour after a success and held off five minutes after a
+  failure, with the first check of each process always running. The cached feed decides what to
+  show, so a popup still appears offline, and a network result never replaces a card being read.
+- The work-hours feature has an on/off toggle separate from the schedule. The flag is tri-state:
+  unset derives from whether hours are painted, so existing installs keep the feature after
+  updating, and switching it off preserves the saved schedule.
 
 ## Android identity
 
 - Application ID/namespace: `com.ScienceFiction.TokenWatchAndroid`
 - Minimum SDK: 28
 - Target/compile SDK: 36
-- Version: 1.0.1 (11)
+- Version: 1.1.0 (12)
 
 ## Platform-specific parity adaptations
 
@@ -80,3 +92,21 @@ reused. Analytics is therefore the sole intentionally deferred platform-specific
   account is added.
 - Phones allow portrait and reverse portrait like the current iPhone target;
   Android tablets retain all orientations like the iPad target.
+- The announcement feed is read from `feeds/android`, a separate materialized document, and the
+  client accepts only `platform` values `android` and `all`. Both a 404 and a seeded empty feed
+  mean "no announcements" and must stay silent.
+- Firestore credentials arrive through `buildConfigField` rather than `google-services.json`;
+  no Firebase SDK or Gradle plugin is applied. The Android app is registered in the
+  `tokenwatch-app` project (`1:913259208794:android:987cb354982006fad5f863`), so adding Analytics
+  later needs no new registration.
+- That API key is restricted to `firestore.googleapis.com` alone. **Adding Analytics requires
+  widening its `apiTargets` first**, otherwise the SDK fails with 403s and no other symptom.
+  No app restriction (SHA-1) is set; adding one would require `X-Android-Package` and
+  `X-Android-Cert` headers on the feed request, which Firestore REST does not enforce today.
+- Announcement analytics events are not implemented, following the deferred-Analytics rule above.
+- `versionInRange` compares version segments numerically, padding missing segments with zero and
+  degrading a non-numeric segment to zero. iOS uses a numeric string comparison, which differs
+  only for inputs the dashboard rejects (it enforces `x.y.z` and blocks `all` + a version range).
+- The popup is suppressed on the add and settings routes, which are full screens here rather
+  than sheets and would otherwise be covered mid-login, and while running under instrumentation,
+  where a modal scrim would swallow taps in the UI tests.

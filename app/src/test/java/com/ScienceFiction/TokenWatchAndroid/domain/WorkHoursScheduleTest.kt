@@ -25,7 +25,7 @@ class WorkHoursScheduleTest {
         assertTrue(painted.isOn(2, 10))
         assertFalse(painted.isOn(4, 10))
         assertEquals(painted, WorkHoursSchedule.decode(painted.encoded))
-        assertNull(WorkHoursSchedule.active("garbage"))
+        assertNull(WorkHoursSchedule.active("garbage", null))
     }
 
     @Test fun markerFreezesBetweenConfiguredBlocks() {
@@ -36,5 +36,26 @@ class WorkHoursScheduleTest {
         assertEquals(0.75, WorkHours.markerFraction(start, end, at("2024-01-04T03:30:00Z"), schedule, zone)!!, 0.001)
         assertFalse(WorkHours.isWorkingTime(at("2024-01-03T12:00:00Z"), schedule, zone))
         assertTrue(WorkHours.isWorkingTime(at("2024-01-04T03:00:00Z"), schedule, zone))
+    }
+
+    @Test fun enabledDerivesFromScheduleWhenFlagIsUnset() {
+        // Existing users updated from a build without the flag: painted hours must keep working.
+        assertTrue(WorkHoursSchedule.isEnabled(monThuMorning().encoded, null))
+        assertFalse(WorkHoursSchedule.isEnabled("", null))
+        assertFalse(WorkHoursSchedule.isEnabled("garbage", null))
+    }
+
+    @Test fun explicitFlagOverridesTheSchedule() {
+        assertFalse(WorkHoursSchedule.isEnabled(monThuMorning().encoded, false))
+        assertTrue(WorkHoursSchedule.isEnabled("", true))
+    }
+
+    @Test fun togglingOffKeepsTheScheduleIntact() {
+        val encoded = monThuMorning().encoded
+        assertNull(WorkHoursSchedule.active(encoded, false))
+        assertEquals(14, WorkHoursSchedule.decode(encoded).onHours)
+        assertEquals(14, WorkHoursSchedule.active(encoded, true)!!.onHours)
+        // On with nothing painted has no basis to bend the flow: fall back to a uniform marker.
+        assertNull(WorkHoursSchedule.active("", true))
     }
 }

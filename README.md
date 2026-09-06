@@ -1,7 +1,7 @@
 # TokenWatch Android
 
 TokenWatch iOS의 Android 동등 구현입니다. 현재 기준선은 iOS 저장소의 commit
-`8d7073e`이며, 기능 범위와 플랫폼별 대응은
+`719142a`이며, 기능 범위와 플랫폼별 대응은
 [`docs/PARITY_BASELINE.md`](docs/PARITY_BASELINE.md)에 고정되어 있습니다.
 
 ## 주요 기능
@@ -17,6 +17,8 @@ TokenWatch iOS의 Android 동등 구현입니다. 현재 기준선은 iOS 저장
 - 429 backoff 중 마지막 정상 그래프 유지와 재시도 안내
 - 공식 status 컴포넌트 기반 4단계 서비스 상태·전체 점검 표시와 마지막 정상 상태 보존
 - 한국어/영어, heartbeat cursor, usage tracking heart, 계단 페이드 gauge slime
+- 서버 피드 기반 시작 공지/패치노트 팝업과 지난 공지를 다시 읽는 공지함
+- 업무시간 기능을 시간대 설정과 분리해 켜고 끄는 토글(설정한 시간대는 그대로 보관)
 - Android Keystore AES-GCM 기반 자격증명 암호화 및 backup/transfer 제외
 
 ## 개발 환경

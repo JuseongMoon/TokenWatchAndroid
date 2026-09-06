@@ -28,8 +28,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.MailOutline
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.semantics.Role
@@ -60,6 +64,12 @@ import com.ScienceFiction.TokenWatchAndroid.ui.components.TerminalBox
 import com.ScienceFiction.TokenWatchAndroid.ui.theme.Term
 import java.util.UUID
 
+/** Stable handles for the header glyph buttons, whose labels change with the app language. */
+internal object HeaderTags {
+    const val ANNOUNCEMENTS = "header.announcements"
+    const val SETTINGS = "header.settings"
+}
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun MainScreen(
@@ -72,7 +82,9 @@ fun MainScreen(
     appVersion: String,
     isRefreshingAll: Boolean,
     isDemo: Boolean = false,
+    unreadAnnouncements: Int = 0,
     onSettings: () -> Unit,
+    onAnnouncements: () -> Unit,
     onAddAgent: () -> Unit,
     onOpenAgent: (Agent) -> Unit,
     onMoveUp: (Agent) -> Unit,
@@ -95,7 +107,9 @@ fun MainScreen(
             settings = settings,
             loc = loc,
             appVersion = appVersion,
+            unreadAnnouncements = unreadAnnouncements,
             onSettings = onSettings,
+            onAnnouncements = onAnnouncements,
             isDemo = isDemo,
             modifier = Modifier.statusBarsPadding(),
         )
@@ -173,7 +187,9 @@ private fun MainHeader(
     settings: AppSettings,
     loc: L10n,
     appVersion: String,
+    unreadAnnouncements: Int,
     onSettings: () -> Unit,
+    onAnnouncements: () -> Unit,
     isDemo: Boolean,
     modifier: Modifier = Modifier,
 ) {
@@ -202,12 +218,22 @@ private fun MainHeader(
                 demo = isDemo,
             )
         }
-        TerminalTextButton(
-            text = "[SETTINGS]",
-            color = Term.Cyan,
-            onClick = onSettings,
-            accessibilityLabel = loc.a11ySettings,
-        )
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            TerminalGlyphButton(
+                icon = Icons.Default.MailOutline,
+                onClick = onAnnouncements,
+                badged = unreadAnnouncements > 0,
+                accessibilityLabel = loc.a11yAnnouncements(unreadAnnouncements),
+                // Tagged because the labels are localized; the old "[SETTINGS]" text was not.
+                modifier = Modifier.testTag(HeaderTags.ANNOUNCEMENTS),
+            )
+            TerminalGlyphButton(
+                icon = Icons.Default.Settings,
+                onClick = onSettings,
+                accessibilityLabel = loc.a11ySettings,
+                modifier = Modifier.testTag(HeaderTags.SETTINGS),
+            )
+        }
     }
 }
 
@@ -317,7 +343,7 @@ private fun AgentCardItem(
             serviceHealth = serviceHealth,
             hideUnusedWindows = settings.hideUnusedWindows,
             gaugeCritterEnabled = settings.gaugeCritter,
-            workHoursSchedule = WorkHoursSchedule.active(settings.workHours),
+            workHoursSchedule = WorkHoursSchedule.active(settings.workHours, settings.workHoursEnabled),
             loc = loc,
             modifier = Modifier.combinedClickable(
                 interactionSource = interactionSource,

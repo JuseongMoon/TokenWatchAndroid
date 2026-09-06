@@ -131,7 +131,7 @@ fun SettingsScreen(
                 loc = loc,
                 onSettingsChange = onSettingsChange,
             )
-            WorkHoursSection(settings, loc) { showingWorkHours = true }
+            WorkHoursSection(settings, loc, onSettingsChange) { showingWorkHours = true }
             HeartbeatSection(
                 settings = settings,
                 graphs = trackableGraphOptions(agents, snapshots),
@@ -172,8 +172,18 @@ fun SettingsScreen(
         )
     }
     if (showingWorkHours) WorkHoursEditor(
-        initial = WorkHoursSchedule.decode(settings.workHours), loc = loc,
-        onSave = { onSettingsChange(settings.copy(workHours = it.encoded)); showingWorkHours = false },
+        initial = WorkHoursSchedule.decode(settings.workHours),
+        enabled = WorkHoursSchedule.isEnabled(settings.workHours, settings.workHoursEnabled),
+        loc = loc,
+        onSave = { draft ->
+            // Pin the derived value against the OLD schedule: saving hours changes the times, never
+            // the switch. Deriving from the new grid would silently turn the feature on the first
+            // time an empty grid is painted.
+            val pinned = settings.workHoursEnabled
+                ?: WorkHoursSchedule.isEnabled(settings.workHours, null)
+            onSettingsChange(settings.copy(workHours = draft.encoded, workHoursEnabled = pinned))
+            showingWorkHours = false
+        },
         onDismiss = { showingWorkHours = false },
     )
 }
@@ -188,13 +198,28 @@ private fun DemoSection(isDemo: Boolean, loc: L10n, onToggle: () -> Unit) {
 }
 
 @Composable
-private fun WorkHoursSection(settings: AppSettings, loc: L10n, onOpen: () -> Unit) {
+private fun WorkHoursSection(
+    settings: AppSettings,
+    loc: L10n,
+    onSettingsChange: (AppSettings) -> Unit,
+    onOpen: () -> Unit,
+) {
     val schedule = WorkHoursSchedule.decode(settings.workHours)
+    val enabled = WorkHoursSchedule.isEnabled(settings.workHours, settings.workHoursEnabled)
     TerminalBox(title = "WORK HOURS") {
+        SettingToggle(
+            checked = enabled,
+            title = "use work hours",
+            onClick = { onSettingsChange(settings.copy(workHoursEnabled = !enabled)) },
+        )
+        // Editing stays reachable while the feature is off so hours can be prepared or fixed. The
+        // summary also keeps showing, so a switched-off schedule still looks saved rather than lost.
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            TerminalTextButton(loc.workHoursButton, onClick = onOpen, color = Term.Green)
+            TerminalTextButton(loc.workHoursButton, onClick = onOpen,
+                color = if (enabled) Term.Green else Term.Dim)
             Text(if (schedule.isEmpty) loc.workHoursNotSet else loc.workHoursSummary(schedule.onHours),
-                color = Term.Dim, style = terminalTextStyle(11.sp))
+                color = if (enabled && !schedule.isEmpty) Term.Green else Term.Dim,
+                style = terminalTextStyle(11.sp))
         }
         HelpText(loc.settingsWorkHoursHelp)
     }

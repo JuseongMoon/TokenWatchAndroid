@@ -40,6 +40,7 @@ class MainScreenInteractionTest {
                     appVersion = "1.0",
                     isRefreshingAll = false,
                     onSettings = {},
+                    onAnnouncements = {},
                     onAddAgent = {},
                     onOpenAgent = { _ -> },
                     onMoveUp = { _ -> },

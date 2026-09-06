@@ -6,16 +6,23 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
@@ -108,6 +115,66 @@ internal fun TerminalDivider(modifier: Modifier = Modifier) {
             .height(1.dp)
             .background(Term.Dim.copy(alpha = 0.35f)),
     )
+}
+
+/**
+ * Bracketed glyph button — `[icon]` — for the header, where a text label would crowd the title.
+ *
+ * The bracket characters are drawn as text with a vector icon between them rather than using the
+ * ✉/⚙ code points, which render as colour emoji on Android and break the terminal palette.
+ * [badged] paints the small unread dot; the count itself is left to the accessibility label.
+ */
+@Composable
+internal fun TerminalGlyphButton(
+    icon: ImageVector,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    color: Color = Term.Cyan,
+    accessibilityLabel: String? = null,
+    badged: Boolean = false,
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    Box(
+        modifier = modifier
+            .then(
+                if (accessibilityLabel != null) {
+                    Modifier.semantics(mergeDescendants = true) {
+                        contentDescription = accessibilityLabel
+                        role = Role.Button
+                    }
+                } else {
+                    Modifier
+                },
+            )
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                role = Role.Button,
+                onClick = onClick,
+            )
+            .padding(horizontal = 2.dp, vertical = 5.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(text = "[", color = color, style = terminalTextStyle(13.sp, FontWeight.SemiBold))
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = color,
+                modifier = Modifier.size(15.dp),
+            )
+            Text(text = "]", color = color, style = terminalTextStyle(13.sp, FontWeight.SemiBold))
+        }
+        if (badged) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .offset(x = 2.dp, y = (-1).dp)
+                    .size(6.dp)
+                    .clip(CircleShape)
+                    .background(Term.Green),
+            )
+        }
+    }
 }
 
 @Composable

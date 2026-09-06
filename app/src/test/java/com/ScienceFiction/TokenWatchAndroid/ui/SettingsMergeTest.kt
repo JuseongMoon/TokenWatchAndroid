@@ -4,6 +4,7 @@ import com.ScienceFiction.TokenWatchAndroid.data.AppSettings
 import com.ScienceFiction.TokenWatchAndroid.localization.AppLanguage
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -57,5 +58,23 @@ class SettingsMergeTest {
         assertFalse(merged.notifyWeeklyResets)
         assertTrue(merged.notifySessionResets)
         assertTrue(merged.keepScreenOn)
+    }
+
+    @Test
+    fun workHoursFlagMergesInBothDirectionsIncludingBackToUnset() {
+        val base = AppSettings(workHours = "1".repeat(168))
+        val current = base.copy(keepScreenOn = true)
+
+        val turnedOff = mergeSettingsChange(base, base.copy(workHoursEnabled = false), current)
+        assertEquals(false, turnedOff.workHoursEnabled)
+        assertTrue(turnedOff.keepScreenOn)
+
+        // Nullable fields cannot ride the takeIf/elvis idiom: a reset to "unset" has to survive too.
+        val backToUnset = mergeSettingsChange(
+            base = turnedOff,
+            proposed = turnedOff.copy(workHoursEnabled = null),
+            current = turnedOff,
+        )
+        assertNull(backToUnset.workHoursEnabled)
     }
 }

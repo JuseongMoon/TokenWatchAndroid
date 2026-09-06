@@ -50,8 +50,8 @@ data class L10n(val lang: Lang) {
     val a11yExitDemo get() = choose("데모 종료", "Exit demo")
 
     val settingsWorkHoursHelp get() = choose(
-        "주간 그래프의 현재 시각 세로선이 설정한 업무시간에만 흐릅니다. 비워 두면 한 주 내내 균일하게 흐릅니다.",
-        "The current-time line on weekly graphs advances only during your work hours. Leave empty to flow evenly across the whole week.",
+        "주간 그래프의 현재 시각 세로선이 설정한 업무시간에만 흐릅니다. 체크를 끄면 한 주 내내 균일하게 흐르고, 설정해 둔 시간대는 그대로 보관됩니다.",
+        "The current-time line on weekly graphs advances only during your work hours. Uncheck to flow evenly across the whole week — your saved hours are kept.",
     )
     val workHoursButton get() = choose("[ 업무시간 설정 ]", "[ set work hours ]")
     val workHoursNotSet get() = choose("설정 안 됨", "not set")
@@ -140,6 +140,35 @@ data class L10n(val lang: Lang) {
     val notifDefaultTitle get() = "TokenWatch"
 
     val a11yBack get() = choose("뒤로", "Back")
+
+    val announcementClose get() = choose("닫기", "Close")
+    val announcementNever get() = choose("다시 열지 않기", "Don't show again")
+    val announcementsEmpty get() = choose("아직 받은 공지가 없습니다.", "No announcements yet.")
+    val announcementsUnavailable get() = choose(
+        "공지를 불러오지 못했습니다. 잠시 뒤 다시 열어보세요.",
+        "Couldn't load announcements. Try again in a moment.",
+    )
+    fun a11yAnnouncements(unread: Int) = if (unread == 0) {
+        choose("공지", "Announcements")
+    } else {
+        choose("공지, 안 읽음 ${unread}개", "Announcements, $unread unread")
+    }
+
+    /** Publication date. The year is only spelled out when it is not the current one. */
+    fun announcementDate(
+        date: Instant,
+        now: Instant = Instant.now(),
+        zoneId: ZoneId = ZoneId.systemDefault(),
+    ): String {
+        val sameYear = date.atZone(zoneId).year == now.atZone(zoneId).year
+        val pattern = when {
+            lang == Lang.KO && sameYear -> "M월 d일"
+            lang == Lang.KO -> "yyyy년 M월 d일"
+            sameYear -> "MMM d"
+            else -> "MMM d, yyyy"
+        }
+        return DateTimeFormatter.ofPattern(pattern, dateLocale).format(date.atZone(zoneId))
+    }
     val a11yStatusPage get() = choose("서비스 상태 페이지 열기", "Open service status page")
     val logoutConfirmTitle get() = choose("로그아웃하시겠어요?", "Log out?")
     val logout get() = choose("로그아웃", "Log out")

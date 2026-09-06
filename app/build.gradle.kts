@@ -12,10 +12,22 @@ android {
         applicationId = "com.ScienceFiction.TokenWatchAndroid"
         minSdk = 28
         targetSdk = 36
-        versionCode = 11
-        versionName = "1.0.1"
+        versionCode = 12
+        versionName = "1.1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // Announcement feed (Firestore REST, no Firebase SDK). The key is an Android-only
+        // client identifier restricted to the Firestore API; access is governed by the
+        // Firestore security rules, and the feed document is public by design.
+        buildConfigField("String", "ANNOUNCEMENT_PROJECT_ID", "\"tokenwatch-app\"")
+        buildConfigField(
+            "String",
+            "ANNOUNCEMENT_API_KEY",
+            "\"AIzaSyBiC3NxeGkvd6_IfoxITe0DPx-E2OTocbY\"",
+        )
+        // Kept configurable so the feed can be pointed elsewhere without editing app code.
+        buildConfigField("String", "ANNOUNCEMENT_FEED_DOC", "\"android\"")
     }
 
     buildTypes {
@@ -63,6 +75,7 @@ dependencies {
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
+    implementation(libs.androidx.compose.material.icons.core)
 
     implementation(libs.okhttp)
     implementation(libs.moshi)

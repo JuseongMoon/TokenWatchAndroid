@@ -10,8 +10,10 @@ import com.ScienceFiction.TokenWatchAndroid.auth.device.CopilotDeviceFlow
 import com.ScienceFiction.TokenWatchAndroid.auth.oauth.ClaudeOAuthClient
 import com.ScienceFiction.TokenWatchAndroid.auth.oauth.CodexOAuthClient
 import com.ScienceFiction.TokenWatchAndroid.data.AgentRepository
+import com.ScienceFiction.TokenWatchAndroid.data.AnnouncementRepository
 import com.ScienceFiction.TokenWatchAndroid.data.SettingsRepository
 import com.ScienceFiction.TokenWatchAndroid.localization.AppLocaleState
+import com.ScienceFiction.TokenWatchAndroid.network.announcements.AnnouncementFeedClient
 import com.ScienceFiction.TokenWatchAndroid.network.core.HttpTransport
 import com.ScienceFiction.TokenWatchAndroid.network.orchestration.ProviderUsageRegistry
 import com.ScienceFiction.TokenWatchAndroid.network.orchestration.RateLimitGate
@@ -21,6 +23,7 @@ import com.ScienceFiction.TokenWatchAndroid.network.status.ServiceStatusClient
 import com.ScienceFiction.TokenWatchAndroid.notifications.BackgroundRefreshScheduler
 import com.ScienceFiction.TokenWatchAndroid.notifications.ResetNotificationManager
 import com.ScienceFiction.TokenWatchAndroid.store.AgentStore
+import com.ScienceFiction.TokenWatchAndroid.store.AnnouncementStore
 import java.io.Closeable
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -84,6 +87,22 @@ class TokenWatchContainer(context: Context) : Closeable {
         resetNotificationManager = resetNotificationManager,
     )
 
+    /**
+     * True while running under instrumentation. The announcement popup is a modal scrim, and a
+     * real announcement can be published at any time, so leaving it enabled would make the UI
+     * tests fail intermittently for reasons unrelated to what they cover.
+     */
+    val underInstrumentation: Boolean = runCatching {
+        Class.forName("androidx.test.platform.app.InstrumentationRegistry")
+    }.isSuccess
+
+    // Announcements ride the shared transport but are otherwise independent of the usage path.
+    val announcementStore = AnnouncementStore(
+        scope = scope,
+        repository = AnnouncementRepository(applicationContext),
+        client = AnnouncementFeedClient(transport),
+    )
+
     private val providerMigrationJob = scope.launch {
         agentRepository.migrateUnsupportedProviders { id ->
             tokenStore.delete(id)
@@ -101,6 +120,7 @@ class TokenWatchContainer(context: Context) : Closeable {
         languageSyncJob.cancel()
         providerMigrationJob.cancel()
         agentStore.close()
+        announcementStore.close()
         scope.cancel()
     }
 }

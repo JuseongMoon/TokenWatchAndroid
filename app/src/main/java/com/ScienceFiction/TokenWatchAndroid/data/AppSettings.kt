@@ -8,6 +8,8 @@ data class AppSettings(
     val hideUnusedWindows: Boolean = false,
     val gaugeCritter: Boolean = true,
     val workHours: String = "",
+    /** Tri-state: null means "derive from the schedule". See WorkHoursSchedule.isEnabled. */
+    val workHoursEnabled: Boolean? = null,
     val heartbeatCursor: Boolean = false,
     val heartbeatTracking: Boolean = false,
     val heartbeatTargets: Set<String> = emptySet(),
@@ -30,6 +32,7 @@ object AppSettingsCodec {
         hideUnusedWindows: Boolean? = null,
         gaugeCritter: Boolean? = null,
         workHours: String? = null,
+        workHoursEnabled: Boolean? = null,
         heartbeatCursor: Boolean? = null,
         heartbeatTracking: Boolean? = null,
         heartbeatTargets: Set<String>? = null,
@@ -43,6 +46,7 @@ object AppSettingsCodec {
             hideUnusedWindows = hideUnusedWindows ?: false,
             gaugeCritter = gaugeCritter ?: true,
             workHours = WorkHoursSetting.normalize(workHours.orEmpty()),
+            workHoursEnabled = workHoursEnabled,
             heartbeatCursor = heartbeatCursor ?: false,
             heartbeatTracking = heartbeatTracking ?: false,
             heartbeatTargets = heartbeatTargets.orEmpty(),
@@ -52,6 +56,7 @@ object AppSettingsCodec {
         ),
     )
 
+    /** Note: workHoursEnabled is deliberately left alone — coercing it would collapse the tri-state. */
     fun normalize(settings: AppSettings): AppSettings = settings.copy(
         refreshInterval = settings.refreshInterval.takeIf(supportedRefreshIntervals::contains)
             ?: AppSettings.DEFAULT_REFRESH_INTERVAL,
