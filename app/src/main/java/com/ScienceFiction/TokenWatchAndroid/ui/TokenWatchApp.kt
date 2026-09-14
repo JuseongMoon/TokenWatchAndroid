@@ -40,10 +40,16 @@ import com.ScienceFiction.TokenWatchAndroid.localization.L10n
 import com.ScienceFiction.TokenWatchAndroid.store.AccountInfo
 import com.ScienceFiction.TokenWatchAndroid.tokenWatchContainer
 import com.ScienceFiction.TokenWatchAndroid.analytics.AnalyticsEvent
+import com.ScienceFiction.TokenWatchAndroid.analytics.AnalyticsService
+import com.ScienceFiction.TokenWatchAndroid.analytics.LoginStage
+import com.ScienceFiction.TokenWatchAndroid.domain.AgentProvider
+import com.ScienceFiction.TokenWatchAndroid.domain.WorkHoursSchedule
+import com.ScienceFiction.TokenWatchAndroid.analytics.RefreshSource
 import com.ScienceFiction.TokenWatchAndroid.analytics.AnnouncementAction
 import com.ScienceFiction.TokenWatchAndroid.analytics.DemoSource
 import com.ScienceFiction.TokenWatchAndroid.analytics.ScreenName
 import com.ScienceFiction.TokenWatchAndroid.ui.components.AnnouncementDialog
+import com.ScienceFiction.TokenWatchAndroid.ui.add.AddAgentPhase
 import com.ScienceFiction.TokenWatchAndroid.ui.add.AddAgentScreen
 import com.ScienceFiction.TokenWatchAndroid.ui.add.AddAgentFlowViewModel
 import com.ScienceFiction.TokenWatchAndroid.ui.screens.AnnouncementDetailScreen
@@ -187,6 +193,99 @@ internal fun TokenWatchApp(
         onNotificationHandled()
     }
 
+    // Settings changes are logged by diffing the persisted model rather than from each toggle:
+    // one place to maintain, and it cannot drift from what was actually saved. The analytics
+    // opt-out itself is only logged when switching on — logging the switch-off would be the very
+    // thing the user just declined.
+    var previousSettings by remember { mutableStateOf<AppSettings?>(null) }
+    LaunchedEffect(settings, initialLoadFinished) {
+        // The settings Flow emits defaults before the stored values arrive. Diffing across that
+        // first transition would report every persisted preference as a fresh change on every
+        // launch, so the baseline is only armed once the store has finished loading.
+        if (!initialLoadFinished) {
+            previousSettings = settings
+            return@LaunchedEffect
+        }
+        val previous = previousSettings
+        previousSettings = settings
+        if (previous == null) return@LaunchedEffect
+        fun changed(name: String, value: String) {
+            analytics.log(AnalyticsEvent.SettingChange(name, value))
+        }
+        fun onOff(value: Boolean) = if (value) "on" else "off"
+        if (previous.refreshInterval != settings.refreshInterval) {
+            changed("refresh_interval", settings.refreshInterval.toString())
+        }
+        if (previous.keepScreenOn != settings.keepScreenOn) changed("keep_screen_on", onOff(settings.keepScreenOn))
+        if (previous.hideUnusedWindows != settings.hideUnusedWindows) {
+            changed("hide_unused", onOff(settings.hideUnusedWindows))
+        }
+        if (previous.gaugeCritter != settings.gaugeCritter) changed("gauge_critter", onOff(settings.gaugeCritter))
+        if (previous.workHoursEnabled != settings.workHoursEnabled) {
+            changed(
+                "work_hours_enabled",
+                onOff(WorkHoursSchedule.isEnabled(settings.workHours, settings.workHoursEnabled)),
+            )
+        }
+        if (previous.workHours != settings.workHours) {
+            changed(
+                "work_hours",
+                AnalyticsService.workHoursBucket(
+                    hours = WorkHoursSchedule.decode(settings.workHours).onHours,
+                    enabled = WorkHoursSchedule.isEnabled(settings.workHours, settings.workHoursEnabled),
+                ),
+            )
+        }
+        if (previous.heartbeatCursor != settings.heartbeatCursor) {
+            changed("heartbeat_cursor", onOff(settings.heartbeatCursor))
+        }
+        if (previous.heartbeatTracking != settings.heartbeatTracking) {
+            changed("heartbeat_tracking", onOff(settings.heartbeatTracking))
+        }
+        if (previous.notifySessionResets != settings.notifySessionResets) {
+            changed("notify_session", onOff(settings.notifySessionResets))
+        }
+        if (previous.notifyWeeklyResets != settings.notifyWeeklyResets) {
+            changed("notify_weekly", onOff(settings.notifyWeeklyResets))
+        }
+        if (previous.language != settings.language) changed("language", settings.language.wireId)
+        if (!previous.analyticsEnabled && settings.analyticsEnabled) changed("analytics", "on")
+    }
+
+    // The Failed phase carries no provider, so the last one seen is remembered to attribute a
+    // failure or an abandoned flow. Cleared once the funnel ends.
+    var loginProvider by remember { mutableStateOf<AgentProvider?>(null) }
+    var loginStage by remember { mutableStateOf(LoginStage.AUTHORIZE) }
+    LaunchedEffect(addAgentFlow.phase) {
+        when (val phase = addAgentFlow.phase) {
+            is AddAgentPhase.OAuthLogin -> {
+                loginProvider = phase.provider
+                loginStage = LoginStage.AUTHORIZE
+                analytics.log(AnalyticsEvent.LoginStart(phase.provider))
+            }
+            is AddAgentPhase.ApiKey -> {
+                loginProvider = phase.provider
+                loginStage = LoginStage.API_KEY_ENTRY
+                analytics.log(AnalyticsEvent.LoginStart(phase.provider))
+            }
+            is AddAgentPhase.DeviceFlow -> {
+                loginProvider = phase.provider
+                loginStage = LoginStage.DEVICE_POLL
+                analytics.log(AnalyticsEvent.LoginStart(phase.provider))
+            }
+            AddAgentPhase.Authenticating -> loginStage = LoginStage.EXCHANGE
+            is AddAgentPhase.Failed -> {
+                loginProvider?.let {
+                    // The message is deliberately not forwarded: it can carry provider error text.
+                    analytics.log(AnalyticsEvent.LoginFail(it, loginStage, loginStage.wireId))
+                }
+                loginProvider = null
+            }
+            AddAgentPhase.Completed -> loginProvider = null
+            AddAgentPhase.PickProvider -> Unit
+        }
+    }
+
     LaunchedEffect(route, selectedAgent) {
         val screen = when {
             route == ROUTE_MAIN -> ScreenName.MAIN
@@ -249,9 +348,16 @@ internal fun TokenWatchApp(
                 onOpenAgent = { agent -> route = "$ROUTE_DETAIL_PREFIX${agent.id}" },
                 onMoveUp = { agent -> scope.launch { store.moveUp(agent) } },
                 onMoveDown = { agent -> scope.launch { store.moveDown(agent) } },
-                onRefreshAgent = { agent -> scope.launch { store.refresh(agent) } },
-                onDeleteAgent = { agent -> scope.launch { store.remove(agent) } },
+                onRefreshAgent = { agent ->
+                    analytics.log(AnalyticsEvent.RefreshManual(RefreshSource.LIST))
+                    scope.launch { store.refresh(agent) }
+                },
+                onDeleteAgent = { agent ->
+                    analytics.log(AnalyticsEvent.AgentRemove(agent.provider, agents.size - 1))
+                    scope.launch { store.remove(agent) }
+                },
                 onRefreshAll = {
+                    analytics.log(AnalyticsEvent.RefreshManual(RefreshSource.PULL))
                     if (!isRefreshingAll) {
                         scope.launch {
                             isRefreshingAll = true
@@ -282,6 +388,10 @@ internal fun TokenWatchApp(
                 loc = loc,
                 onAddAgent = { provider, tokens ->
                     store.addAgent(provider, tokens)
+                    analytics.log(AnalyticsEvent.LoginSuccess(provider, agents.size + 1))
+                    if (agents.isEmpty()) {
+                        analytics.log(AnalyticsEvent.ActivationComplete(provider))
+                    }
                     if (
                         Build.VERSION.SDK_INT >= 33 &&
                         context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
@@ -293,6 +403,10 @@ internal fun TokenWatchApp(
                 },
                 onOpenUrl = openUrl,
                 onDismiss = {
+                    loginProvider?.let {
+                        analytics.log(AnalyticsEvent.LoginAbandon(it, loginStage))
+                        loginProvider = null
+                    }
                     addAgentFlow.cancelAndReset()
                     route = ROUTE_MAIN
                 },
@@ -327,7 +441,10 @@ internal fun TokenWatchApp(
                             }
                         }
                     },
-                    onLogoutAgent = { agent -> scope.launch { store.remove(agent) } },
+                    onLogoutAgent = { agent ->
+                        analytics.log(AnalyticsEvent.AgentRemove(agent.provider, agents.size - 1))
+                        scope.launch { store.remove(agent) }
+                    },
                     isDemo = isDemo,
                     onToggleDemo = {
                         scope.launch {
@@ -384,6 +501,9 @@ internal fun TokenWatchApp(
                     onOpenUrl = openUrl,
                     onBack = { route = ROUTE_MAIN },
                     onLogout = {
+                        analytics.log(
+                            AnalyticsEvent.AgentRemove(selectedAgent.provider, agents.size - 1),
+                        )
                         scope.launch {
                             store.remove(selectedAgent)
                             route = ROUTE_MAIN
