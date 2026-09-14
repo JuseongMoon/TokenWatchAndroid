@@ -2,4 +2,6 @@
 <resources>
     <color name="term_bg">#000000</color>
     <color name="term_green">#4CD07A</color>
+    <!-- Matches the artwork's own background so the inset edge is invisible. -->
+    <color name="ic_launcher_background">#000000</color>
 </resources>

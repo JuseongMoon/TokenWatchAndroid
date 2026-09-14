@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The artwork is a wide gauge bar, so at full bleed a circular launcher mask clips its ends.
+
+  The foreground is drawn into 108dp with only the middle 72dp guaranteed visible. 9dp of inset was
+  not enough: the gauge sits below the artwork's centre, and a circle is narrower away from its
+  middle, so the ends still clipped on a round launcher. At 14dp the art is 80dp wide, putting the
+  gauge (~62dp) inside the ~71dp the circle actually offers at that height.
+-->
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@drawable/tokenwatch_icon_v2"
+    android:inset="14dp" />
