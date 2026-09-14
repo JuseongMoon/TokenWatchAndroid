@@ -46,6 +46,7 @@ class SettingsRepository(
         notifySessionResets = safeGet(Keys.notifySessionResets),
         notifyWeeklyResets = safeGet(Keys.notifyWeeklyResets),
         languageWireId = safeGet(Keys.language),
+        analyticsEnabled = safeGet(Keys.analyticsEnabled),
     )
 
     private fun MutablePreferences.write(settings: AppSettings) {
@@ -65,6 +66,7 @@ class SettingsRepository(
         this[Keys.notifySessionResets] = settings.notifySessionResets
         this[Keys.notifyWeeklyResets] = settings.notifyWeeklyResets
         this[Keys.language] = settings.language.wireId
+        this[Keys.analyticsEnabled] = settings.analyticsEnabled
     }
 
     private object Keys {
@@ -80,5 +82,6 @@ class SettingsRepository(
         val notifySessionResets = booleanPreferencesKey("tokenwatch.notifySession")
         val notifyWeeklyResets = booleanPreferencesKey("tokenwatch.notifyWeekly")
         val language = stringPreferencesKey(APP_LANGUAGE_STORAGE_KEY)
+        val analyticsEnabled = booleanPreferencesKey("tokenwatch.analyticsEnabled")
     }
 }

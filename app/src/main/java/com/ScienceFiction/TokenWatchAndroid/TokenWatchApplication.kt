@@ -2,6 +2,7 @@ package com.ScienceFiction.TokenWatchAndroid
 
 import android.app.Application
 import android.content.Context
+import com.ScienceFiction.TokenWatchAndroid.analytics.AnalyticsService
 import com.ScienceFiction.TokenWatchAndroid.auth.AndroidCredentialVault
 import com.ScienceFiction.TokenWatchAndroid.auth.ProviderAuthRegistry
 import com.ScienceFiction.TokenWatchAndroid.auth.ProviderTokenRefresher
@@ -103,6 +104,19 @@ class TokenWatchContainer(context: Context) : Closeable {
         client = AnnouncementFeedClient(transport),
     )
 
+    /** Demo state is read lazily so sample agents never surface as real provider activity. */
+    val analytics = AnalyticsService(
+        context = applicationContext,
+        isDemo = { agentStore.isDemo.value },
+    )
+
+    private val analyticsSyncJob = scope.launch {
+        agentStore.settings.collect { settings ->
+            analytics.setCollectionEnabled(settings.analyticsEnabled)
+            analytics.syncSettingsProperties(settings)
+        }
+    }
+
     private val providerMigrationJob = scope.launch {
         agentRepository.migrateUnsupportedProviders { id ->
             tokenStore.delete(id)
@@ -118,6 +132,7 @@ class TokenWatchContainer(context: Context) : Closeable {
 
     override fun close() {
         languageSyncJob.cancel()
+        analyticsSyncJob.cancel()
         providerMigrationJob.cancel()
         agentStore.close()
         announcementStore.close()

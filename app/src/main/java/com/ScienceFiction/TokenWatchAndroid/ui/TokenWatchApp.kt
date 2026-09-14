@@ -39,6 +39,10 @@ import com.ScienceFiction.TokenWatchAndroid.domain.ServiceHealth
 import com.ScienceFiction.TokenWatchAndroid.localization.L10n
 import com.ScienceFiction.TokenWatchAndroid.store.AccountInfo
 import com.ScienceFiction.TokenWatchAndroid.tokenWatchContainer
+import com.ScienceFiction.TokenWatchAndroid.analytics.AnalyticsEvent
+import com.ScienceFiction.TokenWatchAndroid.analytics.AnnouncementAction
+import com.ScienceFiction.TokenWatchAndroid.analytics.DemoSource
+import com.ScienceFiction.TokenWatchAndroid.analytics.ScreenName
 import com.ScienceFiction.TokenWatchAndroid.ui.components.AnnouncementDialog
 import com.ScienceFiction.TokenWatchAndroid.ui.add.AddAgentScreen
 import com.ScienceFiction.TokenWatchAndroid.ui.add.AddAgentFlowViewModel
@@ -61,19 +65,25 @@ private const val ROUTE_ANNOUNCEMENTS = "announcements"
 private const val ROUTE_ANNOUNCEMENT_PREFIX = "announcement:"
 
 @Composable
-fun TokenWatchApp() {
+fun TokenWatchApp(
+    notificationAgentId: String? = null,
+    onNotificationHandled: () -> Unit = {},
+) {
     val container = LocalContext.current.tokenWatchContainer()
     val addAgentFlow: AddAgentFlowViewModel = viewModel()
-    TokenWatchApp(container, addAgentFlow)
+    TokenWatchApp(container, addAgentFlow, notificationAgentId, onNotificationHandled)
 }
 
 @Composable
 internal fun TokenWatchApp(
     container: TokenWatchContainer,
     addAgentFlow: AddAgentFlowViewModel,
+    notificationAgentId: String? = null,
+    onNotificationHandled: () -> Unit = {},
 ) {
     val store = container.agentStore
     val announcements = container.announcementStore
+    val analytics = container.analytics
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -165,6 +175,31 @@ internal fun TokenWatchApp(
         ?.let { value -> runCatching { UUID.fromString(value) }.getOrNull() }
         ?.let { id -> agents.firstOrNull { it.id == id } }
 
+    // A tapped reset notification opens that agent's detail. Waits for the initial load so the
+    // agent list is populated; an agent removed in the meantime just leaves the user on main.
+    LaunchedEffect(notificationAgentId, agents, initialLoadFinished) {
+        val raw = notificationAgentId ?: return@LaunchedEffect
+        if (!initialLoadFinished) return@LaunchedEffect
+        val id = runCatching { UUID.fromString(raw) }.getOrNull()
+        if (id != null && agents.any { it.id == id }) {
+            route = "$ROUTE_DETAIL_PREFIX$id"
+        }
+        onNotificationHandled()
+    }
+
+    LaunchedEffect(route, selectedAgent) {
+        val screen = when {
+            route == ROUTE_MAIN -> ScreenName.MAIN
+            route == ROUTE_ADD -> ScreenName.ADD_AGENT
+            route == ROUTE_SETTINGS -> ScreenName.SETTINGS
+            route == ROUTE_ANNOUNCEMENTS -> ScreenName.ANNOUNCEMENTS
+            route.startsWith(ROUTE_ANNOUNCEMENT_PREFIX) -> ScreenName.ANNOUNCEMENT_DETAIL
+            route.startsWith(ROUTE_DETAIL_PREFIX) -> ScreenName.AGENT_DETAIL
+            else -> null
+        } ?: return@LaunchedEffect
+        analytics.log(AnalyticsEvent.ScreenView(screen, selectedAgent?.provider))
+    }
+
     val selectedAnnouncement = route
         .takeIf { it.startsWith(ROUTE_ANNOUNCEMENT_PREFIX) }
         ?.removePrefix(ROUTE_ANNOUNCEMENT_PREFIX)
@@ -228,8 +263,14 @@ internal fun TokenWatchApp(
                         }
                     }
                 },
-                onEnterDemo = { scope.launch { store.enterDemo(); store.startAutoRefresh(settings.refreshInterval) } },
-                onExitDemo = { scope.launch { store.exitDemo(); store.startAutoRefresh(settings.refreshInterval) } },
+                onEnterDemo = {
+                    analytics.log(AnalyticsEvent.DemoStart(DemoSource.EMPTY_LIST))
+                    scope.launch { store.enterDemo(); store.startAutoRefresh(settings.refreshInterval) }
+                },
+                onExitDemo = {
+                    analytics.log(AnalyticsEvent.DemoEnd)
+                    scope.launch { store.exitDemo(); store.startAutoRefresh(settings.refreshInterval) }
+                },
             )
         }
 
@@ -300,6 +341,7 @@ internal fun TokenWatchApp(
                         notificationPermissionRevision
                         container.resetNotificationManager.isDenied()
                     },
+                    onOpenUrl = openUrl,
                     onOpenNotificationSettings = {
                         context.startActivity(
                             Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
@@ -314,6 +356,12 @@ internal fun TokenWatchApp(
                 BackHandler { route = ROUTE_ANNOUNCEMENTS }
                 LaunchedEffect(selectedAnnouncement.id) {
                     announcements.markSeen(selectedAnnouncement.id)
+                    analytics.log(
+                        AnalyticsEvent.AnnouncementOpen(
+                            selectedAnnouncement.id,
+                            selectedAnnouncement.kind,
+                        ),
+                    )
                 }
                 AnnouncementDetailScreen(
                     announcement = selectedAnnouncement,
@@ -363,12 +411,23 @@ internal fun TokenWatchApp(
         LaunchedEffect(announcement.id) {
             // Seen in the popup counts as read in the inbox too, so no badge is left behind.
             announcements.markSeen(announcement.id)
+            analytics.log(AnalyticsEvent.AnnouncementShown(announcement.id, announcement.kind))
         }
         AnnouncementDialog(
             announcement = announcement,
             loc = loc,
-            onClose = announcements::closePresented,
-            onDismissForever = { scope.launch { announcements.dismissPresentedForever() } },
+            onClose = {
+                analytics.log(
+                    AnalyticsEvent.AnnouncementActionEvent(announcement.id, AnnouncementAction.CLOSE),
+                )
+                announcements.closePresented()
+            },
+            onDismissForever = {
+                analytics.log(
+                    AnalyticsEvent.AnnouncementActionEvent(announcement.id, AnnouncementAction.NEVER),
+                )
+                scope.launch { announcements.dismissPresentedForever() }
+            },
         )
     }
 
@@ -481,4 +540,6 @@ internal fun mergeSettingsChange(
         it != base.notifyWeeklyResets
     } ?: current.notifyWeeklyResets,
     language = proposed.language.takeIf { it != base.language } ?: current.language,
+    analyticsEnabled = proposed.analyticsEnabled.takeIf { it != base.analyticsEnabled }
+        ?: current.analyticsEnabled,
 )

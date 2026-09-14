@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "913259208794",
+    "project_id": "tokenwatch-app",
+    "storage_bucket": "tokenwatch-app.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:913259208794:android:987cb354982006fad5f863",
+        "android_client_info": {
+          "package_name": "com.ScienceFiction.TokenWatchAndroid"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBiC3NxeGkvd6_IfoxITe0DPx-E2OTocbY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

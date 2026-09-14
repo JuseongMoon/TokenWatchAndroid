@@ -57,6 +57,9 @@ enum class RefreshIntervalOption(val seconds: Int, val terminalLabel: String) {
     AUTO(-1, "auto"),
 }
 
+/** Also the URL declared to Play Console; the two must not drift apart. */
+private const val PRIVACY_POLICY_URL = "https://sciencefiction.co.kr/tokenwatch/privacy/"
+
 data class GraphOption(
     val agent: Agent,
     val window: UsageWindow,
@@ -81,6 +84,7 @@ fun SettingsScreen(
     modifier: Modifier = Modifier,
     notificationDenied: Boolean = false,
     onOpenNotificationSettings: () -> Unit = {},
+    onOpenUrl: (String) -> Unit = {},
 ) {
     var pendingLogoutId by rememberSaveable { mutableStateOf<String?>(null) }
     var showingWorkHours by rememberSaveable { mutableStateOf(false) }
@@ -149,6 +153,12 @@ fun SettingsScreen(
                 keepScreenOn = settings.keepScreenOn,
                 loc = loc,
                 onToggle = { onSettingsChange(settings.copy(keepScreenOn = !settings.keepScreenOn)) },
+            )
+            PrivacySection(
+                settings = settings,
+                loc = loc,
+                onSettingsChange = onSettingsChange,
+                onOpenPolicy = { onOpenUrl(PRIVACY_POLICY_URL) },
             )
             if (agents.isNotEmpty()) DemoSection(isDemo, loc, onToggleDemo)
             TerminalBox(title = "INFO") {
@@ -565,6 +575,25 @@ private fun GraphOptionRow(graph: GraphOption, selected: Boolean, onClick: () ->
             color = Term.statusColor(graph.window.remainingPercent),
             style = terminalTextStyle(12.sp),
         )
+    }
+}
+
+/** Opt-out plus the policy link. Play expects a reachable policy for an app holding credentials. */
+@Composable
+private fun PrivacySection(
+    settings: AppSettings,
+    loc: L10n,
+    onSettingsChange: (AppSettings) -> Unit,
+    onOpenPolicy: () -> Unit,
+) {
+    TerminalBox(title = "PRIVACY") {
+        SettingToggle(
+            checked = settings.analyticsEnabled,
+            title = "share anonymous usage stats",
+            onClick = { onSettingsChange(settings.copy(analyticsEnabled = !settings.analyticsEnabled)) },
+        )
+        HelpText(loc.settingsPrivacyHelp)
+        TerminalTextButton(loc.privacyPolicyButton, onClick = onOpenPolicy, color = Term.Cyan)
     }
 }
 

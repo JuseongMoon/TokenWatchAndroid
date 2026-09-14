@@ -182,6 +182,18 @@ class ResetNotificationManager(
         internal const val ExtraBody = "body"
         internal const val ExtraAgentId = "agentId"
 
+        /**
+         * Reboot drops every scheduled alarm, but the pending set lives in SharedPreferences and
+         * survives it. Since identifiers are deterministic, the next reconcile would compute an
+         * empty `add` and silently lose the upcoming reset notification. Clearing the set makes
+         * that reconcile re-register everything.
+         */
+        internal fun clearPendingIds(context: Context) {
+            context.applicationContext
+                .getSharedPreferences(PreferencesName, Context.MODE_PRIVATE)
+                .edit { remove(PendingIdsKey) }
+        }
+
         internal fun post(
             context: Context,
             identifier: String,
@@ -230,5 +242,13 @@ class ResetAlarmReceiver : BroadcastReceiver() {
             body = body,
             agentId = intent.getStringExtra(ResetNotificationManager.ExtraAgentId),
         )
+    }
+}
+
+/** Re-arms reset alarms after a reboot. See [ResetNotificationManager.clearPendingIds]. */
+class BootCompletedReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        if (intent.action != Intent.ACTION_BOOT_COMPLETED) return
+        ResetNotificationManager.clearPendingIds(context)
     }
 }

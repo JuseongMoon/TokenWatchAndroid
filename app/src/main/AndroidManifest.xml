@@ -1,10 +1,33 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <!--
+      Firebase Analytics merges this permission in automatically. Removing it is what keeps the
+      Play Console advertising-ID declaration answerable with "no" and matches the iOS build,
+      which uses the ad-ID-free FirebaseAnalyticsCore configuration. Analytics still works: the
+      app never reads the advertising ID.
+    -->
+    <uses-permission
+        android:name="com.google.android.gms.permission.AD_ID"
+        tools:node="remove" />
+    <!--
+      Firebase also pulls in the Privacy Sandbox advertising permissions. The app measures nothing
+      about ads and reads no advertising identifier, so they go too — leaving them would contradict
+      the "no advertising ID" declaration even though AD_ID itself is gone. Analytics event
+      collection does not depend on either.
+    -->
+    <uses-permission
+        android:name="android.permission.ACCESS_ADSERVICES_AD_ID"
+        tools:node="remove" />
+    <uses-permission
+        android:name="android.permission.ACCESS_ADSERVICES_ATTRIBUTION"
+        tools:node="remove" />
 
     <application
         android:name=".TokenWatchApplication"
@@ -26,6 +49,15 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <!-- Exported because the system sends BOOT_COMPLETED; it only clears our own pending set. -->
+        <receiver
+            android:name=".notifications.BootCompletedReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
         <receiver
             android:name=".notifications.ResetAlarmReceiver"
             android:exported="false" />

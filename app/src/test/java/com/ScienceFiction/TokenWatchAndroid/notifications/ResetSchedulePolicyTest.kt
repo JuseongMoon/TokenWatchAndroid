@@ -99,6 +99,22 @@ class ResetSchedulePolicyTest {
         assertTrue(result.remove.all { it.startsWith(ResetSchedulePolicy.IdPrefix) })
     }
 
+    @Test
+    fun clearedPendingSetReschedulesEverything() {
+        // What a reboot looks like to reconcile: the OS dropped the alarms and BootCompletedReceiver
+        // cleared the persisted set, so every desired identifier has to be registered again. If the
+        // stale set were left in place instead, `add` would be empty and the next reset notification
+        // would be lost without a trace.
+        val desired = setOf("reset|a|1", "reset|b|2")
+
+        val afterReboot = ResetSchedulePolicy.reconcile(desired, emptyList())
+        assertEquals(desired, afterReboot.add)
+        assertTrue(afterReboot.remove.isEmpty())
+
+        val stalePendingSet = ResetSchedulePolicy.reconcile(desired, desired.toList())
+        assertTrue(stalePendingSet.add.isEmpty())
+    }
+
     private fun window(
         label: String,
         reset: Instant,

@@ -30,7 +30,22 @@ Android 네이티브 구현입니다. AI 코딩 서비스 7종의 사용량·크
 자격증명을 초기화할 수 있습니다.** 실제 계정으로 로그인한 기기에서 실행하지 말고,
 전용 테스트 기기나 로그인 전에만 실행합니다.
 
-Release 빌드는 R8/minify까지 검증하지만 배포 서명 키는 저장소에 포함하지 않습니다.
+### Release 빌드
+
+```bash
+export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
+./gradlew bundleRelease        # Play 업로드용 AAB
+```
+
+⚠️ **`JAVA_HOME` 지정이 필수입니다.** 이 머신의 기본 JDK는 Temurin 26이고 Gradle 8.13이 이
+버전 문자열을 파싱하지 못해 빌드 스크립트 컴파일 단계에서 죽습니다. `jvmToolchain(21)`은
+컴파일러만 고정할 뿐 Gradle 자신이 도는 JVM은 바꾸지 못하므로, 셸에서 빌드할 때는 위처럼
+JBR 21을 가리켜야 합니다. Android Studio에서 빌드하면 번들 JBR을 쓰므로 문제가 없습니다.
+
+서명은 `keystore.properties`(gitignore)에서 읽고, 키스토어 자체는 저장소 밖에 둡니다. 둘 중
+하나라도 없으면 `assembleRelease`/`bundleRelease`가 **명시적으로 실패**합니다 — 미서명 산출물이
+조용히 만들어지지 않게 하기 위한 가드입니다. 공지 피드 키 3종이 `local.properties`에 없을 때도
+같은 이유로 릴리스 빌드를 막습니다(그대로 두면 공지 기능이 꺼진 채 출시됩니다).
 
 ## Project Structure
 

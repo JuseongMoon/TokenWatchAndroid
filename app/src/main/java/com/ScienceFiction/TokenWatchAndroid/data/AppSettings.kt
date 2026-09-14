@@ -16,6 +16,8 @@ data class AppSettings(
     val notifySessionResets: Boolean = false,
     val notifyWeeklyResets: Boolean = true,
     val language: AppLanguage = AppLanguage.SYSTEM,
+    /** Anonymous usage statistics opt-out. Default on, mirroring iOS. */
+    val analyticsEnabled: Boolean = true,
 ) {
     companion object {
         const val DEFAULT_REFRESH_INTERVAL = 60
@@ -39,6 +41,7 @@ object AppSettingsCodec {
         notifySessionResets: Boolean? = null,
         notifyWeeklyResets: Boolean? = null,
         languageWireId: String? = null,
+        analyticsEnabled: Boolean? = null,
     ): AppSettings = normalize(
         AppSettings(
             refreshInterval = refreshInterval ?: AppSettings.DEFAULT_REFRESH_INTERVAL,
@@ -53,6 +56,7 @@ object AppSettingsCodec {
             notifySessionResets = notifySessionResets ?: false,
             notifyWeeklyResets = notifyWeeklyResets ?: true,
             language = AppLanguage.fromWireId(languageWireId),
+            analyticsEnabled = analyticsEnabled ?: true,
         ),
     )
 
