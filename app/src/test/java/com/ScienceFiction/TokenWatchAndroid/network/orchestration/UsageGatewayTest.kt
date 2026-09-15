@@ -211,6 +211,30 @@ class UsageGatewayTest {
         assertEquals(1, planTransport.requests.size)
     }
 
+    @Test
+    fun fetchOutcomeIsReportedOncePerFetchWithTheRawFailure() = runBlocking {
+        val id = UUID.randomUUID()
+        val outcomes = mutableListOf<Throwable?>()
+        var fail = true
+        val client = ProviderUsageClient {
+            if (fail) throw UsageException.Http(503, "upstream detail") else listOf(window())
+        }
+        val gateway = gateway(
+            client = client,
+            store = storeWithApiKey(id),
+            gate = RateLimitGate(now = { now }),
+        ) { _, _, error -> outcomes += error }
+
+        gateway.fetchSnapshot(AgentProvider.OPENROUTER, id)
+        fail = false
+        gateway.fetchSnapshot(AgentProvider.OPENROUTER, id)
+
+        // One report per fetch, carrying the exception itself — classification belongs to the caller.
+        assertEquals(2, outcomes.size)
+        assertTrue(outcomes[0] is UsageException.Http)
+        assertNull(outcomes[1])
+    }
+
     private fun gateway(
         client: ProviderUsageClient,
         store: TokenStore,
@@ -218,6 +242,7 @@ class UsageGatewayTest {
         codexAccountClient: CodexAccountClient = CodexAccountClient(
             NetworkTransport { error("Codex plan lookup not expected") },
         ),
+        onFetchOutcome: (AgentProvider, UUID, Throwable?) -> Unit = { _, _, _ -> },
     ) = UsageGateway(
         registry = ProviderUsageRegistry(AgentProvider.entries.associateWith { client }),
         tokenStore = store,
@@ -225,6 +250,7 @@ class UsageGatewayTest {
         codexAccountClient = codexAccountClient,
         localization = { l10n },
         now = { now },
+        onFetchOutcome = onFetchOutcome,
     )
 
     private fun storeWithApiKey(id: UUID): TokenStore = TokenStore(

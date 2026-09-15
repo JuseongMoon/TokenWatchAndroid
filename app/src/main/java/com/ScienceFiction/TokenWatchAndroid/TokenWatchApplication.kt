@@ -3,6 +3,8 @@ package com.ScienceFiction.TokenWatchAndroid
 import android.app.Application
 import android.content.Context
 import com.ScienceFiction.TokenWatchAndroid.analytics.AnalyticsService
+import com.ScienceFiction.TokenWatchAndroid.analytics.fetchOutcomeEvent
+import com.ScienceFiction.TokenWatchAndroid.domain.AgentProvider
 import com.ScienceFiction.TokenWatchAndroid.auth.AndroidCredentialVault
 import com.ScienceFiction.TokenWatchAndroid.auth.ProviderAuthRegistry
 import com.ScienceFiction.TokenWatchAndroid.auth.ProviderTokenRefresher
@@ -26,6 +28,8 @@ import com.ScienceFiction.TokenWatchAndroid.notifications.ResetNotificationManag
 import com.ScienceFiction.TokenWatchAndroid.store.AgentStore
 import com.ScienceFiction.TokenWatchAndroid.store.AnnouncementStore
 import java.io.Closeable
+import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -71,6 +75,7 @@ class TokenWatchContainer(context: Context) : Closeable {
         rateLimitGate = RateLimitGate(),
         codexAccountClient = CodexAccountClient(transport),
         localization = localeState::l10n,
+        onFetchOutcome = ::recordFetchOutcome,
     )
     private val serviceStatusClient = ServiceStatusClient(transport)
     private val agentRepository = AgentRepository(applicationContext)
@@ -109,6 +114,17 @@ class TokenWatchContainer(context: Context) : Closeable {
         context = applicationContext,
         isDemo = { agentStore.isDemo.value },
     )
+
+    /**
+     * Last known outcome per agent. Only transitions are reported: a provider that keeps failing
+     * logs one error, not one per refresh, and the recovery is what closes the pair.
+     */
+    private val fetchHadError = ConcurrentHashMap<UUID, Boolean>()
+
+    private fun recordFetchOutcome(provider: AgentProvider, agentId: UUID, error: Throwable?) {
+        val previouslyFailed = fetchHadError.put(agentId, error != null) == true
+        fetchOutcomeEvent(provider, error, previouslyFailed)?.let(analytics::log)
+    }
 
     private val analyticsSyncJob = scope.launch {
         agentStore.settings.collect { settings ->

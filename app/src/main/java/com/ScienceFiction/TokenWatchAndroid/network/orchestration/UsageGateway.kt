@@ -22,6 +22,12 @@ class UsageGateway(
     private val codexAccountClient: CodexAccountClient = CodexAccountClient(),
     private val localization: () -> L10n = { L10n(AppLanguage.SYSTEM.resolved()) },
     private val now: () -> Instant = Instant::now,
+    /**
+     * Called once per fetch with the failure, or null on success. Deliberately a Throwable rather
+     * than a classified reason: this layer should not need to know that analytics exists, so the
+     * bucketing lives with the caller that does.
+     */
+    private val onFetchOutcome: (AgentProvider, UUID, Throwable?) -> Unit = { _, _, _ -> },
 ) {
     suspend fun fetchSnapshot(
         provider: AgentProvider,
@@ -59,14 +65,17 @@ class UsageGateway(
                 error = null,
             ).also { snapshot ->
                 rateLimitGate.recordSuccess(agentId, snapshot)
+                onFetchOutcome(provider, agentId, null)
             }
         } catch (error: UsageException.RateLimited) {
+            onFetchOutcome(provider, agentId, error)
             rateLimitGate.recordRateLimit(agentId, error.retryAfter)
             val until = rateLimitGate.blocked(agentId) ?: now().plusSeconds(300)
             rateLimitedSnapshot(agentId, until)
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Throwable) {
+            onFetchOutcome(provider, agentId, error)
             errorSnapshot(localizedMessage(error, localization()))
         }
     }

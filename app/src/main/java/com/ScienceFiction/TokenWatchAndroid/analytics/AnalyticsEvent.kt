@@ -2,6 +2,8 @@ package com.ScienceFiction.TokenWatchAndroid.analytics
 
 import com.ScienceFiction.TokenWatchAndroid.domain.Announcement
 import com.ScienceFiction.TokenWatchAndroid.domain.AgentProvider
+import com.ScienceFiction.TokenWatchAndroid.network.core.UsageException
+import java.io.IOException
 
 /** Where a login attempt stopped. Mirrors the iOS `LoginStage`. */
 enum class LoginStage(val wireId: String) {
@@ -25,6 +27,35 @@ enum class FetchErrorReason(val wireId: String) {
     PARSE("parse"),
     EMPTY("empty"),
     OTHER("other"),
+}
+
+/** Buckets a fetch failure. Raw messages never leave the device, only this classification. */
+fun Throwable.toFetchErrorReason(): FetchErrorReason = when (this) {
+    is UsageException.Unauthorized -> FetchErrorReason.AUTH
+    is UsageException.RateLimited -> FetchErrorReason.RATE_LIMIT
+    is UsageException.Http -> if (statusCode in 400..499) FetchErrorReason.HTTP_4XX else FetchErrorReason.HTTP_5XX
+    is UsageException.Decode -> FetchErrorReason.PARSE
+    is UsageException.NoWindows -> FetchErrorReason.EMPTY
+    is IOException -> FetchErrorReason.NETWORK
+    else -> FetchErrorReason.OTHER
+}
+
+/**
+ * The event a fetch outcome should produce, or null when nothing changed.
+ *
+ * Only transitions are worth reporting: a provider that keeps failing should log one error rather
+ * than one per refresh, and the recovery is what closes that pair. [previouslyFailed] is the caller's
+ * memory of the last outcome for the same agent.
+ */
+fun fetchOutcomeEvent(
+    provider: AgentProvider,
+    error: Throwable?,
+    previouslyFailed: Boolean,
+): AnalyticsEvent? = when {
+    error != null && !previouslyFailed ->
+        AnalyticsEvent.UsageFetchError(provider, error.toFetchErrorReason())
+    error == null && previouslyFailed -> AnalyticsEvent.UsageFetchRecover(provider)
+    else -> null
 }
 
 enum class ScreenName(val wireId: String, val screenClass: String) {
