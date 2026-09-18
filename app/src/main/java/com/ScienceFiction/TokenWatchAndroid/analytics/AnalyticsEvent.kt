@@ -2,6 +2,7 @@ package com.ScienceFiction.TokenWatchAndroid.analytics
 
 import com.ScienceFiction.TokenWatchAndroid.domain.Announcement
 import com.ScienceFiction.TokenWatchAndroid.domain.AgentProvider
+import com.ScienceFiction.TokenWatchAndroid.domain.AuthKind
 import com.ScienceFiction.TokenWatchAndroid.network.core.UsageException
 import java.io.IOException
 
@@ -101,18 +102,25 @@ sealed class AnalyticsEvent(
      */
     val isProviderScoped: Boolean = true,
 ) {
-    class LoginStart(provider: AgentProvider) :
-        AnalyticsEvent("login_start", mapOf("provider" to provider.wireId))
+    class LoginStart(provider: AgentProvider) : AnalyticsEvent(
+        "login_start",
+        mapOf("provider" to provider.wireId, "auth_kind" to provider.analyticsAuthKind),
+    )
 
     class LoginSuccess(provider: AgentProvider, agentsTotal: Int) : AnalyticsEvent(
         "login_success",
-        mapOf("provider" to provider.wireId, "agents_total" to agentsTotal.toString()),
+        mapOf(
+            "provider" to provider.wireId,
+            "auth_kind" to provider.analyticsAuthKind,
+            "agents_total" to agentsTotal.toString(),
+        ),
     )
 
     class LoginFail(provider: AgentProvider, stage: LoginStage, code: String) : AnalyticsEvent(
         "login_fail",
         mapOf(
             "provider" to provider.wireId,
+            "auth_kind" to provider.analyticsAuthKind,
             "stage" to stage.wireId,
             // Already a bucketed code at the call site; truncated as a second line of defence.
             "code" to code.take(40),
@@ -184,3 +192,30 @@ sealed class AnalyticsEvent(
         isProviderScoped = false,
     )
 }
+
+/** The `auth_kind` parameter value, matching iOS `authKindTag`. */
+val AgentProvider.analyticsAuthKind: String
+    get() = when (authKind) {
+        AuthKind.OAUTH_CODE -> "oauth"
+        AuthKind.OAUTH_BROWSER -> "oauth_browser"
+        AuthKind.OAUTH_DEVICE_FLOW -> "device"
+        AuthKind.API_KEY -> "api_key"
+    }
+
+/**
+ * Short tag for the `providers` user property. GA4 caps property values at 36 characters, and the
+ * full wire IDs of every provider would not fit; all ten tags joined come to 26.
+ */
+val AgentProvider.analyticsShortTag: String
+    get() = when (this) {
+        AgentProvider.CLAUDE -> "c"
+        AgentProvider.CODEX -> "x"
+        AgentProvider.COPILOT -> "cp"
+        AgentProvider.GROK -> "gr"
+        AgentProvider.CURSOR -> "cr"
+        AgentProvider.KIMI -> "km"
+        AgentProvider.OPENROUTER -> "or"
+        AgentProvider.DEEPSEEK -> "ds"
+        AgentProvider.POE -> "p"
+        AgentProvider.ELEVENLABS -> "11"
+    }

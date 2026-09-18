@@ -10,8 +10,10 @@ import com.ScienceFiction.TokenWatchAndroid.auth.ProviderAuthRegistry
 import com.ScienceFiction.TokenWatchAndroid.auth.ProviderTokenRefresher
 import com.ScienceFiction.TokenWatchAndroid.auth.TokenStore
 import com.ScienceFiction.TokenWatchAndroid.auth.device.CopilotDeviceFlow
+import com.ScienceFiction.TokenWatchAndroid.auth.device.CursorAuth
 import com.ScienceFiction.TokenWatchAndroid.auth.oauth.ClaudeOAuthClient
 import com.ScienceFiction.TokenWatchAndroid.auth.oauth.CodexOAuthClient
+import com.ScienceFiction.TokenWatchAndroid.auth.oauth.GrokOAuthClient
 import com.ScienceFiction.TokenWatchAndroid.data.AgentRepository
 import com.ScienceFiction.TokenWatchAndroid.data.AnnouncementRepository
 import com.ScienceFiction.TokenWatchAndroid.data.SettingsRepository
@@ -21,6 +23,7 @@ import com.ScienceFiction.TokenWatchAndroid.network.core.HttpTransport
 import com.ScienceFiction.TokenWatchAndroid.network.orchestration.ProviderUsageRegistry
 import com.ScienceFiction.TokenWatchAndroid.network.orchestration.RateLimitGate
 import com.ScienceFiction.TokenWatchAndroid.network.orchestration.UsageGateway
+import com.ScienceFiction.TokenWatchAndroid.network.providers.apikey.KimiUsageClient
 import com.ScienceFiction.TokenWatchAndroid.network.providers.subscription.CodexAccountClient
 import com.ScienceFiction.TokenWatchAndroid.network.status.ServiceStatusClient
 import com.ScienceFiction.TokenWatchAndroid.notifications.BackgroundRefreshScheduler
@@ -53,20 +56,33 @@ class TokenWatchContainer(context: Context) : Closeable {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val transport = HttpTransport()
 
+    /** For hand-attached session cookies (Cursor), which must never follow a redirect. */
+    private val noRedirectTransport = transport.withoutRedirects()
+
     val localeState = AppLocaleState()
-    val claudeOAuth = ClaudeOAuthClient(transport)
-    val codexOAuth = CodexOAuthClient(transport)
-    val providerAuth = ProviderAuthRegistry(claudeOAuth, codexOAuth)
-    val deviceFlow = CopilotDeviceFlow(transport)
+    private val claudeOAuth = ClaudeOAuthClient(transport)
+    private val codexOAuth = CodexOAuthClient(transport)
+    private val grokOAuth = GrokOAuthClient(transport)
+    private val kimiUsage = KimiUsageClient(transport)
+    val providerAuth = ProviderAuthRegistry(
+        claudeOAuth = claudeOAuth,
+        codexOAuth = codexOAuth,
+        grokOAuth = grokOAuth,
+        copilotDeviceFlow = CopilotDeviceFlow(transport),
+        cursorAuth = CursorAuth(noRedirectTransport),
+        kimi = kimiUsage,
+    )
 
     private val credentialVault = AndroidCredentialVault(applicationContext)
     val tokenStore = TokenStore(
         vault = credentialVault,
-        refresher = ProviderTokenRefresher(claudeOAuth, codexOAuth),
+        refresher = ProviderTokenRefresher(claudeOAuth, codexOAuth, grokOAuth),
     )
 
     private val usageRegistry = ProviderUsageRegistry.create(
         transport = transport,
+        noRedirectTransport = noRedirectTransport,
+        kimi = kimiUsage,
         codexAdditionalLimitLabel = { localeState.l10n().codexAdditionalLimit },
     )
     private val usageGateway = UsageGateway(

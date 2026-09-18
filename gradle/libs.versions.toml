@@ -6,6 +6,7 @@ lifecycle = "2.9.4"
 activityCompose = "1.11.0"
 navigationCompose = "2.8.0"
 datastore = "1.1.1"
+browser = "1.10.0"
 composeBom = "2025.06.01"
 okhttp = "4.12.0"
 moshi = "1.15.1"
@@ -26,6 +27,8 @@ androidx-lifecycle-viewmodel-compose = { group = "androidx.lifecycle", name = "l
 androidx-activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activityCompose" }
 androidx-navigation-compose = { group = "androidx.navigation", name = "navigation-compose", version.ref = "navigationCompose" }
 androidx-datastore-preferences = { group = "androidx.datastore", name = "datastore-preferences", version.ref = "datastore" }
+# Auth Tab / Custom Tabs: the in-app sign-in window (iOS ASWebAuthenticationSession / SFSafariViewController).
+androidx-browser = { group = "androidx.browser", name = "browser", version.ref = "browser" }
 androidx-compose-bom = { group = "androidx.compose", name = "compose-bom", version.ref = "composeBom" }
 androidx-compose-ui = { group = "androidx.compose.ui", name = "ui" }
 androidx-compose-ui-graphics = { group = "androidx.compose.ui", name = "ui-graphics" }

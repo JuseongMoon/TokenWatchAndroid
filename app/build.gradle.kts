@@ -69,8 +69,8 @@ android {
         applicationId = "com.ScienceFiction.TokenWatchAndroid"
         minSdk = 28
         targetSdk = 36
-        versionCode = 12
-        versionName = "1.1.0"
+        versionCode = 14
+        versionName = "1.2.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -153,6 +153,7 @@ dependencies {
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.datastore.preferences)
+    implementation(libs.androidx.browser)
 
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)

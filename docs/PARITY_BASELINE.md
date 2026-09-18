@@ -4,17 +4,37 @@
 > and the single place recording how far Android has been synced. Pricing strategy,
 > unreleased plans and operational procedures do not belong in this repository's `docs/`.
 
-The Android release mirrors the portable iOS patches through commit `719142a`
-(`chore: 마케팅 버전 1.1.0 · 빌드 12로 올림`) on `dev`. Uncommitted iOS working-tree changes are
+The Android release mirrors the portable iOS patches through commit `e82e1d0` on `dev`, the iOS
+1.2.0 (14) release. `cebace6` briefly moved iOS to 1.3.0 (15) without any functional change;
+`e82e1d0` returned the marketing version to 1.2.0 and the build number went back to 14, so
+Android ships the same content as 1.2.0 (14). Uncommitted iOS working-tree changes are otherwise
 deliberately not part of this baseline.
 
-The Firebase Analytics patch (`480f00b`/`b336807`) still requires a separately registered Android
-Firebase app and its `google-services.json`; the iOS Firebase application identifier must not be
-reused. Analytics is therefore the sole intentionally deferred platform-specific item.
+Firebase Analytics runs against the Android app's own Firebase registration and
+`google-services.json`; the iOS Firebase application identifier is not reused.
 
 ## Included behavior
 
-- Seven audited providers and three authentication families retained at `31a2e2c`.
+- Ten providers: the seven audited at `31a2e2c`, plus Grok and Cursor re-introduced with official
+  CLI login flows (`8cff71c`, `d856eac`) and Kimi Code (`db7fc6b`). Grok reads the weekly pool
+  from `creditUsagePercent` only, refreshes on 401 but not on 403, and has no status source
+  (status.x.ai blocks automated reads). Cursor reads the dashboard usage summary with a session
+  cookie over a transport that never follows redirects, and signs in again when its token
+  expires. Kimi probes both regional hosts before a card exists and reads the new
+  `usages.limit_*` shape before the legacy one. Plans carried by a usage response (Grok,
+  Cursor) are stored on every fetch.
+- Four authentication families: WebView code capture (Codex), in-app sign-in window with a
+  loopback callback (Claude, Grok; Claude keeps a paste-the-code fallback), polling login with
+  the approval page in an in-app tab (Copilot with a code, Cursor without), and API keys. Pages
+  involved in signing in (approval, key issuance, code pages) open inside the app.
+- The loopback listener binds 127.0.0.1 and ::1 on one ephemeral port, accepts only the expected
+  state, answers `302` to `tokenwatch://login-complete`, and hands the code over only after that
+  response is written. A code exchange that fails before reaching the server is retried once,
+  and the failure screen's RETRY repeats only the exchange; `invalid_grant` at exchange reads as
+  an expired code rather than "log in again".
+- Signing in again with an account that already has a card replaces that card's token instead
+  of adding a second card.
+- The add-agent list opens with a policy notice signed by the team and the weekly green slime.
 - Work-hour-aware weekly gauge markers with a persisted 7 x 24 schedule.
 - A side-effect-isolated demo mode with sample subscription and credit data.
 - Demo samples keep one exhausted gauge animated and one warning-red gauge visible, with the demo
@@ -76,7 +96,7 @@ reused. Analytics is therefore the sole intentionally deferred platform-specific
 - Application ID/namespace: `com.ScienceFiction.TokenWatchAndroid`
 - Minimum SDK: 28
 - Target/compile SDK: 36
-- Version: 1.1.0 (12)
+- Version: 1.2.0 (14)
 
 ## Platform-specific parity adaptations
 
@@ -99,19 +119,27 @@ reused. Analytics is therefore the sole intentionally deferred platform-specific
 - The announcement feed is read from `feeds/android`, a separate materialized document, and the
   client accepts only `platform` values `android` and `all`. Both a 404 and a seeded empty feed
   mean "no announcements" and must stay silent.
-- Firestore credentials arrive through `buildConfigField`, injected from `local.properties`,
-  rather than `google-services.json`; no Firebase SDK or Gradle plugin is applied. Leaving the
-  properties unset disables announcements quietly instead of failing the build. The Android app
-  is already registered in the Firebase project, so adding Analytics later needs no new
-  registration.
-- The feed API key is restricted to `firestore.googleapis.com` alone. **Adding Analytics requires
-  widening its `apiTargets` first**, otherwise the SDK fails with 403s and no other symptom.
-  Tightening it with an app (SHA-1) restriction would additionally require `X-Android-Package`
-  and `X-Android-Cert` headers on the feed request.
-- Announcement analytics events are not implemented, following the deferred-Analytics rule above.
+- The feed is read over Firestore REST, not the Firebase SDK. Its credentials arrive through
+  `buildConfigField`, injected from `local.properties`; leaving them unset disables announcements
+  quietly in debug builds, and release builds refuse to build without them. Firebase Analytics is
+  a separate concern configured by `google-services.json`.
+- Tightening the feed key with an app (SHA-1) restriction would require `X-Android-Package` and
+  `X-Android-Cert` headers on the feed request.
 - `versionInRange` compares version segments numerically, padding missing segments with zero and
   degrading a non-numeric segment to zero. iOS uses a numeric string comparison, which differs
   only for inputs the dashboard rejects (it enforces `x.y.z` and blocks `all` + a version range).
+- The in-app sign-in window is an Auth Tab (androidx.browser), the counterpart of
+  `ASWebAuthenticationSession`: it closes itself on the `tokenwatch://login-complete` redirect.
+  Browsers without Auth Tab show the same intent as a Custom Tab; that redirect then reaches
+  `LoginCompleteActivity`, which only returns to the app (the code already travelled through the
+  loopback listener, so the intent's own code is ignored). "Sign in with another account" is
+  offered only when the browser supports ephemeral browsing, since elsewhere it would behave
+  exactly like the normal sign-in.
+- `SFSafariViewController` maps to Custom Tabs. Android cannot close a Custom Tab from the app, so
+  when a polling login completes under an open approval tab the app brings itself to the front
+  (best effort; newer Android versions may block it, and the user closes the tab).
+- The paste fallback uses an explicit `[ paste ]` button instead of iOS `PasteButton`; Android shows
+  its own clipboard notice on that tap.
 - The popup is suppressed on the add and settings routes, which are full screens here rather
   than sheets and would otherwise be covered mid-login, and while running under instrumentation,
   where a modal scrim would swallow taps in the UI tests.

@@ -11,16 +11,26 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.Request
 
+/**
+ * Claude OAuth with PKCE. Sign-in runs in the in-app sign-in window with a loopback redirect
+ * (iOS 4f0eda5/7d0d9da): claude.ai's Google button opens a `window.open` popup that a WebView cannot
+ * host, and the authorization server rejects custom-scheme redirect URIs. The console code page
+ * ([REDIRECT_URI]) remains as the paste-the-code fallback.
+ */
 class ClaudeOAuthClient(
     private val transport: NetworkTransport,
     private val now: () -> Instant = Instant::now,
     private val tokenUrl: String = TOKEN_URL,
-) : OAuthCodeClient {
-    override fun authorizeUrl(pkce: Pkce): String = AUTHORIZE_URL.toHttpUrl().newBuilder()
+) : OAuthCodeClient, BrowserOAuthClient {
+    override fun authorizeUrl(pkce: Pkce): String = authorizeUrl(pkce, REDIRECT_URI)
+
+    override fun loopbackRedirectUri(port: Int): String = "http://localhost:$port/callback"
+
+    override fun authorizeUrl(pkce: Pkce, redirect: String): String = AUTHORIZE_URL.toHttpUrl().newBuilder()
         .addQueryParameter("code", "true")
         .addQueryParameter("client_id", CLIENT_ID)
         .addQueryParameter("response_type", "code")
-        .addQueryParameter("redirect_uri", REDIRECT_URI)
+        .addQueryParameter("redirect_uri", redirect)
         .addQueryParameter("scope", SCOPES.joinToString(" "))
         .addQueryParameter("code_challenge", pkce.challenge)
         .addQueryParameter("code_challenge_method", "S256")
@@ -28,24 +38,24 @@ class ClaudeOAuthClient(
         .build()
         .toString()
 
-    override fun parseCallback(url: String): OAuthCallback? {
-        if (!url.startsWith(CALLBACK_PREFIX)) return null
-        val parsed = url.toHttpUrlOrNull() ?: return null
-        val code = parsed.queryParameter("code") ?: return null
-        return OAuthCallback(code, parsed.queryParameter("state").orEmpty())
-    }
+    override val manualCodeRedirect: String = REDIRECT_URI
 
-    override suspend fun exchange(callback: OAuthCallback, pkce: Pkce): OAuthTokens {
-        if (callback.state != pkce.state) throw OAuthException.StateMismatch()
+    override fun parseCallback(url: String): OAuthCallback? = parseConsoleCallback(url)
+
+    override suspend fun exchange(callback: OAuthCallback, pkce: Pkce): OAuthTokens =
+        exchange(callback.code, callback.state, pkce, REDIRECT_URI)
+
+    override suspend fun exchange(code: String, state: String, pkce: Pkce, redirect: String): OAuthTokens {
+        if (state != pkce.state) throw OAuthException.StateMismatch()
         val body = FormBody.Builder()
             .add("grant_type", "authorization_code")
-            .add("code", callback.code)
-            .add("state", callback.state)
+            .add("code", code)
+            .add("state", state)
             .add("client_id", CLIENT_ID)
-            .add("redirect_uri", REDIRECT_URI)
+            .add("redirect_uri", redirect)
             .add("code_verifier", pkce.verifier)
             .build()
-        return postToken(body, previous = null, exchange = true)
+        return retryingTransientFailureOnce { postToken(body, previous = null, exchange = true) }
     }
 
     override suspend fun refresh(tokens: OAuthTokens): OAuthTokens {
@@ -72,10 +82,12 @@ class ClaudeOAuthClient(
         if (response.statusCode !in 200..299) {
             val responseBody = response.bodyText()
             val detail = "HTTP ${response.statusCode}: $responseBody"
-            if (exchange) throw OAuthException.ExchangeFailed(detail)
-            if (response.statusCode in listOf(400, 401) && "invalid_grant" in responseBody) {
-                throw OAuthException.RefreshRevoked()
+            val invalidGrant = response.statusCode in listOf(400, 401) && "invalid_grant" in responseBody
+            if (exchange) {
+                // At the exchange stage invalid_grant means the code expired or was already used.
+                throw if (invalidGrant) OAuthException.CodeExpired() else OAuthException.ExchangeFailed(detail)
             }
+            if (invalidGrant) throw OAuthException.RefreshRevoked()
             throw OAuthException.RefreshFailed(detail)
         }
         val json = JsonMap.decode(response.bodyText())
@@ -109,6 +121,33 @@ class ClaudeOAuthClient(
         const val REDIRECT_URI = "https://console.anthropic.com/oauth/code/callback"
         const val CALLBACK_PREFIX = REDIRECT_URI
         val SCOPES = listOf("org:create_api_key", "user:profile", "user:inference")
+
+        /** Extracts code/state from a console code-page callback URL; null for any other URL. */
+        fun parseConsoleCallback(url: String): OAuthCallback? {
+            if (!url.startsWith(CALLBACK_PREFIX)) return null
+            val parsed = url.toHttpUrlOrNull() ?: return null
+            val code = parsed.queryParameter("code") ?: return null
+            return OAuthCallback(code, parsed.queryParameter("state").orEmpty())
+        }
+
+        /**
+         * Reads what the user pasted from the console code page. The page shows `code#state`, but
+         * copying only the code is common, so a missing state falls back to the one this login
+         * created ([fallbackState]). A whole callback URL is accepted too.
+         */
+        fun parseManualCode(text: String, fallbackState: String): OAuthCallback? {
+            val trimmed = text.trim()
+            if (trimmed.isEmpty()) return null
+            if (trimmed.startsWith("http")) {
+                parseConsoleCallback(trimmed)?.let { parsed ->
+                    return OAuthCallback(parsed.code, parsed.state.ifEmpty { fallbackState })
+                }
+            }
+            val code = trimmed.substringBefore('#').trim()
+            if (code.isEmpty()) return null
+            val state = if ('#' in trimmed) trimmed.substringAfter('#').trim() else ""
+            return OAuthCallback(code, state.ifEmpty { fallbackState })
+        }
     }
 }
 

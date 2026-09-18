@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Project Overview
 
 TokenWatch Android는 [TokenWatch iOS](https://github.com/JuseongMoon/TokenWatch)의
-Android 네이티브 구현입니다. AI 코딩 서비스 7종의 사용량·크레딧 잔량을 한 화면에서 보여줍니다.
+Android 네이티브 구현입니다. AI 코딩 서비스 10종의 사용량·크레딧 잔량을 한 화면에서 보여줍니다.
 두 플랫폼은 같은 서비스 목록·인증 방식·게이지 정책을 공유하며, 대조표는
 [`docs/PARITY_BASELINE.md`](docs/PARITY_BASELINE.md)에 있습니다.
 
@@ -51,12 +51,12 @@ JBR 21을 가리켜야 합니다. Android Studio에서 빌드하면 번들 JBR�
 
 ```text
 app/src/main/java/com/ScienceFiction/TokenWatchAndroid/
-├── auth/              CredentialVault(Android Keystore AES-GCM), OAuth code/device, 세션
+├── auth/              CredentialVault(Android Keystore AES-GCM), OAuth code/루프백/device, 세션
 ├── data/              AppSettings, SettingsRepository, 코덱
 ├── domain/            WorkHoursSchedule, Announcement, 새로고침 정책
 ├── network/
 │   ├── core/          NetworkTransport
-│   ├── providers/     서비스 7종 (apikey / session / subscription)
+│   ├── providers/     서비스 10종 (apikey / session / subscription)
 │   ├── orchestration/ 중복 조회 억제, backoff
 │   ├── status/        공식 status 컴포넌트 파싱
 │   ├── parsing/

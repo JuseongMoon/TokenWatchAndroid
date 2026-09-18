@@ -1,14 +1,16 @@
 # TokenWatch Android
 
 [TokenWatch iOS](https://github.com/JuseongMoon/TokenWatch)의 Android 네이티브 구현입니다.
-두 앱은 동일한 7개 서비스·인증 방식·게이지 정책을 공유하고, 플랫폼별 대응 차이는
+두 앱은 동일한 10개 서비스·인증 방식·게이지 정책을 공유하고, 플랫폼별 대응 차이는
 [docs/PARITY_BASELINE.md](docs/PARITY_BASELINE.md)에 정리했습니다.
 어느 iOS 커밋까지 맞췄는지도 같은 문서에 기록하며, 동기화 커밋에서 함께 갱신합니다.
 
 ## 주요 기능
 
-- 공식 API 또는 검증된 엔드포인트를 사용하는 7개 서비스
-- OAuth code, OAuth device flow, API key 인증
+- 공식 API 또는 검증된 엔드포인트를 사용하는 10개 서비스
+  (Claude, Codex, Copilot, Grok, Cursor, Kimi, OpenRouter, DeepSeek, Poe, ElevenLabs)
+- 앱 안 로그인 창(Auth Tab) + 루프백 콜백, WebView OAuth, 폴링 로그인, API key 인증
+- 같은 계정으로 다시 로그인하면 카드를 늘리지 않고 토큰만 교체
 - 로그인 없이 전체 UI를 둘러보는 격리된 데모 모드
 - 업무시간에만 진행하는 주간 게이지 현재시각 마커
 - 구독 게이지와 충전형 크레딧 역방향 게이지(API 총액 또는 최고 관측 잔액 기준)

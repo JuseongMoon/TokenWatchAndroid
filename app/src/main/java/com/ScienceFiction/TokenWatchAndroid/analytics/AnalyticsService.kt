@@ -63,7 +63,7 @@ class AnalyticsService(
     fun syncUserProperties(agents: List<Agent>, settings: AppSettings) {
         if (!isUsable || isDemo()) return
         analytics?.setUserProperty("agents_count", agents.size.toString())
-        val tags = agents.map { it.provider.wireId }.distinct().sorted().joinToString(",")
+        val tags = agents.map { it.provider.analyticsShortTag }.distinct().sorted().joinToString(",")
         analytics?.setUserProperty("providers", tags.ifEmpty { null })
         syncSettingsProperties(settings)
     }

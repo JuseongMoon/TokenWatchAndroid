@@ -10,6 +10,8 @@ import com.ScienceFiction.TokenWatchAndroid.domain.WindowKind
 import com.ScienceFiction.TokenWatchAndroid.localization.L10n
 import com.ScienceFiction.TokenWatchAndroid.localization.Lang
 import com.ScienceFiction.TokenWatchAndroid.network.core.NetworkTransport
+import com.ScienceFiction.TokenWatchAndroid.network.core.PlanReportingUsageClient
+import com.ScienceFiction.TokenWatchAndroid.network.core.ProviderUsage
 import com.ScienceFiction.TokenWatchAndroid.network.core.ProviderUsageClient
 import com.ScienceFiction.TokenWatchAndroid.network.core.UsageException
 import com.ScienceFiction.TokenWatchAndroid.network.providers.subscription.CodexAccountClient
@@ -162,17 +164,36 @@ class UsageGatewayTest {
             AgentProvider.CLAUDE to "ClaudeUsageClient",
             AgentProvider.CODEX to "CodexUsageClient",
             AgentProvider.COPILOT to "CopilotUsageClient",
+            AgentProvider.GROK to "GrokUsageClient",
+            AgentProvider.CURSOR to "CursorUsageClient",
+            AgentProvider.KIMI to "KimiUsageClient",
             AgentProvider.OPENROUTER to "OpenRouterUsageClient",
             AgentProvider.DEEPSEEK to "DeepSeekUsageClient",
             AgentProvider.POE to "PoeUsageClient",
             AgentProvider.ELEVENLABS to "ElevenLabsUsageClient",
         )
 
-        assertEquals(7, AgentProvider.entries.size)
+        assertEquals(10, AgentProvider.entries.size)
         assertEquals(AgentProvider.entries.toSet(), registry.providers)
         expectedClassNames.forEach { (provider, expectedName) ->
             assertEquals(expectedName, registry.clientFor(provider)::class.java.simpleName)
         }
+    }
+
+    /** Grok/Cursor carry the plan in the usage response; it is stored on every fetch, manual or not. */
+    @Test
+    fun planCarriedByTheUsageResponseIsPersistedOnEveryFetch() = runBlocking {
+        val id = UUID.randomUUID()
+        val vault = MemoryVault(id to OAuthTokens("token", plan = "Old"))
+        val store = TokenStore(vault, TokenRefresher { _, _ -> error("unused") }, now = { now })
+        val client = object : PlanReportingUsageClient {
+            override suspend fun fetchUsage(tokens: OAuthTokens) = ProviderUsage(listOf(window()), "SuperGrok")
+        }
+
+        val snapshot = gateway(client, store, RateLimitGate(now = { now })).fetchSnapshot(AgentProvider.GROK, id)
+
+        assertEquals("SuperGrok", snapshot.planLabel)
+        assertEquals("SuperGrok", vault.load(id)?.plan)
     }
 
     @Test

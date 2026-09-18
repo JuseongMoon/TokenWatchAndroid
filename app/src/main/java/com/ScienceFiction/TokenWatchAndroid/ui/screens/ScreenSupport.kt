@@ -53,6 +53,9 @@ internal fun AgentProvider.terminalColor(): Color = when (terminalColorKey) {
     TerminalColorKey.GREEN -> Term.Green
     TerminalColorKey.PINK -> Term.Pink
     TerminalColorKey.TEAL -> Term.Teal
+    TerminalColorKey.FOREGROUND -> Term.Foreground
+    TerminalColorKey.BLUE -> Term.Blue
+    TerminalColorKey.LIME -> Term.Lime
 }
 
 internal fun serviceHealthColor(health: ServiceHealth): Color = when (health) {

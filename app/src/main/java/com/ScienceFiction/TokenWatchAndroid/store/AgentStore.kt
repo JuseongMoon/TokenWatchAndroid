@@ -64,6 +64,13 @@ data class AccountInfo(
     val accountId: String?,
 )
 
+/** Outcome of [AgentStore.addAgent]: the card that now holds the credential. */
+data class AddAgentResult(
+    val agent: Agent,
+    /** True when an existing card for the same account received the new token. */
+    val replacedExisting: Boolean,
+)
+
 /** Injectable clock-independent suspension boundary used by auto/reset refresh tests. */
 fun interface StoreSleeper {
     suspend fun sleep(duration: Duration)
@@ -265,10 +272,27 @@ class AgentStore(
         resetBaselineLoaded.await()
     }
 
-    /** Saves credentials, appends the account, persists it, and performs its first refresh. */
-    suspend fun addAgent(provider: AgentProvider, tokens: OAuthTokens): Agent {
+    /**
+     * Saves credentials, appends the account, persists it, and performs its first refresh.
+     *
+     * Signing in again with an account that already has a card replaces only that card's token
+     * (iOS 7d0d9da). The sign-in window reuses the browser's signed-in account, so the same account
+     * comes back easily, and two cards refreshing one account's rotating refresh-token chain would
+     * invalidate each other.
+     */
+    suspend fun addAgent(provider: AgentProvider, tokens: OAuthTokens): AddAgentResult {
         check(!_isDemo.value) { "Accounts cannot be added in demo mode" }
         awaitAgentsReady()
+        val existing = tokens.accountEmail?.let { email ->
+            _agents.value.firstOrNull { it.provider == provider && it.accountLabel == email }
+        }
+        if (existing != null) {
+            withContext(NonCancellable) { dependencies.saveTokens(existing.id, tokens) }
+            currentCoroutineContext().ensureActive()
+            // Manual, so the new token is used right away instead of waiting out the fetch spacing.
+            refresh(existing, manual = true)
+            return AddAgentResult(existing, replacedExisting = true)
+        }
         val agent = Agent(
             provider = provider,
             accountLabel = tokens.accountEmail ?: tokens.plan,
@@ -294,7 +318,7 @@ class AgentStore(
         }
         currentCoroutineContext().ensureActive()
         refresh(agent)
-        return agent
+        return AddAgentResult(agent, replacedExisting = false)
     }
 
     suspend fun remove(agent: Agent) {

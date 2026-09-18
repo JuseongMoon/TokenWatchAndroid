@@ -1,129 +1,119 @@
 package com.ScienceFiction.TokenWatchAndroid.network.providers.subscription
 
 import com.ScienceFiction.TokenWatchAndroid.auth.OAuthTokens
+import com.ScienceFiction.TokenWatchAndroid.domain.UsageStyle
+import com.ScienceFiction.TokenWatchAndroid.domain.WindowKind
+import com.ScienceFiction.TokenWatchAndroid.network.core.ProviderUsage
 import com.ScienceFiction.TokenWatchAndroid.network.core.UsageException
 import java.time.Instant
-import java.time.ZoneOffset
-import okhttp3.HttpUrl.Companion.toHttpUrl
+import java.util.Base64
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Test
 
+/** Cursor usage-summary mapping, ported from iOS CursorUsageTests (measured samples, CodexBar fixtures). */
 class CursorUsageClientTest {
-    @Test
-    fun sendsCookieAndEncodedUserQueryAndMapsGpt4Bucket() {
-        val transport = RecordingTransport(
-            jsonResponse(
-                """
-                {
-                  "startOfMonth":"2026-07-01T00:00:00.123Z",
-                  "gpt-3.5-turbo":{"numRequests":1,"maxRequestUsage":10},
-                  "gpt-4":{"numRequests":125,"maxRequestUsage":500},
-                  "metadata":{"name":"ignored"}
-                }
-                """.trimIndent(),
-            ),
+    private fun usage(json: String): ProviderUsage = CursorUsageMapper.usage(json.toByteArray())
+
+    /** Measured Pro sample: included usage exhausted — Other models 100%, Cursor models 0%. */
+    @Test fun measuredProResponseMapsToTwoPools() {
+        val result = usage(
+            """{"billingCycleStart":"2026-04-02T14:11:55.000Z","billingCycleEnd":"2026-05-02T14:11:55.000Z",
+             "membershipType":"pro","limitType":"user","isUnlimited":false,
+             "individualUsage":{"plan":{"enabled":true,"used":2000,"limit":2000,"remaining":0,
+               "autoPercentUsed":0,"apiPercentUsed":100,"totalPercentUsed":100,
+               "breakdown":{"included":2000,"bonus":0,"total":2000}},
+              "onDemand":{"enabled":true,"used":2309,"limit":10000,"remaining":7691}},
+             "teamUsage":{"onDemand":{"enabled":true,"used":5000,"limit":50000,"remaining":45000}}}""",
         )
-        val endpoint = "https://fixture.example/cursor-usage?old=value".toHttpUrl()
-        val windows = runSuspend {
-            CursorUsageClient(transport, endpoint, ZoneOffset.UTC).fetch(
-                OAuthTokens(
-                    accessToken = "user%3A%3Ajwt-token",
-                    accountId = "user +/42",
-                ),
-            )
+        assertEquals(listOf("Cursor models", "Other models"), result.windows.map { it.label })
+        assertEquals(listOf(0.0, 100.0), result.windows.map { it.usedPercent })
+        result.windows.forEach {
+            assertEquals(WindowKind.WEEKLY, it.kind)
+            assertEquals(UsageStyle.GAUGE, it.style)
         }
-
-        val request = transport.lastRequest
-        assertEquals("https", request.url.scheme)
-        assertEquals("fixture.example", request.url.host)
-        assertEquals("/cursor-usage", request.url.encodedPath)
-        assertEquals("value", request.url.queryParameter("old"))
-        assertEquals("user +/42", request.url.queryParameter("user"))
-        assertEquals(
-            "WorkosCursorSessionToken=user%3A%3Ajwt-token",
-            request.header("Cookie"),
-        )
-        assertEquals("application/json", request.header("Accept"))
-        assertEquals("TokenWatch/1.0", request.header("User-Agent"))
-
-        val window = windows.single()
-        assertEquals("Fast requests", window.label)
-        assertEquals(25.0, window.usedPercent, 0.0)
-        assertEquals(Instant.parse("2026-08-01T00:00:00.123Z"), window.resetsAt)
-        assertNull(window.windowSeconds)
+        assertEquals(Instant.parse("2026-05-02T14:11:55Z"), result.windows.first().resetsAt)
+        assertEquals(30.0 * 24 * 3600, result.windows.first().windowSeconds!!, 0.0)
+        assertEquals("Pro", result.plan)
     }
 
-    @Test
-    fun defensivelyIgnoresMalformedBucketsAndUsesFirstLimitedFallback() {
-        val transport = RecordingTransport(
-            jsonResponse(
-                """
-                {
-                  "startOfMonth":"invalid",
-                  "broken":{"numRequests":"five","maxRequestUsage":10},
-                  "metadata":{"arbitrary":true},
-                  "first-limited":{"numRequests":5,"maxRequestUsage":20},
-                  "second-limited":{"numRequests":9,"maxRequestUsage":10}
-                }
-                """.trimIndent(),
-            ),
+    /** Pool percents are already percent; totalPercentUsed (30) disagreed with the dashboard and is ignored. */
+    @Test fun percentsAreUsedAsIsAndTotalIsIgnored() {
+        val result = usage(
+            """{"billingCycleStart":"2026-09-01T00:00:00Z","billingCycleEnd":"2026-10-01T00:00:00Z",
+             "membershipType":"pro","individualUsage":{"plan":{"enabled":true,"used":1500,
+             "limit":5000,"remaining":3500,"totalPercentUsed":30,"autoPercentUsed":10,"apiPercentUsed":20}}}""",
         )
-        val window = runSuspend {
-            CursorUsageClient(transport, zoneId = ZoneOffset.UTC).fetch(
-                OAuthTokens(accessToken = "cookie", accountId = "user-1"),
-            )
-        }.single()
-
-        assertEquals(25.0, window.usedPercent, 0.0)
-        assertNull(window.resetsAt)
+        assertEquals(listOf(10.0, 20.0), result.windows.map { it.usedPercent })
+        assertEquals(Instant.parse("2026-10-01T00:00:00Z"), result.windows.first().resetsAt)
+        assertFalse(result.windows.any { it.usedPercent == 30.0 })
     }
 
-    @Test
-    fun preferredGpt4WithoutPositiveLimitDoesNotFallBack() {
-        val transport = RecordingTransport(
-            jsonResponse(
-                """{"gpt-4":{"numRequests":1,"maxRequestUsage":0},"other":{"numRequests":1,"maxRequestUsage":10}}""",
-            ),
+    @Test fun onlyPoolsWithAPercentBecomeWindows() {
+        val result = usage(
+            """{"billingCycleEnd":"2026-10-01T00:00:00Z","membershipType":"express","individualUsage":{"plan":{"autoPercentUsed":42.5}}}""",
         )
-        val windows = runSuspend {
-            CursorUsageClient(transport).fetch(
-                OAuthTokens(accessToken = "cookie", accountId = "user-1"),
-            )
+        assertEquals(listOf("Cursor models"), result.windows.map { it.label })
+        assertEquals(42.5, result.windows.single().usedPercent, 0.0)
+        // Without a start the window length is unknown.
+        assertNull(result.windows.single().windowSeconds)
+        assertEquals("Start", result.plan)
+    }
+
+    @Test fun olderResponsesFallBackToTheIncludedAmount() {
+        val result = usage("""{"billingCycleEnd":"2026-10-01T00:00:00Z","individualUsage":{"plan":{"used":500,"limit":2000}}}""")
+        assertEquals(listOf("Included usage"), result.windows.map { it.label })
+        assertEquals(25.0, result.windows.single().usedPercent, 0.0)
+    }
+
+    /** A changed 200 is an error, never a 0% gauge. */
+    @Test fun missingCycleOrPlanUsageIsAnError() {
+        listOf(
+            "{}",
+            """{"individualUsage":{"plan":{"autoPercentUsed":10}}}""",
+            """{"billingCycleEnd":"2026-10-01T00:00:00Z","individualUsage":{}}""",
+            """{"billingCycleEnd":"not-a-date","individualUsage":{"plan":{"autoPercentUsed":10}}}""",
+        ).forEach { json ->
+            assertThrows(json, UsageException.Decode::class.java) { usage(json) }
         }
-        assertEquals(emptyList<Any>(), windows)
     }
 
-    @Test
-    fun missingAccountAndForbiddenResponseAreUnauthorized() {
-        val missingAccount = RecordingTransport()
+    @Test fun outOfRangePercentsAreClamped() {
+        val result = usage(
+            """{"billingCycleEnd":"2026-10-01T00:00:00Z","individualUsage":{"plan":{"autoPercentUsed":130,"apiPercentUsed":-5}}}""",
+        )
+        assertEquals(listOf(100.0, 0.0), result.windows.map { it.usedPercent })
+    }
+
+    @Test fun planNamesAreMadeReadable() {
+        assertEquals("Pro Plus", CursorUsageMapper.planLabel("pro_plus"))
+        assertEquals("Ultra", CursorUsageMapper.planLabel("ultra"))
+        assertEquals("Hobby", CursorUsageMapper.planLabel("free"))
+        assertEquals("Start", CursorUsageMapper.planLabel("express"))
+        assertEquals("New Tier X", CursorUsageMapper.planLabel("new_tier_x"))
+        assertNull(CursorUsageMapper.planLabel(null))
+        assertNull(CursorUsageMapper.planLabel("  "))
+    }
+
+    /** The cookie pairs the user id with the token; no session or a redirect means signed out. */
+    @Test fun requestsCarryTheSessionCookieAndTreatRedirectsAsSignedOut() {
+        val token = "e30.${Base64.getUrlEncoder().withoutPadding().encodeToString("""{"sub":"auth0|user_1"}""".toByteArray())}.sig"
+        val transport = RecordingTransport(
+            jsonResponse("""{"billingCycleEnd":"2026-10-01T00:00:00Z","individualUsage":{"plan":{"autoPercentUsed":1}}}"""),
+        )
+        runSuspend { CursorUsageClient(transport).fetchUsage(OAuthTokens(token)) }
+        assertEquals("WorkosCursorSessionToken=user_1%3A%3A$token", transport.lastRequest.header("Cookie"))
+
+        for (status in listOf(302, 401, 403)) {
+            transport.response = jsonResponse("{}", statusCode = status)
+            assertThrows(UsageException.Unauthorized::class.java) {
+                runSuspend { CursorUsageClient(transport).fetchUsage(OAuthTokens(token)) }
+            }
+        }
         assertThrows(UsageException.Unauthorized::class.java) {
-            runSuspend {
-                CursorUsageClient(missingAccount).fetch(OAuthTokens(accessToken = "cookie"))
-            }
-        }
-        assertEquals(0, missingAccount.requests.size)
-
-        val forbidden = RecordingTransport(jsonResponse("denied", statusCode = 403))
-        assertThrows(UsageException.Unauthorized::class.java) {
-            runSuspend {
-                CursorUsageClient(forbidden).fetch(
-                    OAuthTokens(accessToken = "cookie", accountId = "user-1"),
-                )
-            }
-        }
-    }
-
-    @Test
-    fun malformedRootIsDecodeError() {
-        val transport = RecordingTransport(jsonResponse("[]"))
-        assertThrows(UsageException.Decode::class.java) {
-            runSuspend {
-                CursorUsageClient(transport).fetch(
-                    OAuthTokens(accessToken = "cookie", accountId = "user-1"),
-                )
-            }
+            runSuspend { CursorUsageClient(transport).fetchUsage(OAuthTokens("not-a-jwt")) }
         }
     }
 }

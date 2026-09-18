@@ -21,6 +21,9 @@ data class DeviceCode(
 sealed class DeviceFlowException(message: String) : Exception(message) {
     class Expired : DeviceFlowException("The code expired. Please try again.")
     class Denied : DeviceFlowException("Authorization was denied.")
+
+    /** A code-less polling login (Cursor) waited for approval until its attempts ran out. */
+    class TimedOut : DeviceFlowException("Sign-in timed out. Please try again.")
     class Http(detail: String) : DeviceFlowException(detail)
 }
 

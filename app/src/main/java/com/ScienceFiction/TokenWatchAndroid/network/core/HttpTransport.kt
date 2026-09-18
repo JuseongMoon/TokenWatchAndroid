@@ -41,6 +41,17 @@ class HttpTransport(
         .followSslRedirects(true)
         .build(),
 ) : NetworkTransport {
+    /**
+     * Same connection pool, but redirects are returned instead of followed. Used where a session
+     * cookie is attached by hand (Cursor), so the cookie never follows a redirect to another host.
+     */
+    fun withoutRedirects(): HttpTransport = HttpTransport(
+        client.newBuilder()
+            .followRedirects(false)
+            .followSslRedirects(false)
+            .build(),
+    )
+
     override suspend fun execute(request: Request): NetworkResponse =
         suspendCancellableCoroutine { continuation ->
             val call = client.newCall(request)

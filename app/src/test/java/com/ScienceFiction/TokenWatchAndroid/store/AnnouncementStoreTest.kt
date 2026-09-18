@@ -258,6 +258,15 @@ class AnnouncementStoreTest {
         assertEquals(AnnouncementStore.ID_CAP, backend.seen.size)
         assertEquals("id5", backend.seen.first())
         assertEquals("id204", backend.seen.last())
+
+        // Still in the list, so it is not appended again (iOS 10c448b fixed a test assuming otherwise).
+        store.markSeen("id5")
+        assertEquals("id204", backend.seen.last())
+        assertEquals(AnnouncementStore.ID_CAP, backend.seen.size)
+        // A trimmed ID comes back as the newest entry.
+        store.markSeen("id0")
+        assertEquals("id0", backend.seen.last())
+        assertEquals(AnnouncementStore.ID_CAP, backend.seen.size)
         store.close()
     }
 }

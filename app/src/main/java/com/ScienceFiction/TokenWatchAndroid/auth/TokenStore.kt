@@ -1,5 +1,6 @@
 package com.ScienceFiction.TokenWatchAndroid.auth
 
+import com.ScienceFiction.TokenWatchAndroid.auth.oauth.BrowserOAuthClient
 import com.ScienceFiction.TokenWatchAndroid.auth.oauth.OAuthCodeClient
 import com.ScienceFiction.TokenWatchAndroid.auth.oauth.OAuthException
 import com.ScienceFiction.TokenWatchAndroid.domain.AgentProvider
@@ -21,16 +22,23 @@ fun interface TokenRefresher {
     suspend fun refresh(provider: AgentProvider, tokens: OAuthTokens): OAuthTokens
 }
 
-/** Clean-baseline provider refresh dispatch: Claude and Codex, and no other provider. */
+/**
+ * Provider refresh dispatch. Claude, Codex, and Grok rotate refresh tokens; device-flow and API-key
+ * credentials have no refresh, and Cursor v1 signs in again when its ~60-day token expires.
+ */
 class ProviderTokenRefresher(
-    private val claude: OAuthCodeClient,
+    private val claude: BrowserOAuthClient,
     private val codex: OAuthCodeClient,
+    private val grok: BrowserOAuthClient,
 ) : TokenRefresher {
     override suspend fun refresh(provider: AgentProvider, tokens: OAuthTokens): OAuthTokens =
         when (provider) {
             AgentProvider.CLAUDE -> claude.refresh(tokens)
             AgentProvider.CODEX -> codex.refresh(tokens)
-            else -> throw OAuthException.NotAuthenticated()
+            AgentProvider.GROK -> grok.refresh(tokens)
+            AgentProvider.COPILOT, AgentProvider.CURSOR, AgentProvider.KIMI, AgentProvider.OPENROUTER,
+            AgentProvider.DEEPSEEK, AgentProvider.POE, AgentProvider.ELEVENLABS,
+            -> throw OAuthException.NotAuthenticated()
         }
 }
 
@@ -62,7 +70,7 @@ class TokenStore(
         exclusive { deleteFromVault(agentId) }
     }
 
-    /** Updates only the cached account plan after a live Codex account lookup. */
+    /** Updates only the cached account plan (live Codex lookup, or a plan in the usage response). */
     suspend fun updatePlan(agentId: UUID, plan: String) = exclusive {
         loadFromVault(agentId)?.let { stored ->
             saveToVault(agentId, stored.copy(plan = plan))

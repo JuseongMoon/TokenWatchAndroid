@@ -40,13 +40,21 @@ class UsageGateway(
 
         return try {
             var tokens = tokenStore.validTokens(agentId, provider)
-            val windows = try {
-                registry.fetchWindows(provider, tokens)
+            val usage = try {
+                registry.fetchUsage(provider, tokens)
             } catch (_: UsageException.Unauthorized) {
                 tokens = tokenStore.forceRefresh(agentId, provider)
-                registry.fetchWindows(provider, tokens)
+                registry.fetchUsage(provider, tokens)
             }
+            val windows = usage.windows
             if (windows.isEmpty()) throw UsageException.NoWindows()
+
+            // A plan label that rides on the usage response (Grok, Cursor) is stored with the
+            // credential on every fetch, manual or automatic; no extra request is involved.
+            usage.plan?.takeIf { it != tokens.plan }?.let { livePlan ->
+                tokens = tokens.copy(plan = livePlan)
+                tokenStore.updatePlan(agentId, livePlan)
+            }
 
             if (provider == AgentProvider.CODEX && manual) {
                 runCatching { codexAccountClient.fetchPlan(tokens) }
@@ -114,7 +122,8 @@ class UsageGateway(
             is OAuthException.RefreshRevoked -> l10n.errAuthExpired
             is OAuthException.RefreshFailed -> l10n.errTokenRefresh(error.detailAfterPrefix())
             is OAuthException.ExchangeFailed -> l10n.errTokenExchange(error.detailAfterPrefix())
-            is OAuthException.StateMismatch -> l10n.errTokenExchange(error.message.orEmpty())
+            is OAuthException.StateMismatch -> l10n.errStateMismatch
+            is OAuthException.CodeExpired -> l10n.errTokenExchange(l10n.errCodeExpired)
             else -> error.localizedMessage?.takeIf(String::isNotBlank)
                 ?: error::class.java.simpleName
         }

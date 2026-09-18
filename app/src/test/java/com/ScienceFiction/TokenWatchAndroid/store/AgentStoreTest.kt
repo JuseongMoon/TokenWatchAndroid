@@ -705,7 +705,7 @@ class AgentStoreTest {
             accountId = "acct_1",
         )
 
-        val agent = fixture.store.addAgent(AgentProvider.CLAUDE, tokens)
+        val agent = fixture.store.addAgent(AgentProvider.CLAUDE, tokens).agent
         assertEquals("dev@example.com", fixture.store.agents.value.single().accountLabel)
         assertEquals(
             AccountInfo("dev@example.com", "Max", listOf("read", "profile"), expiry, true, "acct_1"),
@@ -715,6 +715,57 @@ class AgentStoreTest {
         assertTrue(fixture.store.agents.value.isEmpty())
         assertTrue(fixture.store.snapshots.value.isEmpty())
         assertNull(fixture.store.accountInfo(agent))
+        fixture.close()
+    }
+
+    /**
+     * iOS 7d0d9da: signing in again with an account that already has a card replaces that card's
+     * token instead of adding a twin that would fight over the same rotating refresh token.
+     */
+    @Test
+    fun `signing in again with the same account replaces its token instead of adding a card`() = runBlocking {
+        val manualFetches = AtomicInteger(0)
+        val fixture = fixture(
+            parentScope = this,
+            fetchManualSnapshot = { _, _ ->
+                manualFetches.incrementAndGet()
+                snapshot(10.0)
+            },
+        )
+        fixture.store.awaitInitialLoad()
+        val first = fixture.store.addAgent(
+            AgentProvider.CLAUDE,
+            OAuthTokens("first", refreshToken = "r1", accountEmail = "dev@example.com"),
+        )
+        assertFalse(first.replacedExisting)
+
+        val again = fixture.store.addAgent(
+            AgentProvider.CLAUDE,
+            OAuthTokens("second", refreshToken = "r2", accountEmail = "dev@example.com"),
+        )
+        assertTrue(again.replacedExisting)
+        assertEquals(first.agent.id, again.agent.id)
+        assertEquals(1, fixture.store.agents.value.size)
+        assertEquals("second", fixture.tokens[first.agent.id]?.accessToken)
+        // The new token is used at once, past the burst spacing of the first add.
+        assertEquals(1, manualFetches.get())
+
+        // Another account, another provider with the same email, or no email: a new card each.
+        assertFalse(
+            fixture.store.addAgent(
+                AgentProvider.CLAUDE,
+                OAuthTokens("other", accountEmail = "other@example.com"),
+            ).replacedExisting,
+        )
+        assertFalse(
+            fixture.store.addAgent(
+                AgentProvider.GROK,
+                OAuthTokens("grok", accountEmail = "dev@example.com"),
+            ).replacedExisting,
+        )
+        assertFalse(fixture.store.addAgent(AgentProvider.KIMI, OAuthTokens.apiKey("k1")).replacedExisting)
+        assertFalse(fixture.store.addAgent(AgentProvider.KIMI, OAuthTokens.apiKey("k2")).replacedExisting)
+        assertEquals(5, fixture.store.agents.value.size)
         fixture.close()
     }
 

@@ -1,5 +1,6 @@
 package com.ScienceFiction.TokenWatchAndroid.auth
 
+import com.ScienceFiction.TokenWatchAndroid.auth.oauth.BrowserOAuthClient
 import com.ScienceFiction.TokenWatchAndroid.auth.oauth.OAuthCallback
 import com.ScienceFiction.TokenWatchAndroid.auth.oauth.OAuthCodeClient
 import com.ScienceFiction.TokenWatchAndroid.auth.oauth.OAuthException
@@ -129,19 +130,25 @@ class TokenStoreTest {
     }
 
     @Test
-    fun providerRefresherSupportsOnlyClaudeAndCodex(): Unit = runBlocking {
+    fun providerRefresherSupportsOnlyRotatingOAuthProviders(): Unit = runBlocking {
         val input = OAuthTokens("old", refreshToken = "refresh")
         val claudeResult = OAuthTokens("claude")
         val codexResult = OAuthTokens("codex")
+        val grokResult = OAuthTokens("grok")
         val dispatcher = ProviderTokenRefresher(
-            claude = FakeOAuthClient(claudeResult),
+            claude = FakeBrowserClient(claudeResult),
             codex = FakeOAuthClient(codexResult),
+            grok = FakeBrowserClient(grokResult),
         )
 
         assertSame(claudeResult, dispatcher.refresh(AgentProvider.CLAUDE, input))
         assertSame(codexResult, dispatcher.refresh(AgentProvider.CODEX, input))
-        assertThrows(OAuthException.NotAuthenticated::class.java) {
-            runBlocking { dispatcher.refresh(AgentProvider.COPILOT, input) }
+        assertSame(grokResult, dispatcher.refresh(AgentProvider.GROK, input))
+        // Device flow and API keys have no refresh; Cursor v1 signs in again instead.
+        for (provider in listOf(AgentProvider.COPILOT, AgentProvider.CURSOR, AgentProvider.KIMI)) {
+            assertThrows(OAuthException.NotAuthenticated::class.java) {
+                runBlocking { dispatcher.refresh(provider, input) }
+            }
         }
     }
 
@@ -157,6 +164,15 @@ class TokenStoreTest {
         @Synchronized override fun delete(agentId: UUID) {
             values.remove(agentId)
         }
+    }
+
+    private class FakeBrowserClient(private val refreshResult: OAuthTokens) : BrowserOAuthClient {
+        override fun loopbackRedirectUri(port: Int): String = error("unused")
+        override fun authorizeUrl(pkce: Pkce, redirect: String): String = error("unused")
+        override val manualCodeRedirect: String? = null
+        override suspend fun exchange(code: String, state: String, pkce: Pkce, redirect: String): OAuthTokens =
+            error("unused")
+        override suspend fun refresh(tokens: OAuthTokens): OAuthTokens = refreshResult
     }
 
     private class FakeOAuthClient(private val refreshResult: OAuthTokens) : OAuthCodeClient {

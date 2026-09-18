@@ -253,36 +253,46 @@ internal fun TokenWatchApp(
     }
 
     // The Failed phase carries no provider, so the last one seen is remembered to attribute a
-    // failure or an abandoned flow. Cleared once the funnel ends.
+    // failure or an abandoned flow. Cleared once the funnel ends, which is also what keeps a phase
+    // that merely updates in place (a code arriving, a window closing) from logging a second start.
     var loginProvider by remember { mutableStateOf<AgentProvider?>(null) }
     var loginStage by remember { mutableStateOf(LoginStage.AUTHORIZE) }
+    // A failure that kept its code can be retried as an exchange; that retry is the same attempt.
+    var retryProvider by remember { mutableStateOf<AgentProvider?>(null) }
     LaunchedEffect(addAgentFlow.phase) {
+        fun started(provider: AgentProvider, stage: LoginStage) {
+            if (loginProvider == null) analytics.log(AnalyticsEvent.LoginStart(provider))
+            loginProvider = provider
+            loginStage = stage
+        }
         when (val phase = addAgentFlow.phase) {
-            is AddAgentPhase.OAuthLogin -> {
-                loginProvider = phase.provider
-                loginStage = LoginStage.AUTHORIZE
-                analytics.log(AnalyticsEvent.LoginStart(phase.provider))
+            is AddAgentPhase.BrowserLogin -> {
+                started(phase.provider, if (phase.manualEntry) LoginStage.CODE_ENTRY else LoginStage.BROWSER_WAIT)
+                if (phase.inlineError != null) {
+                    analytics.log(AnalyticsEvent.LoginFail(phase.provider, LoginStage.CODE_ENTRY, "code_parse"))
+                }
             }
-            is AddAgentPhase.ApiKey -> {
-                loginProvider = phase.provider
-                loginStage = LoginStage.API_KEY_ENTRY
-                analytics.log(AnalyticsEvent.LoginStart(phase.provider))
+            is AddAgentPhase.OAuthLogin -> started(phase.provider, LoginStage.AUTHORIZE)
+            is AddAgentPhase.ApiKey -> started(phase.provider, LoginStage.API_KEY_ENTRY)
+            is AddAgentPhase.DeviceFlow -> started(phase.provider, LoginStage.DEVICE_POLL)
+            AddAgentPhase.Authenticating -> {
+                if (loginProvider == null) loginProvider = retryProvider
+                retryProvider = null
+                if (loginStage != LoginStage.API_KEY_ENTRY) loginStage = LoginStage.EXCHANGE
             }
-            is AddAgentPhase.DeviceFlow -> {
-                loginProvider = phase.provider
-                loginStage = LoginStage.DEVICE_POLL
-                analytics.log(AnalyticsEvent.LoginStart(phase.provider))
-            }
-            AddAgentPhase.Authenticating -> loginStage = LoginStage.EXCHANGE
             is AddAgentPhase.Failed -> {
                 loginProvider?.let {
                     // The message is deliberately not forwarded: it can carry provider error text.
-                    analytics.log(AnalyticsEvent.LoginFail(it, loginStage, loginStage.wireId))
+                    val stage = phase.stage ?: loginStage
+                    analytics.log(AnalyticsEvent.LoginFail(it, stage, phase.code ?: stage.wireId))
                 }
+                retryProvider = loginProvider.takeIf { phase.canRetryExchange }
                 loginProvider = null
             }
-            AddAgentPhase.Completed -> loginProvider = null
-            AddAgentPhase.PickProvider -> Unit
+            AddAgentPhase.Completed, AddAgentPhase.PickProvider -> {
+                loginProvider = null
+                retryProvider = null
+            }
         }
     }
 
@@ -384,12 +394,13 @@ internal fun TokenWatchApp(
             ROUTE_ADD -> AddAgentScreen(
                 flowState = addAgentFlow,
                 providerAuth = container.providerAuth,
-                deviceFlow = container.deviceFlow,
                 loc = loc,
                 onAddAgent = { provider, tokens ->
-                    store.addAgent(provider, tokens)
-                    analytics.log(AnalyticsEvent.LoginSuccess(provider, agents.size + 1))
-                    if (agents.isEmpty()) {
+                    val added = store.addAgent(provider, tokens)
+                    val total = store.agents.value.size
+                    analytics.log(AnalyticsEvent.LoginSuccess(provider, total))
+                    // Signing in again to an existing card is not a first activation.
+                    if (!added.replacedExisting && total == 1) {
                         analytics.log(AnalyticsEvent.ActivationComplete(provider))
                     }
                     if (
@@ -401,7 +412,6 @@ internal fun TokenWatchApp(
                         notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
                     }
                 },
-                onOpenUrl = openUrl,
                 onDismiss = {
                     loginProvider?.let {
                         analytics.log(AnalyticsEvent.LoginAbandon(it, loginStage))

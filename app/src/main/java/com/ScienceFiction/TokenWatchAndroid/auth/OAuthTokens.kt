@@ -23,10 +23,17 @@ data class OAuthTokens(
     companion object {
         private const val EXPIRY_SAFETY_SECONDS = 60L
 
-        fun apiKey(key: String, email: String? = null, plan: String? = null) = OAuthTokens(
+        /** [accountId] carries a provider-specific extra identifier, e.g. the API host a Kimi key works on. */
+        fun apiKey(
+            key: String,
+            email: String? = null,
+            plan: String? = null,
+            accountId: String? = null,
+        ) = OAuthTokens(
             accessToken = key.trim(),
             accountEmail = email,
             plan = plan,
+            accountId = accountId,
         )
 
         fun session(

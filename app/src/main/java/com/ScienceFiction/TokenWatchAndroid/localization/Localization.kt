@@ -1,5 +1,6 @@
 package com.ScienceFiction.TokenWatchAndroid.localization
 
+import com.ScienceFiction.TokenWatchAndroid.domain.AgentProvider
 import com.ScienceFiction.TokenWatchAndroid.domain.ServiceHealth
 import com.ScienceFiction.TokenWatchAndroid.domain.UsageCategory
 import com.ScienceFiction.TokenWatchAndroid.domain.WindowKind
@@ -275,6 +276,82 @@ data class L10n(val lang: Lang) {
     fun errTokenRefresh(message: String) = choose("토큰 갱신 실패: $message", "Token refresh failed: $message")
     val errNotAuthenticated get() = choose("로그인이 필요합니다.", "Login required.")
     fun errParse(message: String) = choose("응답 파싱 실패: $message", "Failed to parse response: $message")
+    val errInvalidApiKey get() = choose(
+        "API 키가 올바르지 않습니다. 키를 다시 확인해 주세요.",
+        "That API key isn't valid. Please check it and try again.",
+    )
+
+    /** One extra line under the API key field for a provider, or null. */
+    fun apiKeyHint(provider: AgentProvider): String? = when (provider) {
+        AgentProvider.KIMI -> choose(
+            "Kimi Code 콘솔에서 이 앱 전용 키를 새로 만들어 붙여넣으세요. 키로 쿼터를 사용할 수도 있습니다.",
+            "Create a new key just for this app in the Kimi Code console. A key can also spend your quota.",
+        )
+        AgentProvider.CLAUDE, AgentProvider.CODEX, AgentProvider.COPILOT, AgentProvider.GROK,
+        AgentProvider.CURSOR, AgentProvider.OPENROUTER, AgentProvider.DEEPSEEK, AgentProvider.POE,
+        AgentProvider.ELEVENLABS,
+        -> null
+    }
+    val errStateMismatch get() = choose(
+        "로그인 응답 검증에 실패했습니다(state 불일치). 다시 시도해 주세요.",
+        "Login response failed verification (state mismatch). Please try again.",
+    )
+    val errCodeInvalid get() = choose(
+        "코드 형식을 알아볼 수 없습니다. 복사한 내용을 다시 확인해 주세요.",
+        "That code isn't in a format we recognize. Check what you copied.",
+    )
+    val errCodeExpired get() = choose(
+        "코드가 만료되었거나 이미 사용되었습니다. 다시 로그인해 주세요.",
+        "The code expired or was already used. Please sign in again.",
+    )
+
+    /**
+     * Top of the provider list: sign-in and lookups depend on each provider's policies and can stop
+     * without notice, with the promise that outages are watched and fixed quickly.
+     */
+    val addAgentPolicyNotice get() = choose(
+        "로그인 및 사용량 조회는 각 제공업체의 정책에 의존하며, 정책 변경 시 예고 없이 중단될 수 있습니다. 장애는 여러 경로로 상시 모니터링 중이며, 문제 발생 시 신속히 대응합니다.",
+        "Sign-in and usage lookups depend on each provider's policies and may stop working without notice when those change. Outages are monitored continuously across multiple signals; issues are addressed promptly.",
+    )
+
+    /** Signature at the notice's bottom-right, in front of the slime. */
+    val addAgentNoticeSignature get() = choose("토큰워치 팀", "TokenWatch team")
+
+    fun browserSheetIntro(provider: String) = choose(
+        "$provider 계정으로 로그인하고 연결을 승인하세요. 로그인 창은 앱 안에서 열리고, 승인하면 자동으로 닫힙니다.",
+        "Sign in with your $provider account and approve the connection. The sign-in window opens inside the app and closes automatically once you approve.",
+    )
+    val browserSheetOpen get() = choose("[ 로그인 ]", "[ sign in ]")
+    val browserOtherAccountHint get() = choose(
+        "이미 로그인돼 있으면 바로 승인 화면이 열립니다. 다른 계정을 추가하려면 아래 버튼을 쓰세요.",
+        "If you're already signed in, the approval screen opens right away. To add a different account, use the button below.",
+    )
+    val browserOtherAccount get() = choose("[ 다른 계정으로 로그인 ]", "[ sign in with another account ]")
+    val browserWaiting get() = choose("로그인 창에서 승인을 기다리는 중…", "waiting for approval in the sign-in window…")
+    val browserCancelledHint get() = choose(
+        "로그인 창이 닫혔습니다. 다시 시도할 수 있습니다.",
+        "The sign-in window was closed. You can try again.",
+    )
+
+    /** [manualFallback]: the provider has the paste-the-code fallback, so it is suggested too. */
+    fun browserSessionFailed(manualFallback: Boolean) = if (manualFallback) {
+        choose(
+            "로그인 창을 열지 못했습니다. 다시 시도하거나 코드를 직접 입력해 주세요.",
+            "Couldn't open the sign-in window. Try again or enter the code manually.",
+        )
+    } else {
+        choose("로그인 창을 열지 못했습니다. 다시 시도해 주세요.", "Couldn't open the sign-in window. Please try again.")
+    }
+    val browserManualHint get() = choose("자동으로 연결되지 않나요?", "Not connecting automatically?")
+    val browserManualButton get() = choose("[ 코드 직접 입력 ]", "[ enter code manually ]")
+    val manualCodeGet get() = choose("[ 코드 받기 ↗ ]", "[ get code ↗ ]")
+    val manualCodePrompt get() = choose(
+        "승인 후 표시되는 코드를 복사해 아래에 붙여넣으세요.",
+        "Copy the code shown after approving and paste it below.",
+    )
+    val manualCodePlaceholder get() = choose("코드 붙여넣기…", "paste code…")
+    val manualConnect get() = "[ CONNECT ]"
+    val manualPaste get() = choose("[ 붙여넣기 ]", "[ paste ]")
     val errAuthMethodUnavailable get() = choose(
         "이 로그인 방식은 곧 지원됩니다.",
         "This sign-in method is coming soon.",
@@ -292,6 +369,17 @@ data class L10n(val lang: Lang) {
         "The code expired. Please try again.",
     )
     val deviceFlowDenied get() = choose("인증이 거부되었습니다.", "Authorization was denied.")
+
+    /** Polling login that only needs the page approved, without a code to enter (Cursor). */
+    fun pollingLoginPrompt(provider: String) = choose(
+        "앱 안에 열린 $provider 로그인 페이지에서 로그인하고 승인하세요. 승인되면 자동으로 연결됩니다.",
+        "Sign in on the $provider page opened in the app and approve. It connects automatically once approved.",
+    )
+    val pollingLoginOpen get() = choose("[ 로그인 페이지 열기 ↗ ]", "[ open sign-in page ↗ ]")
+    val pollingLoginTimedOut get() = choose(
+        "로그인 대기 시간이 지났습니다. 다시 시도해 주세요.",
+        "Sign-in timed out. Please try again.",
+    )
     val codexAdditionalLimit get() = choose("추가 한도", "Additional limit")
 
     fun usageCategoryLabel(category: UsageCategory) = when (category) {

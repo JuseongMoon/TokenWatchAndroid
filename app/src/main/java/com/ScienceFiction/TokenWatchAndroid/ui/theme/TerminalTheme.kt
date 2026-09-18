@@ -22,6 +22,7 @@ object Term {
     val Blue = Color(0xFF669EF2)
     val Pink = Color(0xFFF273A6)
     val Teal = Color(0xFF4CC7B3)
+    val Lime = Color(0xFFB8DE5C)
     val Track = Color(0xFF242B21)
     val GraveGray = Color(0xFF383838)
     val SignalCaution = Color(0xFFFFD61A)
