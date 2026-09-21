@@ -16,6 +16,7 @@ import com.ScienceFiction.TokenWatchAndroid.auth.oauth.CodexOAuthClient
 import com.ScienceFiction.TokenWatchAndroid.auth.oauth.GrokOAuthClient
 import com.ScienceFiction.TokenWatchAndroid.data.AgentRepository
 import com.ScienceFiction.TokenWatchAndroid.data.AnnouncementRepository
+import com.ScienceFiction.TokenWatchAndroid.data.ReviewPromptRepository
 import com.ScienceFiction.TokenWatchAndroid.data.SettingsRepository
 import com.ScienceFiction.TokenWatchAndroid.localization.AppLocaleState
 import com.ScienceFiction.TokenWatchAndroid.network.announcements.AnnouncementFeedClient
@@ -125,6 +126,9 @@ class TokenWatchContainer(context: Context) : Closeable {
         client = AnnouncementFeedClient(transport),
     )
 
+    /** Review prompt counters. One cold start is recorded as the graph is built (see below). */
+    val reviewPromptRepository = ReviewPromptRepository(applicationContext)
+
     /** Demo state is read lazily so sample agents never surface as real provider activity. */
     val analytics = AnalyticsService(
         context = applicationContext,
@@ -140,6 +144,11 @@ class TokenWatchContainer(context: Context) : Closeable {
     private fun recordFetchOutcome(provider: AgentProvider, agentId: UUID, error: Throwable?) {
         val previouslyFailed = fetchHadError.put(agentId, error != null) == true
         fetchOutcomeEvent(provider, error, previouslyFailed)?.let(analytics::log)
+    }
+
+    /** The process starting is the cold start the review policy counts. */
+    private val reviewLaunchJob = scope.launch {
+        reviewPromptRepository.recordLaunch(System.currentTimeMillis())
     }
 
     private val analyticsSyncJob = scope.launch {

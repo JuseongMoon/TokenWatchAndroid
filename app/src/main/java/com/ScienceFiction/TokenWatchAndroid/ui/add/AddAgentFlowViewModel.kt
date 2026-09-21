@@ -5,6 +5,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.ScienceFiction.TokenWatchAndroid.analytics.LoginFailureCode
 import com.ScienceFiction.TokenWatchAndroid.analytics.LoginStage
 import com.ScienceFiction.TokenWatchAndroid.auth.OAuthTokens
 import com.ScienceFiction.TokenWatchAndroid.auth.Pkce
@@ -284,7 +285,7 @@ internal class AddAgentFlowViewModel : ViewModel() {
                 phase = AddAgentPhase.Failed(
                     message = authErrorMessage(error, loc),
                     stage = LoginStage.EXCHANGE,
-                    code = error::class.java.simpleName,
+                    code = LoginFailureCode.from(error),
                     canRetryExchange = pendingExchange != null,
                 )
                 return@launch
@@ -346,7 +347,7 @@ internal class AddAgentFlowViewModel : ViewModel() {
                 phase = AddAgentPhase.Failed(
                     authErrorMessage(error, loc),
                     LoginStage.API_KEY_ENTRY,
-                    error::class.java.simpleName,
+                    LoginFailureCode.from(error),
                 )
                 return@launch
             }
@@ -375,7 +376,7 @@ internal class AddAgentFlowViewModel : ViewModel() {
                 phase = AddAgentPhase.Failed(
                     authErrorMessage(error, loc),
                     LoginStage.EXCHANGE,
-                    error::class.java.simpleName,
+                    LoginFailureCode.from(error),
                 )
                 return@launch
             }
@@ -406,7 +407,11 @@ internal class AddAgentFlowViewModel : ViewModel() {
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Throwable) {
-                phase = AddAgentPhase.Failed(authErrorMessage(error, loc), LoginStage.DEVICE_POLL, "device_flow")
+                phase = AddAgentPhase.Failed(
+                    authErrorMessage(error, loc),
+                    LoginStage.DEVICE_POLL,
+                    LoginFailureCode.from(error),
+                )
                 return@launch
             }
             addTokens(provider, tokens, loc, onAddAgent)

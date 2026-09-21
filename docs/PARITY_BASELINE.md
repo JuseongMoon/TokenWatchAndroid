@@ -4,16 +4,33 @@
 > and the single place recording how far Android has been synced. Pricing strategy,
 > unreleased plans and operational procedures do not belong in this repository's `docs/`.
 
-The Android release mirrors the portable iOS patches through commit `e82e1d0` on `dev`, the iOS
-1.2.0 (14) release. `cebace6` briefly moved iOS to 1.3.0 (15) without any functional change;
-`e82e1d0` returned the marketing version to 1.2.0 and the build number went back to 14, so
-Android ships the same content as 1.2.0 (14). Uncommitted iOS working-tree changes are otherwise
-deliberately not part of this baseline.
+The Android sources mirror the portable iOS patches through commit `67ef1fe` on `dev`, the iOS
+1.3.0 (15) content: the review prompt, login failure diagnostics and the two analytics additions
+described below. The version here still reads 1.2.0 (14) on purpose — Android 1.2.0 is in review,
+and both platforms move to 1.3.0 together once it is published. Uncommitted iOS working-tree
+changes are deliberately not part of this baseline.
 
 Firebase Analytics runs against the Android app's own Firebase registration and
 `google-services.json`; the iOS Firebase application identifier is not reused.
 
 ## Included behavior
+
+- Review prompt (iOS `3fe80c8`): one request per install, gated by the shared
+  `ReviewPromptPolicy` — signed in, three days since the first launch, five cold starts, and every
+  card currently loading without an error. Android launches the Play in-app review flow, whose
+  sheet Play may decline to show, so `store_review {source=prompt}` counts requests rather than
+  displays; the prompt is marked spent before the flow starts. The settings row opens the store
+  listing instead (`source=settings`), since Play's sheet cannot be triggered on demand, where iOS
+  can deep-link to its review page. Demo mode never qualifies.
+- Login failure diagnostics (iOS `c86095a`): a fire-and-forget POST of platform, app version,
+  build, provider, auth method, stage and a bucketed error code to the developer endpoint, so a
+  provider-side sign-in change is visible before the store reviews are. `LoginFailureCode` is the
+  shared classification table; the report carries no identifier, account data or raw error text and
+  is gated by the same PRIVACY opt-out, demo check and debug rule as analytics. Android classifies
+  the exchange/refresh/device/API-key failures from the exception, matching what iOS sends.
+- `notif_auth` user property: Android has no provisional notification state, so a granted runtime
+  permission with notifications enabled reads `authorized`, an unanswered permission
+  `not_determined`, and anything else `denied`. Re-read whenever the app comes forward.
 
 - Ten providers: the seven audited at `31a2e2c`, plus Grok and Cursor re-introduced with official
   CLI login flows (`8cff71c`, `d856eac`) and Kimi Code (`db7fc6b`). Grok reads the weekly pool

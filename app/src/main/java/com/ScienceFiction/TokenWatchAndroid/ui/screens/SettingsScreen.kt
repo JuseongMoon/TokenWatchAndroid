@@ -85,6 +85,7 @@ fun SettingsScreen(
     notificationDenied: Boolean = false,
     onOpenNotificationSettings: () -> Unit = {},
     onOpenUrl: (String) -> Unit = {},
+    onRateApp: () -> Unit = {},
 ) {
     var pendingLogoutId by rememberSaveable { mutableStateOf<String?>(null) }
     var showingWorkHours by rememberSaveable { mutableStateOf(false) }
@@ -163,6 +164,7 @@ fun SettingsScreen(
             if (agents.isNotEmpty()) DemoSection(isDemo, loc, onToggleDemo)
             TerminalBox(title = "INFO") {
                 KvRow(key = "version", value = appVersion, keyWidth = 84.dp)
+                TerminalTextButton("rate on Play Store", onClick = onRateApp, color = Term.Cyan)
             }
         }
     }

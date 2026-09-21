@@ -80,6 +80,12 @@ enum class RefreshSource(val wireId: String) {
     LIST("list"),
 }
 
+/** Where a store review was requested from. */
+enum class StoreReviewSource(val wireId: String) {
+    PROMPT("prompt"),
+    SETTINGS("settings"),
+}
+
 enum class AnnouncementAction(val wireId: String) {
     CLOSE("close"),
     NEVER("never"),
@@ -116,14 +122,22 @@ sealed class AnalyticsEvent(
         ),
     )
 
-    class LoginFail(provider: AgentProvider, stage: LoginStage, code: String) : AnalyticsEvent(
+    /**
+     * The fields are kept because [com.ScienceFiction.TokenWatchAndroid.analytics.AnalyticsService]
+     * forwards the same failure to the diagnostic report, which needs them unflattened.
+     */
+    class LoginFail(
+        val provider: AgentProvider,
+        val stage: LoginStage,
+        val code: String,
+    ) : AnalyticsEvent(
         "login_fail",
         mapOf(
             "provider" to provider.wireId,
             "auth_kind" to provider.analyticsAuthKind,
             "stage" to stage.wireId,
-            // Already a bucketed code at the call site; truncated as a second line of defence.
-            "code" to code.take(40),
+            // Bucketed at the call site; normalized again here as a second line of defence.
+            "code" to LoginFailureCode.sanitized(code),
         ),
     )
 
@@ -189,6 +203,16 @@ sealed class AnalyticsEvent(
     class AnnouncementOpen(id: String, kind: Announcement.Kind) : AnalyticsEvent(
         "announcement_open",
         mapOf("announcement_id" to id.take(40), "kind" to kind.wireId),
+        isProviderScoped = false,
+    )
+
+    /**
+     * A review was *requested*: the in-app review flow was launched, or the settings row opened the
+     * store listing. Play decides whether its own sheet actually appears, so this counts requests.
+     */
+    class StoreReview(source: StoreReviewSource) : AnalyticsEvent(
+        "store_review",
+        mapOf("source" to source.wireId),
         isProviderScoped = false,
     )
 }

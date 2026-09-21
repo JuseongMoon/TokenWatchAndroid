@@ -39,6 +39,13 @@ class AnalyticsService(
     private val isUsable: Boolean
         get() = analytics != null && collectionEnabled && (!BuildConfig.DEBUG || BuildConfig.ANALYTICS_DEBUG)
 
+    /**
+     * Whether the login failure diagnostic report may be sent: the PRIVACY opt-out and demo mode
+     * gate it exactly as they gate analytics, and debug builds stay silent unless explicitly asked.
+     */
+    private val reportingAllowed: Boolean
+        get() = collectionEnabled && !isDemo() && (!BuildConfig.DEBUG || BuildConfig.ANALYTICS_DEBUG)
+
     /** Applies the opt-out to the SDK as well, so nothing is buffered while it is off. */
     fun setCollectionEnabled(enabled: Boolean) {
         collectionEnabled = enabled
@@ -46,6 +53,17 @@ class AnalyticsService(
     }
 
     fun log(event: AnalyticsEvent) {
+        // Login failures also go to the diagnostic endpoint, behind the same gate (see
+        // [reportingAllowed]) but independent of whether Firebase itself started.
+        if (event is AnalyticsEvent.LoginFail && reportingAllowed) {
+            LoginFailureReporter.report(
+                provider = event.provider,
+                stage = event.stage,
+                code = event.code,
+                appVersion = BuildConfig.VERSION_NAME,
+                build = BuildConfig.VERSION_CODE.toString(),
+            )
+        }
         if (!isUsable) return
         val demo = isDemo()
         if (event.isProviderScoped && demo) return
@@ -66,6 +84,15 @@ class AnalyticsService(
         val tags = agents.map { it.provider.analyticsShortTag }.distinct().sorted().joinToString(",")
         analytics?.setUserProperty("providers", tags.ifEmpty { null })
         syncSettingsProperties(settings)
+    }
+
+    /**
+     * Notification permission state. Android asks once and the user can change it in system
+     * settings afterwards, so this is re-synced whenever the app comes forward.
+     */
+    fun syncNotificationAuthorization(tag: String) {
+        if (!isUsable) return
+        analytics?.setUserProperty("notif_auth", tag)
     }
 
     /** Settings-only properties, for call sites that have no agent list. */

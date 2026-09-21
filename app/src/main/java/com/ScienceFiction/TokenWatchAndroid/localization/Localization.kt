@@ -143,8 +143,8 @@ data class L10n(val lang: Lang) {
     val a11yBack get() = choose("뒤로", "Back")
 
     val settingsPrivacyHelp get() = choose(
-        "화면 이동·기능 사용 여부·오류 발생 같은 익명 통계를 앱 개선에 씁니다. 계정·이메일·토큰·API 키·사용량 수치는 전송하지 않고, 광고 식별자와 이용자 추적도 없습니다.",
-        "Anonymous statistics — screens visited, features used, errors — help improve the app. Never your accounts, emails, tokens, API keys, or usage numbers. No advertising identifiers, no tracking.",
+        "화면 이동·기능 사용 여부·오류 발생 같은 익명 통계와 로그인 실패 진단(서비스·단계·오류 코드)을 앱 개선에 씁니다. 계정·이메일·토큰·API 키·사용량 수치는 전송하지 않고, 광고 식별자와 이용자 추적도 없습니다.",
+        "Anonymous statistics — screens visited, features used, errors — and login failure diagnostics (service, step, error code) help improve the app. Never your accounts, emails, tokens, API keys, or usage numbers. No advertising identifiers, no tracking.",
     )
     val privacyPolicyButton get() = choose("[ 개인정보처리방침 ]", "[ privacy policy ]")
     val announcementClose get() = choose("닫기", "Close")

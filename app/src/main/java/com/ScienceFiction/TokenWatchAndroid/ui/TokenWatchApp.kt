@@ -1,6 +1,9 @@
 package com.ScienceFiction.TokenWatchAndroid.ui
 
 import android.Manifest
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -31,15 +34,19 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.core.app.NotificationManagerCompat
+import com.google.android.play.core.review.ReviewManagerFactory
 import com.ScienceFiction.TokenWatchAndroid.BuildConfig
 import com.ScienceFiction.TokenWatchAndroid.TokenWatchContainer
 import com.ScienceFiction.TokenWatchAndroid.data.AppSettings
 import com.ScienceFiction.TokenWatchAndroid.domain.Agent
+import com.ScienceFiction.TokenWatchAndroid.domain.ReviewPromptPolicy
 import com.ScienceFiction.TokenWatchAndroid.domain.ServiceHealth
 import com.ScienceFiction.TokenWatchAndroid.localization.L10n
 import com.ScienceFiction.TokenWatchAndroid.store.AccountInfo
 import com.ScienceFiction.TokenWatchAndroid.tokenWatchContainer
 import com.ScienceFiction.TokenWatchAndroid.analytics.AnalyticsEvent
+import com.ScienceFiction.TokenWatchAndroid.analytics.StoreReviewSource
 import com.ScienceFiction.TokenWatchAndroid.analytics.AnalyticsService
 import com.ScienceFiction.TokenWatchAndroid.analytics.LoginStage
 import com.ScienceFiction.TokenWatchAndroid.domain.AgentProvider
@@ -160,6 +167,13 @@ internal fun TokenWatchApp(
             lifecycle.removeObserver(observer)
             store.stopAutoRefresh()
         }
+    }
+
+    // Notification permission as a user property. Android asks once and the answer can change in
+    // system settings afterwards, so it is re-read every time the app comes forward.
+    LaunchedEffect(isForeground, notificationPermissionRevision, settings.analyticsEnabled) {
+        if (!isForeground) return@LaunchedEffect
+        analytics.syncNotificationAuthorization(notificationAuthorizationTag(context))
     }
 
     LaunchedEffect(isForeground, settings.refreshInterval, store) {
@@ -330,6 +344,52 @@ internal fun TokenWatchApp(
         }
     }
 
+    // Review prompt. Play caps how often its sheet appears, so the one request per install is
+    // spent on a screen where the app is visibly working: signed in, a few days and launches in,
+    // every card loaded without an error. Demo mode never qualifies — its data is sample data.
+    val requestReview = remember(context, analytics) {
+        {
+            val activity = context.findActivity()
+            if (activity != null) {
+                analytics.log(AnalyticsEvent.StoreReview(StoreReviewSource.PROMPT))
+                val manager = ReviewManagerFactory.create(activity)
+                manager.requestReviewFlow().addOnCompleteListener { task ->
+                    // Play decides whether the sheet actually appears; a failure here is not
+                    // something the user should ever see.
+                    if (task.isSuccessful) {
+                        runCatching { manager.launchReviewFlow(activity, task.result) }
+                    }
+                }
+            }
+            Unit
+        }
+    }
+
+    LaunchedEffect(agents, snapshots, isDemo, initialLoadFinished) {
+        if (isDemo || !initialLoadFinished || agents.isEmpty()) return@LaunchedEffect
+        val healthy = agents.all { agent ->
+            snapshots[agent.id]?.let { it.error == null && it.windows.isNotEmpty() } == true
+        }
+        if (!healthy) return@LaunchedEffect
+        val state = container.reviewPromptRepository.load()
+        val due = ReviewPromptPolicy.shouldPrompt(
+            // A card that has ever loaded cleanly is this app's activation; Android has no
+            // separate activation flag because ActivationComplete is logged when an account
+            // is added rather than on the first healthy snapshot.
+            activated = true,
+            firstLaunchAt = state.firstLaunchAt,
+            launchCount = state.launchCount,
+            alreadyPrompted = state.prompted,
+            allSnapshotsHealthy = true,
+            now = System.currentTimeMillis(),
+        )
+        if (!due) return@LaunchedEffect
+        // Spend the prompt before launching: Play may silently decline to show it, and asking
+        // again on the next refresh would be worse than missing one.
+        container.reviewPromptRepository.markPrompted()
+        requestReview()
+    }
+
     val openUrl = remember(context) {
         { rawUrl: String ->
             runCatching {
@@ -469,6 +529,12 @@ internal fun TokenWatchApp(
                         container.resetNotificationManager.isDenied()
                     },
                     onOpenUrl = openUrl,
+                    onRateApp = {
+                        analytics.log(AnalyticsEvent.StoreReview(StoreReviewSource.SETTINGS))
+                        // The store listing, not the in-app flow: the row is an explicit request,
+                        // and Play's own sheet cannot be triggered on demand.
+                        openUrl("https://play.google.com/store/apps/details?id=${context.packageName}")
+                    },
                     onOpenNotificationSettings = {
                         context.startActivity(
                             Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
@@ -673,3 +739,30 @@ internal fun mergeSettingsChange(
     analyticsEnabled = proposed.analyticsEnabled.takeIf { it != base.analyticsEnabled }
         ?: current.analyticsEnabled,
 )
+
+/** The hosting activity, which the Play review flow needs; null if the context is not activity-backed. */
+private fun Context.findActivity(): Activity? {
+    var current: Context? = this
+    while (current is ContextWrapper) {
+        if (current is Activity) return current
+        current = current.baseContext
+    }
+    return null
+}
+
+/**
+ * The `notif_auth` user property. Android has no "provisional" state, so a channel that exists and
+ * is enabled reads as authorized; before the runtime permission is answered it is not_determined.
+ */
+private fun notificationAuthorizationTag(context: Context): String = when {
+    Build.VERSION.SDK_INT >= 33 &&
+        context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
+        PackageManager.PERMISSION_GRANTED ->
+        if (NotificationManagerCompat.from(context).areNotificationsEnabled()) {
+            "not_determined"
+        } else {
+            "denied"
+        }
+    NotificationManagerCompat.from(context).areNotificationsEnabled() -> "authorized"
+    else -> "denied"
+}
