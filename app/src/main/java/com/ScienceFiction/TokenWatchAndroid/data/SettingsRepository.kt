@@ -37,6 +37,7 @@ class SettingsRepository(
         refreshInterval = safeGet(Keys.refreshInterval),
         keepScreenOn = safeGet(Keys.keepScreenOn),
         hideUnusedWindows = safeGet(Keys.hideUnusedWindows),
+        hideUnusedCredits = safeGet(Keys.hideUnusedCredits),
         gaugeCritter = safeGet(Keys.gaugeCritter),
         workHours = safeGet(Keys.workHours),
         workHoursEnabled = safeGet(Keys.workHoursEnabled),
@@ -53,6 +54,7 @@ class SettingsRepository(
         this[Keys.refreshInterval] = settings.refreshInterval
         this[Keys.keepScreenOn] = settings.keepScreenOn
         this[Keys.hideUnusedWindows] = settings.hideUnusedWindows
+        this[Keys.hideUnusedCredits] = settings.hideUnusedCredits
         this[Keys.gaugeCritter] = settings.gaugeCritter
         this[Keys.workHours] = settings.workHours
         // Absent must stay absent: writing false here would switch work hours off for
@@ -73,6 +75,7 @@ class SettingsRepository(
         val refreshInterval = intPreferencesKey("tokenwatch.refreshInterval")
         val keepScreenOn = booleanPreferencesKey("tokenwatch.keepScreenOn")
         val hideUnusedWindows = booleanPreferencesKey("tokenwatch.hideUnusedWindows")
+        val hideUnusedCredits = booleanPreferencesKey("tokenwatch.hideUnusedCredits")
         val gaugeCritter = booleanPreferencesKey("tokenwatch.gaugeCritter")
         val workHours = stringPreferencesKey("tokenwatch.workHours")
         val workHoursEnabled = booleanPreferencesKey("tokenwatch.workHoursEnabled")

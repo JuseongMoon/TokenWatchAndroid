@@ -5,7 +5,10 @@ import com.ScienceFiction.TokenWatchAndroid.localization.AppLanguage
 data class AppSettings(
     val refreshInterval: Int = DEFAULT_REFRESH_INTERVAL,
     val keepScreenOn: Boolean = false,
+    /** "hide unused graphs › percentage". Keeps the single-toggle era key so existing choices survive. */
     val hideUnusedWindows: Boolean = false,
+    /** "hide unused graphs › credit": hide never-spent prepaid credit gauges. */
+    val hideUnusedCredits: Boolean = false,
     val gaugeCritter: Boolean = true,
     val workHours: String = "",
     /** Tri-state: null means "derive from the schedule". See WorkHoursSchedule.isEnabled. */
@@ -32,6 +35,7 @@ object AppSettingsCodec {
         refreshInterval: Int? = null,
         keepScreenOn: Boolean? = null,
         hideUnusedWindows: Boolean? = null,
+        hideUnusedCredits: Boolean? = null,
         gaugeCritter: Boolean? = null,
         workHours: String? = null,
         workHoursEnabled: Boolean? = null,
@@ -47,6 +51,7 @@ object AppSettingsCodec {
             refreshInterval = refreshInterval ?: AppSettings.DEFAULT_REFRESH_INTERVAL,
             keepScreenOn = keepScreenOn ?: false,
             hideUnusedWindows = hideUnusedWindows ?: false,
+            hideUnusedCredits = hideUnusedCredits ?: false,
             gaugeCritter = gaugeCritter ?: true,
             workHours = WorkHoursSetting.normalize(workHours.orEmpty()),
             workHoursEnabled = workHoursEnabled,

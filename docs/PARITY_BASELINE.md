@@ -4,9 +4,9 @@
 > and the single place recording how far Android has been synced. Pricing strategy,
 > unreleased plans and operational procedures do not belong in this repository's `docs/`.
 
-The Android sources mirror the portable iOS patches through commit `67ef1fe` on `dev`, the iOS
-1.3.0 (15) content: the review prompt, login failure diagnostics and the two analytics additions
-described below. The version here still reads 1.2.0 (14) on purpose — Android 1.2.0 is in review,
+The Android sources mirror the portable iOS patches through commit `6171f42` on `dev`, the iOS
+1.3.0 (15) content: the review prompt, login failure diagnostics, the two analytics additions and
+the split "hide unused graphs" setting described below. The version here still reads 1.2.0 (14) on purpose — Android 1.2.0 is in review,
 and both platforms move to 1.3.0 together once it is published. Uncommitted iOS working-tree
 changes are deliberately not part of this baseline.
 
@@ -28,6 +28,11 @@ Firebase Analytics runs against the Android app's own Firebase registration and
   shared classification table; the report carries no identifier, account data or raw error text and
   is gated by the same PRIVACY opt-out, demo check and debug rule as analytics. Android classifies
   the exchange/refresh/device/API-key failures from the exception, matching what iOS sends.
+- "hide unused graphs" split (iOS `6171f42`): a heading with two checkboxes. `percentage (0%)`
+  keeps the single-toggle era key and `hide_unused` event, so existing choices carry over;
+  `credit (never used)` hides credit gauges whose provider-supplied total is untouched (e.g.
+  Claude Extra usage at $0 this month) and logs `hide_unused_credit`. Estimated-total gauges and
+  plain balances always stay visible, since "full" cannot be told apart from "unused" there.
 - `notif_auth` user property: Android has no provisional notification state, so a granted runtime
   permission with notifications enabled reads `authorized`, an unanswered permission
   `not_determined`, and anything else `denied`. Re-read whenever the app comes forward.

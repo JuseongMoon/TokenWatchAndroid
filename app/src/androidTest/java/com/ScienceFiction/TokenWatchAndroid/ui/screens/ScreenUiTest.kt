@@ -44,6 +44,7 @@ class ScreenUiTest {
                     isLoading = false,
                     serviceHealth = ServiceHealth.OPERATIONAL,
                     hideUnusedWindows = false,
+                    hideUnusedCredits = false,
                     loc = L10n(Lang.EN),
                 )
             }
@@ -65,6 +66,7 @@ class ScreenUiTest {
                     isLoading = false,
                     serviceHealth = null,
                     hideUnusedWindows = false,
+                    hideUnusedCredits = false,
                     loc = L10n(Lang.EN),
                 )
             }
@@ -111,6 +113,7 @@ class ScreenUiTest {
                     account = DetailAccountUiState(isLoading = false),
                     serviceHealth = ServiceHealth.UNKNOWN,
                     hideUnusedWindows = false,
+                    hideUnusedCredits = false,
                     gaugeCritterEnabled = false,
                     loc = loc,
                     showLogoutConfirmation = false,
@@ -157,6 +160,7 @@ class ScreenUiTest {
                     isLoading = false,
                     serviceHealth = ServiceHealth.OPERATIONAL,
                     hideUnusedWindows = false,
+                    hideUnusedCredits = false,
                     loc = L10n(Lang.EN),
                 )
             }

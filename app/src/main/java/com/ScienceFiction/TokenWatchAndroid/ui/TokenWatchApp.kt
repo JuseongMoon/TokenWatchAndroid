@@ -234,6 +234,9 @@ internal fun TokenWatchApp(
         if (previous.hideUnusedWindows != settings.hideUnusedWindows) {
             changed("hide_unused", onOff(settings.hideUnusedWindows))
         }
+        if (previous.hideUnusedCredits != settings.hideUnusedCredits) {
+            changed("hide_unused_credit", onOff(settings.hideUnusedCredits))
+        }
         if (previous.gaugeCritter != settings.gaugeCritter) changed("gauge_critter", onOff(settings.gaugeCritter))
         if (previous.workHoursEnabled != settings.workHoursEnabled) {
             changed(
@@ -570,6 +573,7 @@ internal fun TokenWatchApp(
                     isLoading = selectedAgent.id in loadingIds,
                     serviceHealth = serviceStatus[selectedAgent.provider] ?: ServiceHealth.UNKNOWN,
                     hideUnusedWindows = settings.hideUnusedWindows,
+                    hideUnusedCredits = settings.hideUnusedCredits,
                     gaugeCritterEnabled = settings.gaugeCritter,
                     workHours = settings.workHours,
                     workHoursEnabled = settings.workHoursEnabled,
@@ -638,6 +642,7 @@ private fun AgentDetailRoute(
     isLoading: Boolean,
     serviceHealth: ServiceHealth,
     hideUnusedWindows: Boolean,
+    hideUnusedCredits: Boolean,
     gaugeCritterEnabled: Boolean,
     workHours: String,
     workHoursEnabled: Boolean?,
@@ -666,6 +671,7 @@ private fun AgentDetailRoute(
         account = account,
         serviceHealth = serviceHealth,
         hideUnusedWindows = hideUnusedWindows,
+        hideUnusedCredits = hideUnusedCredits,
         gaugeCritterEnabled = gaugeCritterEnabled,
         workHoursSchedule = com.ScienceFiction.TokenWatchAndroid.domain.WorkHoursSchedule
             .active(workHours, workHoursEnabled),
@@ -713,6 +719,8 @@ internal fun mergeSettingsChange(
         ?: current.keepScreenOn,
     hideUnusedWindows = proposed.hideUnusedWindows.takeIf { it != base.hideUnusedWindows }
         ?: current.hideUnusedWindows,
+    hideUnusedCredits = proposed.hideUnusedCredits.takeIf { it != base.hideUnusedCredits }
+        ?: current.hideUnusedCredits,
     gaugeCritter = proposed.gaugeCritter.takeIf { it != base.gaugeCritter }
         ?: current.gaugeCritter,
     workHours = proposed.workHours.takeIf { it != base.workHours } ?: current.workHours,

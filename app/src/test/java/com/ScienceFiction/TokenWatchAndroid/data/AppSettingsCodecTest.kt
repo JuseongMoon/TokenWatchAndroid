@@ -15,6 +15,7 @@ class AppSettingsCodecTest {
                 refreshInterval = 60,
                 keepScreenOn = false,
                 hideUnusedWindows = false,
+                hideUnusedCredits = false,
                 gaugeCritter = true,
                 heartbeatCursor = false,
                 heartbeatTracking = false,
@@ -33,6 +34,7 @@ class AppSettingsCodecTest {
             refreshInterval = -1,
             keepScreenOn = true,
             hideUnusedWindows = true,
+            hideUnusedCredits = true,
             gaugeCritter = false,
             heartbeatCursor = true,
             heartbeatTracking = true,
@@ -45,6 +47,7 @@ class AppSettingsCodecTest {
         assertEquals(-1, settings.refreshInterval)
         assertTrue(settings.keepScreenOn)
         assertTrue(settings.hideUnusedWindows)
+        assertTrue(settings.hideUnusedCredits)
         assertFalse(settings.gaugeCritter)
         assertTrue(settings.heartbeatCursor)
         assertTrue(settings.heartbeatTracking)

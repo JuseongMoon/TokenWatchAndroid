@@ -45,8 +45,30 @@ class ScreenLogicTest {
             visibleUsageWindows(
                 listOf(unusedGauge, usedGauge, fullCreditGauge, balance),
                 hideUnusedWindows = true,
+                hideUnusedCredits = false,
             ),
         )
+    }
+
+    @Test
+    fun `hide unused credit removes only never spent credit gauges with a known total`() {
+        val unusedGauge = window("session", 0.0)
+        val unusedCredit = window("extra", 0.0, UsageStyle.CREDIT_GAUGE)
+        val spentCredit = window("prepaid", 25.0, UsageStyle.CREDIT_GAUGE)
+        val estimatedCredit = window("estimated", 0.0, UsageStyle.CREDIT_GAUGE).copy(estimatedTotal = true)
+        val balance = window("credits", 0.0, UsageStyle.BALANCE)
+        val all = listOf(unusedGauge, unusedCredit, spentCredit, estimatedCredit, balance)
+
+        assertEquals(all, visibleUsageWindows(all, hideUnusedWindows = false, hideUnusedCredits = false))
+        assertEquals(
+            listOf(unusedGauge, spentCredit, estimatedCredit, balance),
+            visibleUsageWindows(all, hideUnusedWindows = false, hideUnusedCredits = true),
+        )
+        assertEquals(
+            listOf(spentCredit, estimatedCredit, balance),
+            visibleUsageWindows(all, hideUnusedWindows = true, hideUnusedCredits = true),
+        )
+        assertTrue(visibleUsageWindows(listOf(unusedGauge, unusedCredit), true, true).isEmpty())
     }
 
     @Test

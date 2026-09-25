@@ -38,9 +38,17 @@ data class UsageWindow(
     val remainingPercent: Double
         get() = max(0.0, 100.0 - usedPercent)
 
-    /** A zero-percent balance is still meaningful and must remain visible. */
+    /** Zero-percent subscription gauge ("hide unused graphs › percentage"). Credit gauges use [isUnusedCredit]. */
     val isUnused: Boolean
         get() = style == UsageStyle.GAUGE && usedPercent <= 0.0
+
+    /**
+     * Prepaid credit gauge that was never spent, e.g. Claude Extra usage at $0 this month
+     * ("hide unused graphs › credit"). Only judged when the provider supplied the total —
+     * an estimated (peak) total or a plain balance can't tell "full" from "unused".
+     */
+    val isUnusedCredit: Boolean
+        get() = style == UsageStyle.CREDIT_GAUGE && !estimatedTotal && usedPercent <= 0.0
 
     /** Subscription and prepaid-credit gauges both participate in usage tracking. */
     val isGaugeLike: Boolean

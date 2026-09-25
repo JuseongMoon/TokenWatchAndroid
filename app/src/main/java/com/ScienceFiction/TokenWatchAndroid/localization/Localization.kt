@@ -81,8 +81,8 @@ data class L10n(val lang: Lang) {
         "When on, the screen stays awake while you view the app.",
     )
     val settingsHideUnusedHelp get() = choose(
-        "사용률이 0%인(전혀 쓰지 않은) 그래프를 목록·상세에서 숨깁니다.",
-        "Hides usage graphs sitting at 0% from the list and detail.",
+        "목록·상세에서 미사용 그래프를 숨깁니다. 퍼센테이지는 사용률 0%인 구독 그래프, 충전식은 한 번도 쓰지 않은 충전식 잔액(Extra usage 등)입니다. 총액을 알 수 없는 잔액은 항상 표시합니다.",
+        "Hides unused graphs from the list and detail. Percentage covers plan graphs at 0%; credit covers prepaid balances never spent (e.g. Extra usage). Balances with an unknown total always stay visible.",
     )
     val settingsGaugeCritterHelp get() = choose(
         "사용률 100%가 된 게이지 위를 픽셀 슬라임이 통통 튀며 지나갑니다.",
@@ -189,7 +189,7 @@ data class L10n(val lang: Lang) {
         "= 현재 시각 · 채움이 이 선보다 앞서면 시간보다 빠른 소비",
         "= current time · fill past this line means faster-than-time usage",
     )
-    val usageAllUnusedHidden get() = choose("미사용(0%) 창은 숨김", "unused (0%) windows hidden")
+    val usageAllUnusedHidden get() = choose("미사용 창은 숨김", "unused windows hidden")
 
     fun paceAhead(percent: Int) = choose("↑ 시간 대비 $percent%p 빠름", "↑ $percent%p ahead of pace")
     fun paceUnder(percent: Int) = choose("↓ 시간 대비 $percent%p 여유", "↓ $percent%p under pace")

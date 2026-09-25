@@ -74,6 +74,7 @@ fun DetailScreen(
     account: DetailAccountUiState,
     serviceHealth: ServiceHealth,
     hideUnusedWindows: Boolean,
+    hideUnusedCredits: Boolean,
     gaugeCritterEnabled: Boolean,
     workHoursSchedule: WorkHoursSchedule? = null,
     isDemo: Boolean = false,
@@ -135,6 +136,7 @@ fun DetailScreen(
                     snapshot = snapshot,
                     isLoading = isLoading,
                     hideUnusedWindows = hideUnusedWindows,
+                    hideUnusedCredits = hideUnusedCredits,
                     gaugeCritterEnabled = gaugeCritterEnabled,
                     workHoursSchedule = workHoursSchedule,
                     loc = loc,
@@ -218,6 +220,7 @@ private fun DetailUsageCard(
     snapshot: AgentSnapshot?,
     isLoading: Boolean,
     hideUnusedWindows: Boolean,
+    hideUnusedCredits: Boolean,
     gaugeCritterEnabled: Boolean,
     workHoursSchedule: WorkHoursSchedule?,
     loc: L10n,
@@ -232,7 +235,7 @@ private fun DetailUsageCard(
         ) {
             when {
                 snapshot != null && snapshot.windows.isNotEmpty() -> {
-                    val windows = visibleUsageWindows(snapshot.windows, hideUnusedWindows)
+                    val windows = visibleUsageWindows(snapshot.windows, hideUnusedWindows, hideUnusedCredits)
                     if (isLoading) {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             TerminalSpinner(size = 11.sp)

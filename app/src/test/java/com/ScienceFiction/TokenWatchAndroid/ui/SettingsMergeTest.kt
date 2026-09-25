@@ -46,6 +46,18 @@ class SettingsMergeTest {
     }
 
     @Test
+    fun hideUnusedTogglesMergeIndependently() {
+        val base = AppSettings(hideUnusedWindows = true)
+        val proposed = base.copy(hideUnusedCredits = true)
+        val current = base.copy(hideUnusedWindows = false)
+
+        val merged = mergeSettingsChange(base, proposed, current)
+
+        assertTrue(merged.hideUnusedCredits)
+        assertFalse(merged.hideUnusedWindows)
+    }
+
+    @Test
     fun notificationTogglesMergeWithoutRevertingOtherSettings() {
         val base = AppSettings()
         val current = base.copy(keepScreenOn = true)

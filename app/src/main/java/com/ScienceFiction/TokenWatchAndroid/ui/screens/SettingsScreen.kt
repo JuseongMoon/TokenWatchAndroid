@@ -418,14 +418,32 @@ private fun DisplaySection(
 ) {
     TerminalBox(title = "DISPLAY") {
         Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            SettingWithHelp(
-                checked = settings.hideUnusedWindows,
-                title = "hide unused (0%) graphs",
-                help = loc.settingsHideUnusedHelp,
-                onClick = {
-                    onSettingsChange(settings.copy(hideUnusedWindows = !settings.hideUnusedWindows))
-                },
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = "hide unused graphs",
+                    color = Term.Foreground,
+                    style = terminalTextStyle(14.sp),
+                )
+                HideUnusedSubToggle(
+                    checked = settings.hideUnusedWindows,
+                    title = "percentage (0%)",
+                    onClick = {
+                        onSettingsChange(settings.copy(hideUnusedWindows = !settings.hideUnusedWindows))
+                    },
+                )
+                HideUnusedSubToggle(
+                    checked = settings.hideUnusedCredits,
+                    title = "credit (never used)",
+                    onClick = {
+                        onSettingsChange(settings.copy(hideUnusedCredits = !settings.hideUnusedCredits))
+                    },
+                )
+                Text(
+                    text = loc.settingsHideUnusedHelp,
+                    color = Term.Dim,
+                    style = terminalTextStyle(10.sp),
+                )
+            }
             SettingWithHelp(
                 checked = settings.gaugeCritter,
                 title = "gauge slime",
@@ -440,6 +458,37 @@ private fun DisplaySection(
                 },
             )
         }
+    }
+}
+
+/** Child checkbox under the "hide unused graphs" heading — one size smaller, slightly indented. */
+@Composable
+private fun HideUnusedSubToggle(checked: Boolean, title: String, onClick: () -> Unit) {
+    val interactionSource = remember { MutableInteractionSource() }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                role = Role.Checkbox,
+                onClick = onClick,
+            )
+            .padding(start = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = if (checked) "[x]" else "[ ]",
+            color = if (checked) Term.Green else Term.Dim,
+            style = terminalTextStyle(12.sp),
+        )
+        Text(
+            text = title,
+            color = if (checked) Term.Foreground else Term.Dim,
+            style = terminalTextStyle(12.sp),
+        )
+        Spacer(modifier = Modifier.weight(1f))
     }
 }
 

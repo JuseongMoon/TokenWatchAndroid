@@ -342,6 +342,7 @@ private fun AgentCardItem(
             isLoading = isLoading,
             serviceHealth = serviceHealth,
             hideUnusedWindows = settings.hideUnusedWindows,
+            hideUnusedCredits = settings.hideUnusedCredits,
             gaugeCritterEnabled = settings.gaugeCritter,
             workHoursSchedule = WorkHoursSchedule.active(settings.workHours, settings.workHoursEnabled),
             loc = loc,

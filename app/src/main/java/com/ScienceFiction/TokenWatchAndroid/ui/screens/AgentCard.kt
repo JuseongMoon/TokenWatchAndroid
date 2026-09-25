@@ -41,6 +41,7 @@ fun AgentCard(
     isLoading: Boolean,
     serviceHealth: ServiceHealth?,
     hideUnusedWindows: Boolean,
+    hideUnusedCredits: Boolean,
     loc: L10n,
     gaugeCritterEnabled: Boolean = true,
     workHoursSchedule: WorkHoursSchedule? = null,
@@ -58,6 +59,7 @@ fun AgentCard(
                 snapshot = snapshot,
                 isLoading = isLoading,
                 hideUnusedWindows = hideUnusedWindows,
+                hideUnusedCredits = hideUnusedCredits,
                 loc = loc,
                 gaugeCritterEnabled = gaugeCritterEnabled,
                 workHoursSchedule = workHoursSchedule,
@@ -151,23 +153,31 @@ internal fun agentCardTitle(agent: Agent): String = buildString {
         }
 }
 
+/** "hide unused graphs": percentage hides 0% subscription gauges, credit hides never-spent credit gauges. */
 internal fun visibleUsageWindows(
     windows: List<UsageWindow>,
     hideUnusedWindows: Boolean,
-): List<UsageWindow> = if (hideUnusedWindows) windows.filterNot(UsageWindow::isUnused) else windows
+    hideUnusedCredits: Boolean,
+): List<UsageWindow> {
+    if (!hideUnusedWindows && !hideUnusedCredits) return windows
+    return windows.filterNot { window ->
+        (hideUnusedWindows && window.isUnused) || (hideUnusedCredits && window.isUnusedCredit)
+    }
+}
 
 @Composable
 private fun AgentUsageContent(
     snapshot: AgentSnapshot?,
     isLoading: Boolean,
     hideUnusedWindows: Boolean,
+    hideUnusedCredits: Boolean,
     loc: L10n,
     gaugeCritterEnabled: Boolean,
     workHoursSchedule: WorkHoursSchedule?,
 ) {
     when {
         snapshot != null && snapshot.windows.isNotEmpty() -> {
-            val windows = visibleUsageWindows(snapshot.windows, hideUnusedWindows)
+            val windows = visibleUsageWindows(snapshot.windows, hideUnusedWindows, hideUnusedCredits)
             val now = rememberMinuteInstant()
             // Keep last-good usage visible, but place its stale/error notice before the graphs.
             snapshot.error?.let { ErrorLine(it) }
