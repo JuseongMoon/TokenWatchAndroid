@@ -90,6 +90,7 @@ fun DetailScreen(
     now: Instant? = null,
     modifier: Modifier = Modifier,
 ) {
+    var pendingPeakResetLabel by rememberSaveable(agent.id) { mutableStateOf<String?>(null) }
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -141,7 +142,7 @@ fun DetailScreen(
                     workHoursSchedule = workHoursSchedule,
                     loc = loc,
                     nowOverride = now,
-                    onResetCreditPeak = onResetCreditPeak,
+                    onRequestResetPeak = { pendingPeakResetLabel = it },
                 )
                 StatusCard(
                     agent = agent,
@@ -167,6 +168,17 @@ fun DetailScreen(
             loc = loc,
             onConfirm = onLogoutConfirm,
             onDismiss = onLogoutDismiss,
+        )
+    }
+    pendingPeakResetLabel?.let { windowLabel ->
+        CreditResetConfirmationDialog(
+            windowLabel = windowLabel,
+            loc = loc,
+            onConfirm = {
+                pendingPeakResetLabel = null
+                onResetCreditPeak(windowLabel)
+            },
+            onDismiss = { pendingPeakResetLabel = null },
         )
     }
 }
@@ -225,7 +237,7 @@ private fun DetailUsageCard(
     workHoursSchedule: WorkHoursSchedule?,
     loc: L10n,
     nowOverride: Instant?,
-    onResetCreditPeak: (String) -> Unit,
+    onRequestResetPeak: (String) -> Unit,
 ) {
     val now = rememberMinuteInstant(nowOverride)
     TerminalBox(title = "USAGE") {
@@ -258,7 +270,7 @@ private fun DetailUsageCard(
                                 gaugeCritterEnabled = gaugeCritterEnabled,
                                 workHoursSchedule = workHoursSchedule,
                                 now = now,
-                                onResetCreditPeak = onResetCreditPeak,
+                                onRequestResetPeak = onRequestResetPeak,
                             )
                         }
                     }
@@ -313,7 +325,7 @@ private fun DetailUsageRow(
     gaugeCritterEnabled: Boolean,
     workHoursSchedule: WorkHoursSchedule?,
     now: Instant,
-    onResetCreditPeak: (String) -> Unit,
+    onRequestResetPeak: (String) -> Unit,
 ) {
     when (window.style) {
         UsageStyle.BALANCE -> BalanceDetailRow(window = window, loc = loc, now = now)
@@ -321,8 +333,8 @@ private fun DetailUsageRow(
             window = window,
             loc = loc,
             gaugeCritterEnabled = gaugeCritterEnabled,
-            onResetPeak = if (window.estimatedTotal) {
-                { onResetCreditPeak(window.label) }
+            onRequestResetPeak = if (window.estimatedTotal) {
+                { onRequestResetPeak(window.label) }
             } else {
                 null
             },
@@ -342,10 +354,9 @@ private fun CreditGaugeDetailRow(
     window: UsageWindow,
     loc: L10n,
     gaugeCritterEnabled: Boolean,
-    onResetPeak: (() -> Unit)?,
+    onRequestResetPeak: (() -> Unit)?,
 ) {
     val statusColor = Term.statusColor(window.remainingPercent)
-    var showResetConfirmation by rememberSaveable(window.label) { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(modifier = Modifier.fillMaxWidth()) {
             Text(
@@ -390,29 +401,19 @@ private fun CreditGaugeDetailRow(
                     style = terminalTextStyle(11.sp),
                     modifier = Modifier.weight(1f),
                 )
-                if (onResetPeak != null) {
+                if (onRequestResetPeak != null) {
                     TerminalTextButton(
                         text = loc.creditResetButton,
                         color = Term.Yellow,
                         size = 11.sp,
                         weight = FontWeight.Normal,
-                        onClick = { showResetConfirmation = true },
+                        onClick = onRequestResetPeak,
                     )
                 }
             }
         }
     }
 
-    if (showResetConfirmation) {
-        CreditResetConfirmationDialog(
-            loc = loc,
-            onConfirm = {
-                showResetConfirmation = false
-                onResetPeak?.invoke()
-            },
-            onDismiss = { showResetConfirmation = false },
-        )
-    }
 }
 
 @Composable
@@ -670,18 +671,17 @@ private fun LogoutConfirmationDialog(
 
 @Composable
 private fun CreditResetConfirmationDialog(
+    windowLabel: String,
     loc: L10n,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     TerminalConfirmDialog(
         title = loc.creditResetTitle,
+        accountLabel = windowLabel.uppercase(loc.dateLocale),
         message = loc.creditResetMessage,
         confirmLabel = "[ ${loc.creditResetConfirm} ]",
         cancelLabel = "[ ${loc.cancel} ]",
-        confirmColor = Term.Red,
-        borderColor = Term.Yellow,
-        titleColor = Term.Yellow,
         onConfirm = onConfirm,
         onDismiss = onDismiss,
     )

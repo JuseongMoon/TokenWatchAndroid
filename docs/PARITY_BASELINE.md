@@ -4,17 +4,19 @@
 > and the single place recording how far Android has been synced. Pricing strategy,
 > unreleased plans and operational procedures do not belong in this repository's `docs/`.
 
-The Android sources mirror the portable iOS patches through commit `6171f42` on `dev`, the iOS
-1.3.0 (15) content: the review prompt, login failure diagnostics, the two analytics additions and
-the split "hide unused graphs" setting described below. The version here still reads 1.2.0 (14) on purpose — Android 1.2.0 is in review,
-and both platforms move to 1.3.0 together once it is published. Uncommitted iOS working-tree
-changes are deliberately not part of this baseline.
+The Android sources mirror the portable iOS patches through commit `bfdb4ed` on `dev`, the iOS
+1.3.0 (16) content: the review prompt, login failure diagnostics, the two analytics additions,
+the split "hide unused graphs" setting, and the credit-gauge reset confirmation described below.
+Uncommitted iOS working-tree changes are deliberately not part of this baseline.
 
 Firebase Analytics runs against the Android app's own Firebase registration and
 `google-services.json`; the iOS Firebase application identifier is not reused.
 
 ## Included behavior
 
+- Credit-gauge peak reset confirmation (iOS `2d86bd8`): an estimated-total gauge's reset button
+  requests a terminal-styled confirmation at the detail-screen level. It shows the affected window
+  label and only resets that window after confirmation; cancel leaves the observed peak intact.
 - Review prompt (iOS `3fe80c8`): one request per install, gated by the shared
   `ReviewPromptPolicy` — signed in, three days since the first launch, five cold starts, and every
   card currently loading without an error. Android launches the Play in-app review flow, whose
@@ -118,7 +120,7 @@ Firebase Analytics runs against the Android app's own Firebase registration and
 - Application ID/namespace: `com.ScienceFiction.TokenWatchAndroid`
 - Minimum SDK: 28
 - Target/compile SDK: 36
-- Version: 1.2.0 (14)
+- Version: 1.3.0 (16)
 
 ## Platform-specific parity adaptations
 

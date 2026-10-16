@@ -1,7 +1,9 @@
 package com.ScienceFiction.TokenWatchAndroid.ui.screens
 
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -9,8 +11,10 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.ScienceFiction.TokenWatchAndroid.data.AppSettings
 import com.ScienceFiction.TokenWatchAndroid.domain.Agent
+import com.ScienceFiction.TokenWatchAndroid.domain.Announcement
 import com.ScienceFiction.TokenWatchAndroid.domain.AgentProvider
 import com.ScienceFiction.TokenWatchAndroid.domain.AgentSnapshot
+import com.ScienceFiction.TokenWatchAndroid.domain.LocalizedText
 import com.ScienceFiction.TokenWatchAndroid.domain.ServiceHealth
 import com.ScienceFiction.TokenWatchAndroid.domain.UsageStyle
 import com.ScienceFiction.TokenWatchAndroid.domain.UsageWindow
@@ -130,10 +134,42 @@ class ScreenUiTest {
 
         composeRule.onNodeWithText("[reset]").performScrollTo().performClick()
         composeRule.onNodeWithText("Reset gauge scale").assertIsDisplayed()
+        composeRule.onAllNodesWithText("BALANCE").assertCountEquals(2)
+        composeRule.onNodeWithText("[ ${loc.cancel} ]").performClick()
+        composeRule.runOnIdle { assertTrue(resetWindowLabel == null) }
+
+        composeRule.onNodeWithText("[reset]").performScrollTo().performClick()
         composeRule.onNodeWithText("[ ${loc.creditResetConfirm} ]").performClick()
         composeRule.runOnIdle {
             assertTrue(resetWindowLabel == "Balance")
         }
+    }
+
+    @Test
+    fun announcementsScreen_displaysAndOpensPublishedItem() {
+        val announcement = Announcement(
+            id = "test-notice",
+            publishedAt = Instant.parse("2026-10-07T00:00:00Z").toEpochMilli(),
+            platform = Announcement.PLATFORM_ANDROID,
+            title = LocalizedText(en = "Test notice"),
+            body = LocalizedText(en = "Test body"),
+        )
+        var opened: Announcement? = null
+        composeRule.setContent {
+            TokenWatchTheme {
+                AnnouncementsScreen(
+                    announcements = listOf(announcement),
+                    unread = setOf(announcement.id),
+                    fetchFailed = false,
+                    loc = L10n(Lang.EN),
+                    onOpen = { opened = it },
+                    onBack = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("Test notice").assertIsDisplayed().performClick()
+        composeRule.runOnIdle { assertTrue(opened == announcement) }
     }
 
     @Test

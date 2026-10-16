@@ -9,7 +9,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import com.ScienceFiction.TokenWatchAndroid.auth.oauth.ClaudeOAuthClient
+import com.ScienceFiction.TokenWatchAndroid.auth.oauth.CodexOAuthClient
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import org.junit.Assert.assertTrue
@@ -24,9 +24,9 @@ class OAuthWebViewNavigationTest {
 
     @Test
     @Suppress("DEPRECATION")
-    fun claudeCallbackIsCapturedByInstalledWebViewClient() {
+    fun codexCallbackIsCapturedByInstalledWebViewClient() {
         composeRule.onNodeWithText("[ + ADD AGENT ]").performClick()
-        composeRule.onNodeWithText("claude").performClick()
+        composeRule.onNodeWithText("codex").performClick()
 
         val webView = AtomicReference<WebView?>()
         composeRule.waitUntil(timeoutMillis = 10_000) {
@@ -43,7 +43,7 @@ class OAuthWebViewNavigationTest {
             intercepted.set(
                 webView.get()!!.webViewClient.shouldOverrideUrlLoading(
                     webView.get()!!,
-                    "${ClaudeOAuthClient.CALLBACK_PREFIX}?code=instrumented-code&state=wrong-state",
+                    "${CodexOAuthClient.CALLBACK_PREFIX}?code=instrumented-code&state=wrong-state",
                 ),
             )
         }
