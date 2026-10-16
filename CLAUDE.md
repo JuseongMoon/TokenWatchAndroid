@@ -16,7 +16,8 @@ Android 네이티브 구현입니다. AI 코딩 서비스 10종의 사용량·�
 - **JDK**: 21 (Android Studio 번들 JBR 사용)
 - **Java/Kotlin target**: 11
 - UI: Jetpack Compose (XML 레이아웃 없음)
-- 네트워크: OkHttp + Moshi (Retrofit·Firebase SDK 사용하지 않음)
+- 네트워크: OkHttp + Moshi (Retrofit 미사용). Firebase SDK는 Analytics·Auth만 쓰고, Firestore는 REST로 부른다
+  (Firestore·Functions SDK 없음)
 
 ## Development Commands
 
@@ -51,6 +52,7 @@ JBR 21을 가리켜야 합니다. Android Studio에서 빌드하면 번들 JBR�
 
 ```text
 app/src/main/java/com/ScienceFiction/TokenWatchAndroid/
+├── account/           앱 계정(선택): Firebase Auth 래퍼, 상태 머신, Firestore REST 프로필
 ├── auth/              CredentialVault(Android Keystore AES-GCM), OAuth code/루프백/device, 세션
 ├── data/              AppSettings, SettingsRepository, 코덱
 ├── domain/            WorkHoursSchedule, Announcement, 새로고침 정책
@@ -96,6 +98,14 @@ ANNOUNCEMENT_FEED_DOC=android
 - 사용자 토큰과 API key는 **`AndroidCredentialVault`(Android Keystore AES-GCM)** 에만 저장합니다.
   암호화 키는 Keystore 밖으로 나가지 않습니다.
 - Agent/DataStore 모델과 로그에는 토큰을 기록하지 않습니다. 표시할 때는 마스킹합니다.
+- **예외 — 앱 계정(TokenWatch 자체 계정, 선택 사항)의 세션은 firebase-auth SDK가 직접 보관합니다.**
+  firebase-auth(BoM 33.7.0 → 23.1.0)는 앱 전용 SharedPreferences(`com.google.firebase.auth.api.Store.*`)에
+  사용자·토큰 JSON을 **평문**으로 저장합니다. Apple 웹 로그인과 토큰 갱신을 직접 구현하는 비용이 커서
+  받아들인 예외입니다(2026-10-16 승인). 아래 백업 제외 설정과 다음 규칙으로 보완합니다.
+  - 앱 코드는 Firebase·Apple·Google 토큰을 저장하지 않습니다. ID 토큰은 요청 직전에 SDK에서 받아
+    `Authorization` 헤더에만 싣습니다.
+  - 프로필 캐시(`tokenwatch.player.profile.v1`)에는 uid·닉네임·아바타 ID만 둡니다.
+  - provider 토큰과 API key에는 이 예외가 적용되지 않습니다.
 - 앱 데이터는 cloud backup과 device transfer 대상에서 제외돼 있습니다
   (`allowBackup="false"`, `fullBackupContent="false"`, `dataExtractionRules`).
 

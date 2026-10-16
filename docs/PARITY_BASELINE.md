@@ -7,6 +7,9 @@
 The Android sources mirror the portable iOS patches through commit `bfdb4ed` on `dev`, the iOS
 1.3.0 (16) content: the review prompt, login failure diagnostics, the two analytics additions,
 the split "hide unused graphs" setting, and the credit-gauge reset confirmation described below.
+On the `feature/account` branch it also mirrors the optional app account through iOS commit
+`dfae3ea` on `feature/account` (`a8fc3a9`, `2d268f8`, `dfae3ea`), described under
+"Optional app account" below.
 Uncommitted iOS working-tree changes are deliberately not part of this baseline.
 
 Firebase Analytics runs against the Android app's own Firebase registration and
@@ -115,6 +118,29 @@ Firebase Analytics runs against the Android app's own Firebase registration and
   unset derives from whether hours are painted, so existing installs keep the feature after
   updating, and switching it off preserves the saved schedule.
 
+## Optional app account
+
+- A TokenWatch account of its own, separate from the AI service accounts: Sign in with Apple or
+  Google through Firebase Auth. It is optional; every usage feature works signed out, and demo
+  mode disables it. Settings gains a PLAYER box that opens the sign-in, profile setup or account
+  screen depending on the account state.
+- First sign-in leads to profile setup: a nickname (2–12 characters of Korean, English, digits,
+  `_` and `-`, checked against the shared banned-word list on save, never while typing), one of
+  sixteen pixel-art avatars, and agreement to the terms and privacy policy. The avatar set ships
+  as the same JSON bytes as iOS and is verified by SHA-256 in the unit tests. The first avatar is
+  picked at random, as on iOS.
+- The account screen changes the avatar at any time and the nickname once every seven days
+  (measured against the server's `Date` header), links the other sign-in method, signs out, and
+  deletes the account. Deletion re-authenticates first; for Apple it revokes the Apple token and
+  stops if revocation fails.
+- Profiles are read and written over Firestore REST with the signed-in user's ID token, which is
+  fetched right before each request and never stored by the app. Nicknames are reserved
+  case-insensitively in the same commit, so a taken nickname is reported rather than overwritten.
+  The offline profile cache holds only the uid, nickname and avatar ID.
+- Analytics adds `account_login` (method, `is_new`), `account_login_fail` (method, stage),
+  `account_link`, `account_logout`, `account_delete` and `profile_update` (which field changed,
+  never its value), plus one screen event per account screen. No uid, nickname or email is sent.
+
 ## Android identity
 
 - Application ID/namespace: `com.ScienceFiction.TokenWatchAndroid`
@@ -164,6 +190,14 @@ Firebase Analytics runs against the Android app's own Firebase registration and
   (best effort; newer Android versions may block it, and the user closes the tab).
 - The paste fallback uses an explicit `[ paste ]` button instead of iOS `PasteButton`; Android shows
   its own clipboard notice on that tap.
+- App account sign-in: Apple runs Firebase's web OAuth flow in a browser tab instead of the native
+  sheet. That flow cannot request an empty scope, so Apple's consent page asks for name and email
+  where iOS requests neither. Google uses Credential Manager's "Sign in with Google" option; a
+  build without a web client ID in `google-services.json` hides the Google button.
+- The firebase-auth SDK keeps the app-account session in the app's private storage, which is
+  excluded from cloud backup and device transfer. AI service tokens stay in the Keystore vault.
+- The sign-in buttons are drawn by the app to match iOS: white, 50 dp tall, 12 dp corners, a black
+  logo and an English "Sign in with …" / "Continue with …" label.
 - The popup is suppressed on the add and settings routes, which are full screens here rather
   than sheets and would otherwise be covered mid-login, and while running under instrumentation,
   where a modal scrim would swallow taps in the UI tests.

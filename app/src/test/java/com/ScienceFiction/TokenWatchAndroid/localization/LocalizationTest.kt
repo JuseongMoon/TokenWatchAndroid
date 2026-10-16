@@ -115,4 +115,41 @@ class LocalizationTest {
         )
         assertTrue(ko.settingsNotifOpenSettings.contains("Android"))
     }
+
+    @Test
+    fun accountCopyExistsInBothLanguages() {
+        val ko = L10n(Lang.KO)
+        val en = L10n(Lang.EN)
+        com.ScienceFiction.TokenWatchAndroid.domain.account.NicknameError.entries.forEach { error ->
+            assertTrue(ko.nicknameError(error).isNotBlank())
+            assertTrue(en.nicknameError(error).isNotBlank())
+            assertNotEquals(ko.nicknameError(error), en.nicknameError(error))
+        }
+        val notices = listOf(
+            com.ScienceFiction.TokenWatchAndroid.account.AccountNotice.LoginFailed,
+            com.ScienceFiction.TokenWatchAndroid.account.AccountNotice.GoogleUnavailable,
+            com.ScienceFiction.TokenWatchAndroid.account.AccountNotice.ExistsWithDifferentMethod,
+            com.ScienceFiction.TokenWatchAndroid.account.AccountNotice.AlreadyInUse,
+            com.ScienceFiction.TokenWatchAndroid.account.AccountNotice.LinkFailed,
+            com.ScienceFiction.TokenWatchAndroid.account.AccountNotice.Linked(
+                com.ScienceFiction.TokenWatchAndroid.domain.account.AccountMethod.GOOGLE,
+            ),
+            com.ScienceFiction.TokenWatchAndroid.account.AccountNotice.SaveFailed,
+            com.ScienceFiction.TokenWatchAndroid.account.AccountNotice.DeleteFailed,
+            com.ScienceFiction.TokenWatchAndroid.account.AccountNotice.RevokeFailed,
+        )
+        notices.forEach { notice ->
+            assertTrue(ko.accountNotice(notice).isNotBlank())
+            assertNotEquals(ko.accountNotice(notice), en.accountNotice(notice))
+        }
+        // Verbatim iOS copy (the two platforms read the same).
+        assertEquals("이 이메일은 다른 방법으로 가입돼 있어요. 그 방법으로 로그인한 뒤 연결하세요.", ko.accountNotice(notices[2]))
+        assertEquals(
+            "This sign-in is tied to another TokenWatch account. Delete that account to link it here.",
+            en.accountNotice(notices[3]),
+        )
+        assertEquals("Google 로그인을 연결했어요.", ko.accountNotice(notices[5]))
+        assertEquals("다음 변경까지 2일 3시간", ko.nicknameCooldownRemaining(2, 3))
+        assertEquals("next change in 1h", en.nicknameCooldownRemaining(0, 0))
+    }
 }

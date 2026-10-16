@@ -54,6 +54,7 @@ import com.ScienceFiction.TokenWatchAndroid.domain.WorkHoursSchedule
 import com.ScienceFiction.TokenWatchAndroid.analytics.RefreshSource
 import com.ScienceFiction.TokenWatchAndroid.analytics.AnnouncementAction
 import com.ScienceFiction.TokenWatchAndroid.analytics.DemoSource
+import com.ScienceFiction.TokenWatchAndroid.account.AccountState
 import com.ScienceFiction.TokenWatchAndroid.analytics.ScreenName
 import com.ScienceFiction.TokenWatchAndroid.ui.components.AnnouncementDialog
 import com.ScienceFiction.TokenWatchAndroid.ui.add.AddAgentPhase
@@ -64,6 +65,9 @@ import com.ScienceFiction.TokenWatchAndroid.ui.screens.AnnouncementsScreen
 import com.ScienceFiction.TokenWatchAndroid.ui.screens.DetailAccountUiState
 import com.ScienceFiction.TokenWatchAndroid.ui.screens.DetailScreen
 import com.ScienceFiction.TokenWatchAndroid.ui.screens.MainScreen
+import com.ScienceFiction.TokenWatchAndroid.ui.screens.PlayerEntry
+import com.ScienceFiction.TokenWatchAndroid.ui.screens.PlayerScreen
+import com.ScienceFiction.TokenWatchAndroid.ui.screens.PlayerSection
 import com.ScienceFiction.TokenWatchAndroid.ui.screens.SettingsScreen
 import com.ScienceFiction.TokenWatchAndroid.ui.theme.Term
 import java.util.UUID
@@ -76,6 +80,8 @@ private const val ROUTE_DETAIL_PREFIX = "detail:"
 private const val ROUTE_ANNOUNCEMENTS = "announcements"
 // Distinct from ROUTE_ANNOUNCEMENTS: "announcements" does not start with "announcement:".
 private const val ROUTE_ANNOUNCEMENT_PREFIX = "announcement:"
+// The app account screen; the suffix is the PlayerEntry it was opened for.
+private const val ROUTE_PLAYER_PREFIX = "player:"
 
 @Composable
 fun TokenWatchApp(
@@ -117,6 +123,10 @@ internal fun TokenWatchApp(
         inboxItems.filter(announcements::isUnread).map { it.id }.toSet()
     }
     val isDemo by store.isDemo.collectAsStateWithLifecycle()
+    val account = container.accountStore
+    val accountState by account.state.collectAsStateWithLifecycle()
+    val accountMethods by account.methods.collectAsStateWithLifecycle()
+    val accountNotice by account.notice.collectAsStateWithLifecycle()
     val loc = remember(settings.language) { L10n(settings.language.resolved()) }
 
     var route by rememberSaveable { mutableStateOf(ROUTE_MAIN) }
@@ -545,8 +555,40 @@ internal fun TokenWatchApp(
                             },
                         )
                     },
+                    playerSection = if (accountState != AccountState.Unavailable) {
+                        {
+                            PlayerSection(
+                                state = accountState,
+                                methods = accountMethods,
+                                notice = accountNotice,
+                                isDemo = isDemo,
+                                catalog = container.avatarCatalog,
+                                loc = loc,
+                                onOpen = { entry ->
+                                    account.clearNotice()
+                                    route = "$ROUTE_PLAYER_PREFIX${entry.wireId}"
+                                },
+                                onRetry = { account.perform { refreshProfile() } },
+                            )
+                        }
+                    } else {
+                        null
+                    },
                 )
             }
+
+            ROUTE_PLAYER_PREFIX + PlayerEntry.LOGIN.wireId,
+            ROUTE_PLAYER_PREFIX + PlayerEntry.SETUP.wireId,
+            ROUTE_PLAYER_PREFIX + PlayerEntry.MANAGE.wireId,
+            -> PlayerScreen(
+                entry = PlayerEntry.fromWireId(route.removePrefix(ROUTE_PLAYER_PREFIX)) ?: PlayerEntry.LOGIN,
+                account = account,
+                catalog = container.avatarCatalog,
+                loc = loc,
+                // The three inner screens log themselves as they appear (see PlayerScreen).
+                onScreen = { analytics.log(AnalyticsEvent.ScreenView(it)) },
+                onDone = { route = ROUTE_SETTINGS },
+            )
 
             else -> if (selectedAnnouncement != null) {
                 BackHandler { route = ROUTE_ANNOUNCEMENTS }

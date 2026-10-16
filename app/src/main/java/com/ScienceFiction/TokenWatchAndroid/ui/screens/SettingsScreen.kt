@@ -86,6 +86,8 @@ fun SettingsScreen(
     onOpenNotificationSettings: () -> Unit = {},
     onOpenUrl: (String) -> Unit = {},
     onRateApp: () -> Unit = {},
+    /** The app account PLAYER box, or null while the account feature is unavailable. */
+    playerSection: (@Composable () -> Unit)? = null,
 ) {
     var pendingLogoutId by rememberSaveable { mutableStateOf<String?>(null) }
     var showingWorkHours by rememberSaveable { mutableStateOf(false) }
@@ -114,6 +116,8 @@ fun SettingsScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
+            // The app account sits right above the provider ACCOUNTS box, as on iOS.
+            playerSection?.invoke()
             AccountsSection(
                 agents = agents,
                 onLogoutAgent = { pendingLogoutId = it.id.toString() },

@@ -2,6 +2,11 @@ package com.ScienceFiction.TokenWatchAndroid
 
 import android.app.Application
 import android.content.Context
+import com.ScienceFiction.TokenWatchAndroid.account.AccountAuth
+import com.ScienceFiction.TokenWatchAndroid.account.AccountStore
+import com.ScienceFiction.TokenWatchAndroid.account.FirebaseAccountAuth
+import com.ScienceFiction.TokenWatchAndroid.account.PlayerProfileClient
+import com.ScienceFiction.TokenWatchAndroid.account.UnavailableAccountAuth
 import com.ScienceFiction.TokenWatchAndroid.analytics.AnalyticsService
 import com.ScienceFiction.TokenWatchAndroid.analytics.fetchOutcomeEvent
 import com.ScienceFiction.TokenWatchAndroid.domain.AgentProvider
@@ -16,6 +21,8 @@ import com.ScienceFiction.TokenWatchAndroid.auth.oauth.CodexOAuthClient
 import com.ScienceFiction.TokenWatchAndroid.auth.oauth.GrokOAuthClient
 import com.ScienceFiction.TokenWatchAndroid.data.AgentRepository
 import com.ScienceFiction.TokenWatchAndroid.data.AnnouncementRepository
+import com.ScienceFiction.TokenWatchAndroid.data.PlayerProfileRepository
+import com.ScienceFiction.TokenWatchAndroid.domain.account.AvatarCatalog
 import com.ScienceFiction.TokenWatchAndroid.data.ReviewPromptRepository
 import com.ScienceFiction.TokenWatchAndroid.data.SettingsRepository
 import com.ScienceFiction.TokenWatchAndroid.localization.AppLocaleState
@@ -31,6 +38,7 @@ import com.ScienceFiction.TokenWatchAndroid.notifications.BackgroundRefreshSched
 import com.ScienceFiction.TokenWatchAndroid.notifications.ResetNotificationManager
 import com.ScienceFiction.TokenWatchAndroid.store.AgentStore
 import com.ScienceFiction.TokenWatchAndroid.store.AnnouncementStore
+import com.google.firebase.FirebaseApp
 import java.io.Closeable
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
@@ -135,6 +143,39 @@ class TokenWatchContainer(context: Context) : Closeable {
         isDemo = { agentStore.isDemo.value },
     )
 
+    /** Bundled avatar artwork for the app account, decoded once on first use. */
+    val avatarCatalog: AvatarCatalog by lazy {
+        AvatarCatalog.fromFiles(
+            AvatarCatalog.BUNDLED_FILES.mapNotNull { name ->
+                runCatching { applicationContext.assets.open(name).use { it.readBytes() } }.getOrNull()
+            },
+        )
+    }
+
+    /** Main-thread scope for the app account, so its state changes are confined to one thread. */
+    private val accountScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+
+    /**
+     * The optional TokenWatch app account. Separate from the provider accounts above: it shares only
+     * the HTTP transport. The Firestore project comes from `google-services.json`, not from the
+     * announcement keys in local.properties, and a build without Firebase leaves the feature hidden.
+     */
+    val accountStore: AccountStore = run {
+        val auth: AccountAuth = (applicationContext as? Application)
+            ?.let { FirebaseAccountAuth(it, language = { localeState.l10n().lang }) }
+            ?: UnavailableAccountAuth
+        val projectId = runCatching { FirebaseApp.getInstance().options.projectId }.getOrNull()
+            ?.takeIf { it.isNotBlank() && auth.isAvailable }
+        AccountStore(
+            auth = auth,
+            profiles = projectId?.let { PlayerProfileClient(it, transport, auth::idToken) },
+            cache = PlayerProfileRepository(applicationContext),
+            scope = accountScope,
+            isDemo = { agentStore.isDemo.value },
+            log = analytics::log,
+        ).also(AccountStore::start)
+    }
+
     /**
      * Last known outcome per agent. Only transitions are reported: a provider that keeps failing
      * logs one error, not one per refresh, and the recovery is what closes the pair.
@@ -177,6 +218,7 @@ class TokenWatchContainer(context: Context) : Closeable {
         providerMigrationJob.cancel()
         agentStore.close()
         announcementStore.close()
+        accountScope.cancel()
         scope.cancel()
     }
 }

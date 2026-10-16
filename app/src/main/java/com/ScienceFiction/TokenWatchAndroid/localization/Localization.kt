@@ -423,5 +423,5 @@ data class L10n(val lang: Lang) {
         return DateTimeFormatter.ofPattern(pattern, dateLocale).format(date.atZone(zoneId))
     }
 
-    private fun choose(korean: String, english: String): String = if (lang == Lang.KO) korean else english
+    internal fun choose(korean: String, english: String): String = if (lang == Lang.KO) korean else english
 }

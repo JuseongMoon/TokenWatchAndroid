@@ -1,6 +1,8 @@
 package com.ScienceFiction.TokenWatchAndroid.analytics
 
+import com.ScienceFiction.TokenWatchAndroid.account.AccountFailStage
 import com.ScienceFiction.TokenWatchAndroid.domain.Announcement
+import com.ScienceFiction.TokenWatchAndroid.domain.account.AccountMethod
 import com.ScienceFiction.TokenWatchAndroid.domain.AgentProvider
 import com.ScienceFiction.TokenWatchAndroid.domain.AuthKind
 import com.ScienceFiction.TokenWatchAndroid.network.core.UsageException
@@ -67,6 +69,11 @@ enum class ScreenName(val wireId: String, val screenClass: String) {
     WORK_HOURS("work_hours", "WorkHoursEditor"),
     ANNOUNCEMENTS("announcements", "AnnouncementsScreen"),
     ANNOUNCEMENT_DETAIL("announcement_detail", "AnnouncementDetailScreen"),
+    // App account (TokenWatch's own account): logged once as each of the three screens appears, the
+    // same unit iOS uses.
+    ACCOUNT_LOGIN("account_login", "AccountLoginScreen"),
+    PROFILE_SETUP("profile_setup", "ProfileSetupScreen"),
+    ACCOUNT("account", "AccountScreen"),
 }
 
 enum class DemoSource(val wireId: String) {
@@ -84,6 +91,12 @@ enum class RefreshSource(val wireId: String) {
 enum class StoreReviewSource(val wireId: String) {
     PROMPT("prompt"),
     SETTINGS("settings"),
+}
+
+/** Which app account profile field changed. The value itself is never sent. */
+enum class ProfileField(val wireId: String) {
+    NICKNAME("nickname"),
+    AVATAR("avatar"),
 }
 
 enum class AnnouncementAction(val wireId: String) {
@@ -213,6 +226,43 @@ sealed class AnalyticsEvent(
     class StoreReview(source: StoreReviewSource) : AnalyticsEvent(
         "store_review",
         mapOf("source" to source.wireId),
+        isProviderScoped = false,
+    )
+
+    // App account: method, stage and field enums only. No uid, nickname or email ever goes out, and
+    // setUserId is not used. App account failures are deliberately not a [LoginFail] subtype — that
+    // event is provider-only and is forwarded to the diagnostic report.
+
+    class AccountLogin(method: AccountMethod, isNew: Boolean) : AnalyticsEvent(
+        "account_login",
+        // Strings, like every Android parameter (iOS sends is_new as an integer).
+        mapOf("method" to method.wireId, "is_new" to if (isNew) "1" else "0"),
+        isProviderScoped = false,
+    )
+
+    class AccountLoginFail(method: AccountMethod, stage: AccountFailStage) : AnalyticsEvent(
+        "account_login_fail",
+        mapOf("method" to method.wireId, "stage" to stage.wireId),
+        isProviderScoped = false,
+    )
+
+    class AccountLink(method: AccountMethod) : AnalyticsEvent(
+        "account_link",
+        mapOf("method" to method.wireId),
+        isProviderScoped = false,
+    )
+
+    data object AccountLogout : AnalyticsEvent("account_logout", emptyMap(), isProviderScoped = false)
+
+    data object AccountDelete : AnalyticsEvent(
+        "account_delete",
+        mapOf("surface" to "app"),
+        isProviderScoped = false,
+    )
+
+    class ProfileUpdate(field: ProfileField) : AnalyticsEvent(
+        "profile_update",
+        mapOf("field" to field.wireId),
         isProviderScoped = false,
     )
 }

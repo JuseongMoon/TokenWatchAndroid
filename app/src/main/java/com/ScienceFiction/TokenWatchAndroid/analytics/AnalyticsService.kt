@@ -10,7 +10,9 @@ import com.ScienceFiction.TokenWatchAndroid.localization.AppLanguage
 import com.google.firebase.analytics.FirebaseAnalytics
 
 /**
- * The app's only Firebase touchpoint, mirroring the iOS `AnalyticsService`.
+ * The app's only Firebase Analytics touchpoint, mirroring the iOS `AnalyticsService`. (The optional
+ * app account uses firebase-auth from the `account` package; Firebase itself is initialized by
+ * `FirebaseInitProvider` at startup, so these gates control collection, not initialization.)
  *
  * Three gates, in order:
  *  1. **Unconfigured** — if the SDK cannot start (no `google-services.json` in the build), every

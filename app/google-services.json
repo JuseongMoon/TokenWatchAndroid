@@ -12,7 +12,36 @@
           "package_name": "com.ScienceFiction.TokenWatchAndroid"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "913259208794-cnsqo0c9cr4022jq5btps7fcrpptat8r.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.ScienceFiction.TokenWatchAndroid",
+            "certificate_hash": "9fade4fd601daa324c1c1a842396f55c58d35850"
+          }
+        },
+        {
+          "client_id": "913259208794-shkgqrm14nq5pu4bp2rm0drp38a8btdd.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.ScienceFiction.TokenWatchAndroid",
+            "certificate_hash": "44e7a4fa5733472378ad77a04da56032d40cc822"
+          }
+        },
+        {
+          "client_id": "913259208794-sqe5eih692du5iivad0r9dhjitm3hadt.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.ScienceFiction.TokenWatchAndroid",
+            "certificate_hash": "30c45af99183d96cf76c41319eda82e7598f2086"
+          }
+        },
+        {
+          "client_id": "913259208794-18ldn929od2g9ijjili8i20j6br51j3p.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyBiC3NxeGkvd6_IfoxITe0DPx-E2OTocbY"
@@ -20,7 +49,19 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "913259208794-18ldn929od2g9ijjili8i20j6br51j3p.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "913259208794-u5nqi204cm9r54ae7kjcg8j3oru0lsab.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.ScienceFiction.TokenWatch"
+              }
+            }
+          ]
         }
       }
     }
