@@ -8,7 +8,7 @@ The Android sources mirror the portable iOS patches through commit `bfdb4ed` on 
 1.3.0 (16) content: the review prompt, login failure diagnostics, the two analytics additions,
 the split "hide unused graphs" setting, and the credit-gauge reset confirmation described below.
 On the `feature/account` branch it also mirrors the optional app account through iOS commit
-`dfae3ea` on `feature/account` (`a8fc3a9`, `2d268f8`, `dfae3ea`), described under
+`26b74fc` on `feature/account` (`a8fc3a9`, `2d268f8`, `dfae3ea`, `26b74fc`), described under
 "Optional app account" below.
 Uncommitted iOS working-tree changes are deliberately not part of this baseline.
 
@@ -126,17 +126,25 @@ Firebase Analytics runs against the Android app's own Firebase registration and
   screen depending on the account state.
 - First sign-in leads to profile setup: a nickname (2–12 characters of Korean, English, digits,
   `_` and `-`, checked against the shared banned-word list on save, never while typing), one of
-  sixteen pixel-art avatars, and agreement to the terms and privacy policy. The avatar set ships
+  sixteen pixel-art avatars, and agreement to the terms and privacy policy. Nicknames may repeat:
+  a random four-digit tag makes the pair unique, and it is always shown as `nickname #1234` with
+  the tag dimmed. Tags with four identical digits are never assigned. The avatar set ships
   as the same JSON bytes as iOS and is verified by SHA-256 in the unit tests. The first avatar is
   picked at random, as on iOS.
-- The account screen changes the avatar at any time and the nickname once every seven days
-  (measured against the server's `Date` header), links the other sign-in method, signs out, and
+- The account screen changes the avatar at any time and the nickname once every thirty days
+  (measured against the server's `Date` header; every change, even a case-only one, draws a new
+  tag different from the last), links the other sign-in method, signs out, and
   deletes the account. Deletion re-authenticates first; for Apple it revokes the Apple token and
   stops if revocation fails.
 - Profiles are read and written over Firestore REST with the signed-in user's ID token, which is
-  fetched right before each request and never stored by the app. Nicknames are reserved
-  case-insensitively in the same commit, so a taken nickname is reported rather than overwritten.
-  The offline profile cache holds only the uid, nickname and avatar ID.
+  fetched right before each request and never stored by the app; a 401 or 403 fetches a fresh
+  token and retries once, which also picks up a custom claim set after sign-in. The
+  `nickname#tag` pair is reserved case-insensitively in the same commit; a tag already held by
+  another account is redrawn (up to six attempts) rather than overwritten. The offline profile
+  cache holds only the uid, nickname, tag and avatar ID.
+- Accounts carrying the operator custom claim are drawn with a dedicated avatar that never appears
+  in the picker; the stored avatar stays an ordinary preset. No operator artwork is bundled yet, so
+  operators currently show the avatar they picked.
 - Analytics adds `account_login` (method, `is_new`), `account_login_fail` (method, stage),
   `account_link`, `account_logout`, `account_delete` and `profile_update` (which field changed,
   never its value), plus one screen event per account screen. No uid, nickname or email is sent.

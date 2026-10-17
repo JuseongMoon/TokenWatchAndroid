@@ -8,14 +8,22 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ScienceFiction.TokenWatchAndroid.account.AccountNotice
 import com.ScienceFiction.TokenWatchAndroid.account.AccountState
+import com.ScienceFiction.TokenWatchAndroid.account.displayAvatarId
 import com.ScienceFiction.TokenWatchAndroid.domain.account.AccountMethod
 import com.ScienceFiction.TokenWatchAndroid.domain.account.AvatarCatalog
+import com.ScienceFiction.TokenWatchAndroid.domain.account.PlayerProfile
 import com.ScienceFiction.TokenWatchAndroid.localization.L10n
 import com.ScienceFiction.TokenWatchAndroid.localization.Lang
 import com.ScienceFiction.TokenWatchAndroid.localization.accountMethodName
@@ -48,7 +56,7 @@ enum class PlayerEntry(val wireId: String) {
 /**
  * The settings PLAYER box — a summary of the app account only (distinct from the provider ACCOUNTS
  * box). Signed out: help + `[ sign in ]`; no profile: `[ finish profile ]`; signed in: avatar and
- * nickname + `[ manage ]`. The screens themselves live in [PlayerScreen]. Demo mode shows only a
+ * `nickname #tag` + `[ manage ]`. The screens themselves live in [PlayerScreen]. Demo mode shows only a
  * disabled notice. Callers hide the box entirely while the account feature is unavailable.
  */
 @Composable
@@ -57,6 +65,8 @@ fun PlayerSection(
     methods: List<AccountMethod>,
     notice: AccountNotice?,
     isDemo: Boolean,
+    /** Operator accounts draw with the operator avatar (when bundled) instead of the chosen one. */
+    isOperator: Boolean,
     catalog: AvatarCatalog,
     loc: L10n,
     onOpen: (PlayerEntry) -> Unit,
@@ -86,7 +96,7 @@ fun PlayerSection(
                 }
                 AccountState.Deleting -> PlayerHelp(loc.playerDeleting)
                 is AccountState.SignedIn -> {
-                    val avatar = catalog.resolve(state.profile.avatarId)
+                    val avatar = catalog.resolve(displayAvatarId(state.profile, isOperator, catalog))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -98,13 +108,7 @@ fun PlayerSection(
                             contentDescription = avatar.name(loc.lang == Lang.KO),
                         )
                         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                            Text(
-                                text = state.profile.nickname,
-                                color = Term.Foreground,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                style = terminalTextStyle(15.sp, FontWeight.SemiBold),
-                            )
+                            NametagText(profile = state.profile, size = 15.sp)
                             Text(
                                 text = methods.joinToString(" · ") { loc.accountMethodName(it) },
                                 color = Term.Dim,
@@ -120,6 +124,22 @@ fun PlayerSection(
             }
         }
     }
+}
+
+/** `nickname #1234`: the tag is always shown, dimmed, one space after the nickname (battle-tag style). */
+@Composable
+internal fun NametagText(profile: PlayerProfile, size: TextUnit) {
+    Text(
+        text = buildAnnotatedString {
+            append(profile.nickname)
+            withStyle(SpanStyle(color = Term.Dim)) { append(" #${profile.tag}") }
+        },
+        color = Term.Foreground,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        style = terminalTextStyle(size, FontWeight.SemiBold),
+        modifier = Modifier.semantics { contentDescription = profile.nametag },
+    )
 }
 
 @Composable

@@ -13,8 +13,9 @@ import kotlinx.coroutines.flow.first
 
 /**
  * The app account's offline profile cache (`tokenwatch.player.profile.v1`, same key and JSON fields
- * as iOS). Only uid, nickname, avatar id and the nickname change time — never a token or an email.
- * The server is authoritative; this only lets the PLAYER box draw before the profile is re-read.
+ * as iOS). Only uid, nickname, tag, avatar id and the nickname change time — never a token or an email.
+ * The server is authoritative; this only lets the PLAYER box draw before the profile is re-read. A cache
+ * written before nametags existed has no tag and reads as absent, so the profile is re-read instead.
  */
 class PlayerProfileRepository(
     private val dataStore: DataStore<Preferences>,
@@ -42,6 +43,7 @@ class PlayerProfileRepository(
             mapOf(
                 "uid" to cache.uid,
                 "nickname" to cache.nickname,
+                "tag" to cache.tag,
                 "avatarId" to cache.avatarId,
                 "nicknameChangedAtMs" to cache.nicknameChangedAtMs,
             ),
@@ -52,6 +54,7 @@ class PlayerProfileRepository(
             return PlayerProfileCache(
                 uid = map["uid"] as? String ?: return null,
                 nickname = map["nickname"] as? String ?: return null,
+                tag = map["tag"] as? String ?: return null,
                 avatarId = map["avatarId"] as? String ?: return null,
                 nicknameChangedAtMs = (map["nicknameChangedAtMs"] as? Number)?.toLong() ?: return null,
             )

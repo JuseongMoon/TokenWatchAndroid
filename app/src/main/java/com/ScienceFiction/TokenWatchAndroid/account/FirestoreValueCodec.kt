@@ -1,6 +1,7 @@
 package com.ScienceFiction.TokenWatchAndroid.account
 
 import com.ScienceFiction.TokenWatchAndroid.domain.account.AvatarCatalog
+import com.ScienceFiction.TokenWatchAndroid.domain.account.NicknamePolicy
 import com.ScienceFiction.TokenWatchAndroid.domain.account.PlayerProfile
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.Types
@@ -83,21 +84,26 @@ sealed class FirestoreWrite {
     }
 }
 
-/** Profile document paths and write batches. Creation and nickname changes commit players and nicknames together. */
+/**
+ * Profile document paths and write batches. Creation and nickname changes commit players and nametags
+ * together. `nametags/{lowercase nickname#tag}` is the unique reservation; nicknames themselves may repeat.
+ * Names in a commit body stay raw (`…/nametags/david#6304`); only request URLs percent-encode the `#`.
+ */
 class PlayerDocuments(val projectId: String) {
     val root: String get() = "projects/$projectId/databases/(default)/documents"
 
     fun player(uid: String): String = "$root/players/$uid"
 
-    fun nickname(lower: String): String = "$root/nicknames/$lower"
+    fun nametag(key: String): String = "$root/nametags/$key"
 
-    /** Creation: players (new) + nickname reservation (new). */
+    /** Creation: players (new) + nametag reservation (new). */
     fun create(uid: String, profile: PlayerProfile): List<FirestoreWrite> = listOf(
         FirestoreWrite.Update(
             name = player(uid),
             fields = mapOf(
                 "nickname" to FirestoreValue.StringValue(profile.nickname),
                 "nicknameLower" to FirestoreValue.StringValue(profile.nicknameLower),
+                "tag" to FirestoreValue.StringValue(profile.tag),
                 "nicknameChangedAtMs" to FirestoreValue.IntegerValue(profile.nicknameChangedAtMs),
                 "avatar" to avatarValue(profile.avatarId),
                 "termsAcceptedVersion" to FirestoreValue.IntegerValue(profile.termsAcceptedVersion.toLong()),
@@ -108,7 +114,7 @@ class PlayerDocuments(val projectId: String) {
             exists = false,
         ),
         FirestoreWrite.Update(
-            name = nickname(profile.nicknameLower),
+            name = nametag(profile.nametagKey),
             fields = mapOf("uid" to FirestoreValue.StringValue(uid)),
             mask = null,
             exists = false,
@@ -116,41 +122,37 @@ class PlayerDocuments(val projectId: String) {
     )
 
     /**
-     * Nickname change: players (masked) + new reservation + old reservation deleted. A case-only change
-     * keeps the same reservation key, so only players is written.
+     * Nickname change: players (masked) + new nametag reservation + old reservation deleted. Every change
+     * draws a new tag (even a case-only one), so the reservation key always changes.
      */
     fun changeNickname(
         uid: String,
-        oldLower: String,
+        oldKey: String,
         nickname: String,
         lower: String,
+        tag: String,
         nowMs: Long,
-    ): List<FirestoreWrite> = buildList {
-        add(
-            FirestoreWrite.Update(
-                name = player(uid),
-                fields = mapOf(
-                    "nickname" to FirestoreValue.StringValue(nickname),
-                    "nicknameLower" to FirestoreValue.StringValue(lower),
-                    "nicknameChangedAtMs" to FirestoreValue.IntegerValue(nowMs),
-                    "updatedAtMs" to FirestoreValue.IntegerValue(nowMs),
-                ),
-                mask = NICKNAME_MASK,
-                exists = true,
+    ): List<FirestoreWrite> = listOf(
+        FirestoreWrite.Update(
+            name = player(uid),
+            fields = mapOf(
+                "nickname" to FirestoreValue.StringValue(nickname),
+                "nicknameLower" to FirestoreValue.StringValue(lower),
+                "tag" to FirestoreValue.StringValue(tag),
+                "nicknameChangedAtMs" to FirestoreValue.IntegerValue(nowMs),
+                "updatedAtMs" to FirestoreValue.IntegerValue(nowMs),
             ),
-        )
-        if (lower != oldLower) {
-            add(
-                FirestoreWrite.Update(
-                    name = nickname(lower),
-                    fields = mapOf("uid" to FirestoreValue.StringValue(uid)),
-                    mask = null,
-                    exists = false,
-                ),
-            )
-            add(FirestoreWrite.Delete(nickname(oldLower)))
-        }
-    }
+            mask = NICKNAME_MASK,
+            exists = true,
+        ),
+        FirestoreWrite.Update(
+            name = nametag(NicknamePolicy.nametagKey(lower, tag)),
+            fields = mapOf("uid" to FirestoreValue.StringValue(uid)),
+            mask = null,
+            exists = false,
+        ),
+        FirestoreWrite.Delete(nametag(oldKey)),
+    )
 
     fun changeAvatar(uid: String, avatarId: String, nowMs: Long): List<FirestoreWrite> = listOf(
         FirestoreWrite.Update(
@@ -173,14 +175,14 @@ class PlayerDocuments(val projectId: String) {
         ),
     )
 
-    /** Account deletion: the nickname reservation and the profile go together. */
-    fun delete(uid: String, nicknameLower: String): List<FirestoreWrite> = listOf(
-        FirestoreWrite.Delete(nickname(nicknameLower)),
+    /** Account deletion: the nametag reservation and the profile go together. */
+    fun delete(uid: String, nametagKey: String): List<FirestoreWrite> = listOf(
+        FirestoreWrite.Delete(nametag(nametagKey)),
         FirestoreWrite.Delete(player(uid)),
     )
 
     companion object {
-        val NICKNAME_MASK = listOf("nickname", "nicknameLower", "nicknameChangedAtMs", "updatedAtMs")
+        val NICKNAME_MASK = listOf("nickname", "nicknameLower", "tag", "nicknameChangedAtMs", "updatedAtMs")
         val AVATAR_MASK = listOf("avatar", "updatedAtMs")
         val TERMS_MASK = listOf("termsAcceptedVersion", "updatedAtMs")
 
@@ -198,13 +200,14 @@ class PlayerDocuments(val projectId: String) {
             bodyAdapter.toJson(mapOf("writes" to writes.map { it.toJson() }))
 
         /**
-         * `GET players/{uid}` → profile; null when a required field is missing. An avatar of any kind
-         * other than `preset` reads as the fallback avatar.
+         * `GET players/{uid}` → profile; null when a required field (the tag included) is missing. An
+         * avatar of any kind other than `preset` reads as the fallback avatar.
          */
         fun decodeProfile(body: String): PlayerProfile? {
             val fields = documentFields(body) ?: return null
             val nickname = fields["nickname"]?.stringValue ?: return null
             val lower = fields["nicknameLower"]?.stringValue ?: return null
+            val tag = fields["tag"]?.stringValue?.takeIf(NicknamePolicy::isValidTag) ?: return null
             val changed = fields["nicknameChangedAtMs"]?.integerValue ?: return null
             val created = fields["createdAtMs"]?.integerValue ?: return null
             val avatar = fields["avatar"]?.mapValue
@@ -212,6 +215,7 @@ class PlayerDocuments(val projectId: String) {
             return PlayerProfile(
                 nickname = nickname,
                 nicknameLower = lower,
+                tag = tag,
                 nicknameChangedAtMs = changed,
                 avatarId = avatarId ?: AvatarCatalog.FALLBACK_ID,
                 termsAcceptedVersion = (fields["termsAcceptedVersion"]?.integerValue ?: 0L).toInt(),
@@ -220,8 +224,8 @@ class PlayerDocuments(val projectId: String) {
             )
         }
 
-        /** `GET nicknames/{lower}` → the uid holding the reservation. */
-        fun decodeNicknameOwner(body: String): String? = documentFields(body)?.get("uid")?.stringValue
+        /** `GET nametags/{key}` → the uid holding the reservation. */
+        fun decodeNametagOwner(body: String): String? = documentFields(body)?.get("uid")?.stringValue
 
         private fun documentFields(body: String): Map<String, FirestoreValue>? {
             val document = runCatching { anyAdapter.fromJson(body) }.getOrNull() as? Map<*, *> ?: return null

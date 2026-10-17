@@ -127,6 +127,7 @@ internal fun TokenWatchApp(
     val accountState by account.state.collectAsStateWithLifecycle()
     val accountMethods by account.methods.collectAsStateWithLifecycle()
     val accountNotice by account.notice.collectAsStateWithLifecycle()
+    val accountIsOperator by account.isOperator.collectAsStateWithLifecycle()
     val loc = remember(settings.language) { L10n(settings.language.resolved()) }
 
     var route by rememberSaveable { mutableStateOf(ROUTE_MAIN) }
@@ -562,6 +563,7 @@ internal fun TokenWatchApp(
                                 methods = accountMethods,
                                 notice = accountNotice,
                                 isDemo = isDemo,
+                                isOperator = accountIsOperator,
                                 catalog = container.avatarCatalog,
                                 loc = loc,
                                 onOpen = { entry ->

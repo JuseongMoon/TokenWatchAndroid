@@ -38,6 +38,7 @@ import com.ScienceFiction.TokenWatchAndroid.BuildConfig
 import com.ScienceFiction.TokenWatchAndroid.account.AccountState
 import com.ScienceFiction.TokenWatchAndroid.account.AccountStore
 import com.ScienceFiction.TokenWatchAndroid.account.SaveOutcome
+import com.ScienceFiction.TokenWatchAndroid.account.displayAvatarId
 import com.ScienceFiction.TokenWatchAndroid.analytics.ScreenName
 import com.ScienceFiction.TokenWatchAndroid.domain.account.AccountMethod
 import com.ScienceFiction.TokenWatchAndroid.domain.account.AvatarCatalog
@@ -62,6 +63,8 @@ import com.ScienceFiction.TokenWatchAndroid.localization.nicknameCooldownRemaini
 import com.ScienceFiction.TokenWatchAndroid.localization.nicknameError
 import com.ScienceFiction.TokenWatchAndroid.localization.nicknamePlaceholder
 import com.ScienceFiction.TokenWatchAndroid.localization.nicknameRule
+import com.ScienceFiction.TokenWatchAndroid.localization.nicknameTagHint
+import com.ScienceFiction.TokenWatchAndroid.localization.operatorAvatarNote
 import com.ScienceFiction.TokenWatchAndroid.localization.playerDeleting
 import com.ScienceFiction.TokenWatchAndroid.localization.playerLoading
 import com.ScienceFiction.TokenWatchAndroid.localization.playerSigningIn
@@ -342,6 +345,7 @@ private fun AccountContent(
     val notice by account.notice.collectAsStateWithLifecycle()
     val methods by account.methods.collectAsStateWithLifecycle()
     val isWorking by account.isWorking.collectAsStateWithLifecycle()
+    val isOperator by account.isOperator.collectAsStateWithLifecycle()
     val korean = loc.lang == Lang.KO
     var nickname by rememberSaveable(profile.nickname) { mutableStateOf(profile.nickname) }
     var nicknameError by rememberSaveable { mutableStateOf<NicknameError?>(null) }
@@ -350,17 +354,13 @@ private fun AccountContent(
     var confirmDelete by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(Unit) { onScreen(ScreenName.ACCOUNT) }
 
-    val avatar = catalog.resolve(profile.avatarId)
+    val avatar = catalog.resolve(displayAvatarId(profile, isOperator, catalog))
     TerminalBox(title = "PROFILE") {
         Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
                 AvatarView(preset = avatar, cell = 4.dp, contentDescription = avatar.name(korean))
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(
-                        text = profile.nickname,
-                        color = Term.Foreground,
-                        style = terminalTextStyle(16.sp, FontWeight.SemiBold),
-                    )
+                    NametagText(profile = profile, size = 16.sp)
                     Text(
                         text = methods.joinToString(" · ") { loc.accountMethodName(it) },
                         color = Term.Dim,
@@ -404,6 +404,7 @@ private fun AccountContent(
                 )
             } else {
                 Text(text = loc.nicknameRule, color = Term.Dim, style = terminalTextStyle(10.sp))
+                Text(text = loc.nicknameTagHint, color = Term.Dim, style = terminalTextStyle(10.sp))
                 if (NicknamePolicy.normalize(nickname) != profile.nickname) {
                     TerminalButton(
                         title = if (isWorking) "[ saving… ]" else "[ save nickname ]",
@@ -424,6 +425,9 @@ private fun AccountContent(
 
     TerminalBox(title = "AVATAR") {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            if (isOperator && catalog.operatorAvatar != null) {
+                Text(text = loc.operatorAvatarNote, color = Term.Yellow, style = terminalTextStyle(10.sp))
+            }
             AvatarPicker(catalog = catalog, selection = avatarId, korean = korean, onSelect = { avatarId = it })
             if (avatarId != profile.avatarId) {
                 TerminalButton(
@@ -488,7 +492,7 @@ private fun AccountContent(
     if (confirmSignOut) {
         TerminalConfirmDialog(
             title = loc.accountSignOutTitle,
-            accountLabel = profile.nickname,
+            accountLabel = profile.nametag,
             message = loc.accountSignOutMessage,
             confirmLabel = "[ ${loc.accountSignOut} ]",
             cancelLabel = "[ ${loc.cancel} ]",
@@ -502,7 +506,7 @@ private fun AccountContent(
     if (confirmDelete) {
         TerminalConfirmDialog(
             title = loc.accountDeleteTitle,
-            accountLabel = profile.nickname,
+            accountLabel = profile.nametag,
             message = loc.accountDeleteMessage,
             confirmLabel = "[ ${loc.accountDelete} ]",
             cancelLabel = "[ ${loc.cancel} ]",

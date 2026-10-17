@@ -152,4 +152,26 @@ class LocalizationTest {
         assertEquals("다음 변경까지 2일 3시간", ko.nicknameCooldownRemaining(2, 3))
         assertEquals("next change in 1h", en.nicknameCooldownRemaining(0, 0))
     }
+
+    @Test
+    fun nametagCopyMatchesIos() {
+        val ko = L10n(Lang.KO)
+        val en = L10n(Lang.EN)
+        val taken = com.ScienceFiction.TokenWatchAndroid.domain.account.NicknameError.TAKEN
+        val cooldown = com.ScienceFiction.TokenWatchAndroid.domain.account.NicknameError.COOLDOWN
+        assertEquals("이 닉네임은 쓸 수 있는 #번호가 남지 않았어요. 다른 닉네임을 써 주세요.", ko.nicknameError(taken))
+        assertEquals("You can change your nickname once every 30 days.", en.nicknameError(cooldown))
+        assertEquals(
+            "다른 사용자에게 보일 닉네임과 아바타를 골라 주세요. 닉네임 뒤에는 구분용 #번호(예: #8571)가 붙어요. " +
+                "아바타는 언제든, 닉네임은 30일에 한 번 바꿀 수 있어요.",
+            ko.profileSetupIntro,
+        )
+        assertEquals("닉네임을 바꾸면 #번호도 새로 정해져요. 30일에 한 번 바꿀 수 있어요.", ko.nicknameTagHint)
+        assertEquals(
+            "Operator accounts always appear with the operator avatar, whatever you pick here.",
+            en.operatorAvatarNote,
+        )
+        assertNotEquals(ko.operatorAvatarNote, en.operatorAvatarNote)
+        assertNotEquals(ko.nicknameTagHint, en.nicknameTagHint)
+    }
 }

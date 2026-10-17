@@ -9,13 +9,14 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 
 /**
- * Reads and writes the app account profile (`players/{uid}`, `nicknames/{lower}`) over Firestore REST,
+ * Reads and writes the app account profile (`players/{uid}`, `nametags/{nickname#tag}`) over Firestore REST,
  * mirroring iOS `PlayerProfileClient`.
  *
  * Authentication is the Firebase ID token (`Authorization: Bearer`), fetched right before each request
  * and only ever placed in that header — never stored, logged or put in an exception. No `?key=` is
  * sent. Failures come back as result values rather than exceptions, and response bodies (raw server
- * errors) are neither shown nor logged. A 401 refreshes the token and retries once.
+ * errors) are neither shown nor logged. A 401 or 403 refreshes the token and retries once — 403 covers an
+ * operator claim set after the cached token was issued.
  */
 class PlayerProfileClient(
     projectId: String,
@@ -37,7 +38,7 @@ class PlayerProfileClient(
     enum class CommitResult {
         OK,
 
-        /** The nickname reservation belongs to another account, so the whole commit was refused. */
+        /** The nametag reservation belongs to another account, so the whole commit was refused (redraw the tag). */
         TAKEN,
         FAILED,
     }
@@ -57,12 +58,12 @@ class PlayerProfileClient(
         }
     }
 
-    /** Nickname reservation check. 404 is free, and a reservation held by [uid] itself is available. */
-    suspend fun nicknameAvailability(lower: String, uid: String): Availability {
-        val (status, body) = send("GET", listOf("nicknames", lower)) ?: return Availability.FAILED
+    /** Nametag reservation check. 404 is free, and a reservation held by [uid] itself is available. */
+    suspend fun nametagAvailability(key: String, uid: String): Availability {
+        val (status, body) = send("GET", listOf("nametags", key)) ?: return Availability.FAILED
         return when (status) {
             404 -> Availability.AVAILABLE
-            200 -> when (PlayerDocuments.decodeNicknameOwner(body)) {
+            200 -> when (PlayerDocuments.decodeNametagOwner(body)) {
                 null -> Availability.FAILED
                 uid -> Availability.AVAILABLE
                 else -> Availability.TAKEN
@@ -72,14 +73,14 @@ class PlayerProfileClient(
     }
 
     /**
-     * Commits a write batch atomically. Given [nicknameLower], a failure re-reads the reservation to
-     * tell `taken` apart: which HTTP status a duplicate reservation produces is not measured on the
-     * server yet, so no status code is relied on.
+     * Commits a write batch atomically. Given [nametagKey], a failure re-reads the reservation to tell
+     * `taken` apart. A duplicate reservation measured as 409 on the emulator, but the re-read decides
+     * rather than the status code.
      */
-    suspend fun commit(writes: List<FirestoreWrite>, uid: String, nicknameLower: String? = null): CommitResult {
+    suspend fun commit(writes: List<FirestoreWrite>, uid: String, nametagKey: String? = null): CommitResult {
         val response = send("POST", COMMIT, PlayerDocuments.commitBody(writes))
         if (response != null && response.first in 200..299) return CommitResult.OK
-        if (nicknameLower != null && nicknameAvailability(nicknameLower, uid) == Availability.TAKEN) {
+        if (nametagKey != null && nametagAvailability(nametagKey, uid) == Availability.TAKEN) {
             return CommitResult.TAKEN
         }
         return CommitResult.FAILED
@@ -93,7 +94,10 @@ class PlayerProfileClient(
         if (!knowsServerTime) send("GET", listOf("players", uid))
     }
 
-    /** The full request URL, exposed for tests. Korean document ids are percent-encoded per segment. */
+    /**
+     * The full request URL, exposed for tests. Document ids (Korean nicknames, the `#` of a nametag) are
+     * percent-encoded per segment, so `#` travels as `%23` instead of starting a fragment.
+     */
     internal fun url(segments: List<String>): HttpUrl {
         val builder = HttpUrl.Builder()
             .scheme("https")
@@ -132,7 +136,7 @@ class PlayerProfileClient(
                 return null
             }
             clock.record(response.header("Date"))
-            if (response.statusCode == 401 && attempt == 0) continue
+            if ((response.statusCode == 401 || response.statusCode == 403) && attempt == 0) continue
             return response.statusCode to response.bodyText()
         }
         return null

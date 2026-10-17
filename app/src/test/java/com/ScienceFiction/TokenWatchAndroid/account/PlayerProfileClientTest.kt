@@ -35,7 +35,7 @@ internal fun response(status: Int, body: String = "{}", date: String? = null) = 
 )
 
 internal const val PROFILE_BODY = """{"fields":{
-    "nickname":{"stringValue":"Tok"},"nicknameLower":{"stringValue":"tok"},
+    "nickname":{"stringValue":"Tok"},"nicknameLower":{"stringValue":"tok"},"tag":{"stringValue":"0042"},
     "nicknameChangedAtMs":{"integerValue":"1000"},"createdAtMs":{"integerValue":"1000"},
     "updatedAtMs":{"integerValue":"1000"},"termsAcceptedVersion":{"integerValue":"1"},
     "avatar":{"mapValue":{"fields":{"kind":{"stringValue":"preset"},"id":{"stringValue":"cat"}}}}}}"""
@@ -73,7 +73,7 @@ class PlayerProfileClientTest {
 
     @Test fun mapsMissingAndFailedReads() = runBlocking {
         assertEquals(PlayerProfileClient.FetchResult.NotFound, client(ScriptedTransport(response(404))).fetchProfile("u"))
-        assertEquals(PlayerProfileClient.FetchResult.Failed, client(ScriptedTransport(response(403))).fetchProfile("u"))
+        assertEquals(PlayerProfileClient.FetchResult.Failed, client(ScriptedTransport(response(500))).fetchProfile("u"))
         assertEquals(PlayerProfileClient.FetchResult.Failed, client(ScriptedTransport(response(200, "{}"))).fetchProfile("u"))
         val offline = ScriptedTransport().apply { failNext = true }
         assertEquals(PlayerProfileClient.FetchResult.Failed, client(offline).fetchProfile("u"))
@@ -96,31 +96,48 @@ class PlayerProfileClientTest {
         assertEquals(listOf(false, true), tokens)
     }
 
-    @Test fun nicknameAvailabilityTreatsTheOwnReservationAsFree() = runBlocking {
+    @Test fun a403AlsoRefreshesTheTokenOnce() = runBlocking {
+        // An operator claim set after the cached token was issued: the rules refuse until a new token.
+        val retried = ScriptedTransport(response(403), response(200))
+        val c = client(retried)
+        assertEquals(PlayerProfileClient.CommitResult.OK, c.commit(c.documents.changeAvatar("u", "cat", 1), "u"))
+        assertEquals(listOf(false, true), tokens)
+        assertEquals(2, retried.requests.size)
+
+        tokens.clear()
+        val twice = ScriptedTransport(response(403), response(403))
+        assertEquals(PlayerProfileClient.FetchResult.Failed, client(twice).fetchProfile("u"))
+        assertEquals(2, twice.requests.size)
+        assertEquals(listOf(false, true), tokens)
+    }
+
+    @Test fun nametagAvailabilityTreatsTheOwnReservationAsFree() = runBlocking {
         assertEquals(
             PlayerProfileClient.Availability.AVAILABLE,
-            client(ScriptedTransport(response(404))).nicknameAvailability("tok", "me"),
+            client(ScriptedTransport(response(404))).nametagAvailability("tok#0042", "me"),
         )
         assertEquals(
             PlayerProfileClient.Availability.AVAILABLE,
-            client(ScriptedTransport(response(200, ownerBody("me")))).nicknameAvailability("tok", "me"),
+            client(ScriptedTransport(response(200, ownerBody("me")))).nametagAvailability("tok#0042", "me"),
         )
         assertEquals(
             PlayerProfileClient.Availability.TAKEN,
-            client(ScriptedTransport(response(200, ownerBody("other")))).nicknameAvailability("tok", "me"),
+            client(ScriptedTransport(response(200, ownerBody("other")))).nametagAvailability("tok#0042", "me"),
         )
         assertEquals(
             PlayerProfileClient.Availability.FAILED,
-            client(ScriptedTransport(response(500))).nicknameAvailability("tok", "me"),
+            client(ScriptedTransport(response(500))).nametagAvailability("tok#0042", "me"),
         )
     }
 
-    @Test fun koreanDocumentIdsArePercentEncodedInThePath() = runBlocking {
+    @Test fun nametagIdsArePercentEncodedInThePath() = runBlocking {
         val transport = ScriptedTransport(response(404))
-        client(transport).nicknameAvailability("토큰", "me")
+        client(transport).nametagAvailability("토큰#0042", "me")
         val url = transport.requests.single().url
-        assertTrue(url.encodedPath.endsWith("/documents/nicknames/%ED%86%A0%ED%81%B0"))
-        assertEquals("토큰", url.pathSegments.last())
+        // `#` must travel as %23, or everything after it would become a URL fragment.
+        assertTrue(url.encodedPath, url.encodedPath.endsWith("/documents/nametags/%ED%86%A0%ED%81%B0%230042"))
+        assertNull(url.fragment)
+        assertEquals("토큰#0042", url.pathSegments.last())
     }
 
     @Test fun commitPostsTheBatchToTheCommitEndpoint() = runBlocking {
@@ -140,18 +157,19 @@ class PlayerProfileClientTest {
         assertTrue(request.bodyText().contains("projects/tokenwatch-app/databases/(default)/documents/players/uid1"))
     }
 
-    @Test fun aFailedCommitIsTakenOnlyWhenAnotherUidHoldsTheNickname() = runBlocking {
-        val taken = ScriptedTransport(response(400), response(200, ownerBody("other")))
+    @Test fun aFailedCommitIsTakenOnlyWhenAnotherUidHoldsTheNametag() = runBlocking {
+        val taken = ScriptedTransport(response(409), response(200, ownerBody("other")))
         val c = client(taken)
-        assertEquals(PlayerProfileClient.CommitResult.TAKEN, c.commit(emptyList(), "me", nicknameLower = "tok"))
+        assertEquals(PlayerProfileClient.CommitResult.TAKEN, c.commit(emptyList(), "me", nametagKey = "tok#0042"))
         assertEquals(2, taken.requests.size)
+        assertTrue(taken.requests[1].url.encodedPath.endsWith("/nametags/tok%230042"))
 
         val mine = ScriptedTransport(response(409), response(200, ownerBody("me")))
-        assertEquals(PlayerProfileClient.CommitResult.FAILED, client(mine).commit(emptyList(), "me", nicknameLower = "tok"))
+        assertEquals(PlayerProfileClient.CommitResult.FAILED, client(mine).commit(emptyList(), "me", nametagKey = "tok#0042"))
 
-        val noNickname = ScriptedTransport(response(403))
-        assertEquals(PlayerProfileClient.CommitResult.FAILED, client(noNickname).commit(emptyList(), "me"))
-        assertEquals(1, noNickname.requests.size)
+        val noNametag = ScriptedTransport(response(400))
+        assertEquals(PlayerProfileClient.CommitResult.FAILED, client(noNametag).commit(emptyList(), "me"))
+        assertEquals(1, noNametag.requests.size)
     }
 
     @Test fun theDateHeaderCorrectsTheClock() = runBlocking {
@@ -177,7 +195,7 @@ class PlayerProfileClientTest {
         val transport = ScriptedTransport(response(200))
         val c = client(transport)
         c.commit(c.documents.create("uid1", com.ScienceFiction.TokenWatchAndroid.domain.account.PlayerProfile(
-            "Tok", "tok", 1, "cat", 1, 1, 1,
+            "Tok", "tok", "0042", 1, "cat", 1, 1, 1,
         )), "uid1")
         val request = transport.requests.single()
         assertFalse(request.url.toString().contains("id-token-secret"))

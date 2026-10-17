@@ -2,7 +2,9 @@ package com.ScienceFiction.TokenWatchAndroid.domain.account
 
 import java.util.Locale
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class NicknamePolicyTest {
@@ -68,12 +70,58 @@ class NicknamePolicyTest {
         assertEquals("창녀", NicknamePolicy.BANNED_WORDS.last())
     }
 
-    @Test fun cooldownAllowsAChangeFromExactlySevenDays() {
+    @Test fun cooldownAllowsAChangeFromExactlyThirtyDays() {
         val changed = 1_000_000L
         assertEquals(1L, NicknamePolicy.cooldownRemainingMs(changed, changed + NicknamePolicy.COOLDOWN_MS - 1))
         assertEquals(0L, NicknamePolicy.cooldownRemainingMs(changed, changed + NicknamePolicy.COOLDOWN_MS))
         assertEquals(0L, NicknamePolicy.cooldownRemainingMs(changed, changed + NicknamePolicy.COOLDOWN_MS + 5))
-        assertEquals(604_800_000L, NicknamePolicy.COOLDOWN_MS)
+        assertEquals(NicknamePolicy.COOLDOWN_MS, NicknamePolicy.cooldownRemainingMs(changed, changed))
+        assertEquals(2_592_000_000L, NicknamePolicy.COOLDOWN_MS)
+    }
+
+    @Test fun tagRules() {
+        assertTrue(NicknamePolicy.isValidTag("0042"))
+        assertFalse(NicknamePolicy.isValidTag("42"))
+        assertFalse(NicknamePolicy.isValidTag("12a4"))
+        assertFalse(NicknamePolicy.isValidTag("12345"))
+        // Non-ASCII digits (Arabic-Indic, full-width) are not tags.
+        assertFalse(NicknamePolicy.isValidTag("١٢٣٤"))
+        assertFalse(NicknamePolicy.isValidTag("１２３４"))
+        for (d in 0..9) assertTrue(NicknamePolicy.isRepdigit(d.toString().repeat(4)))
+        assertFalse(NicknamePolicy.isRepdigit("1112"))
+        assertEquals("모험가#0042", NicknamePolicy.nametagKey("모험가", "0042"))
+    }
+
+    @Test fun randomTagIsNeverARepdigitAndDiffersFromTheOldOne() {
+        repeat(2000) {
+            val tag = NicknamePolicy.randomTag(excluding = "1234")
+            assertTrue(NicknamePolicy.isValidTag(tag))
+            assertFalse(NicknamePolicy.isRepdigit(tag))
+            assertTrue(tag != "1234")
+        }
+    }
+
+    @Test fun randomTagSkipsRepdigitsAndTheOldTagFromTheGenerator() {
+        val sequence = ArrayDeque(listOf(0, 1111, 7, 8571))
+        assertEquals("0007", NicknamePolicy.randomTag(draw = sequence::removeFirst))
+        val second = ArrayDeque(listOf(8571, 8571, 42))
+        assertEquals("0042", NicknamePolicy.randomTag(excluding = "8571", draw = second::removeFirst))
+    }
+
+    @Test fun nametagAndKeyKeepLeadingZeros() {
+        val profile = PlayerProfile(
+            nickname = "David",
+            nicknameLower = "david",
+            tag = "0304",
+            nicknameChangedAtMs = 1,
+            avatarId = "slime",
+            termsAcceptedVersion = 1,
+            createdAtMs = 1,
+            updatedAtMs = 1,
+        )
+        // Display has one space before the tag; the reservation key has none.
+        assertEquals("David #0304", profile.nametag)
+        assertEquals("david#0304", profile.nametagKey)
     }
 
     @Test fun errorWireIdsMatchTheContract() {

@@ -3,6 +3,7 @@ package com.ScienceFiction.TokenWatchAndroid.account
 import com.ScienceFiction.TokenWatchAndroid.analytics.AnalyticsEvent
 import com.ScienceFiction.TokenWatchAndroid.analytics.ProfileField
 import com.ScienceFiction.TokenWatchAndroid.domain.account.AccountMethod
+import com.ScienceFiction.TokenWatchAndroid.domain.account.AvatarCatalog
 import com.ScienceFiction.TokenWatchAndroid.domain.account.NicknameError
 import com.ScienceFiction.TokenWatchAndroid.domain.account.NicknamePolicy
 import com.ScienceFiction.TokenWatchAndroid.domain.account.PlayerProfile
@@ -14,6 +15,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlin.random.Random
 
 /**
  * App account (TokenWatch's own account) state machine, mirroring iOS `AccountStore`. It coordinates
@@ -25,6 +27,8 @@ import kotlinx.coroutines.launch
  * - The server holds the profile. A minimal cache only lets the PLAYER box draw offline.
  * - Deletion is reauthenticate → (Apple) revoke → profile delete commit → Auth user delete. A cancelled
  *   reauthentication or a failed revocation stops it before anything is erased.
+ * - Nicknames carry a random four-digit tag (`nickname#1234`); saving draws one, checks the nametag
+ *   reservation and redraws on a clash, up to six times.
  */
 sealed class AccountState {
     /** Firebase is unusable; the PLAYER box is hidden. */
@@ -67,6 +71,13 @@ sealed class SaveOutcome {
     data object Failed : SaveOutcome()
 }
 
+/**
+ * The avatar actually drawn for [profile]: the operator avatar for an operator account (when its bitmap
+ * is bundled), otherwise the chosen one. The stored avatar stays an ordinary preset either way.
+ */
+fun displayAvatarId(profile: PlayerProfile, isOperator: Boolean, catalog: AvatarCatalog): String =
+    catalog.operatorAvatar?.takeIf { isOperator }?.id ?: profile.avatarId
+
 /** The offline profile cache, behind an interface so the store is testable without DataStore. */
 interface PlayerProfileCacheStore {
     suspend fun load(): PlayerProfileCache?
@@ -81,6 +92,8 @@ class AccountStore(
     private val scope: CoroutineScope,
     private val isDemo: () -> Boolean = { false },
     private val log: (AnalyticsEvent) -> Unit = {},
+    /** Draws a tag number in 0..9999; tests pass fixed sequences. */
+    private val drawTag: () -> Int = { Random.nextInt(0, 10_000) },
 ) {
     private val _state = MutableStateFlow<AccountState>(
         if (auth.isAvailable && profiles != null) AccountState.SignedOut else AccountState.Unavailable,
@@ -99,6 +112,11 @@ class AccountStore(
 
     private val _notice = MutableStateFlow<AccountNotice?>(null)
     val notice: StateFlow<AccountNotice?> = _notice.asStateFlow()
+
+    private val _isOperator = MutableStateFlow(false)
+
+    /** Operator account (custom claim): drawn with the operator avatar whatever it picked. */
+    val isOperator: StateFlow<Boolean> = _isOperator.asStateFlow()
 
     @Volatile
     private var currentUid: String? = null
@@ -162,6 +180,7 @@ class AccountStore(
                 PlayerProfile(
                     nickname = cached.nickname,
                     nicknameLower = NicknamePolicy.lower(cached.nickname),
+                    tag = cached.tag,
                     nicknameChangedAtMs = cached.nicknameChangedAtMs,
                     avatarId = cached.avatarId,
                     termsAcceptedVersion = PlayerProfile.CURRENT_TERMS_VERSION,
@@ -180,6 +199,7 @@ class AccountStore(
             if (_state.value == AccountState.Deleting) return
             currentUid = null
             _methods.value = emptyList()
+            _isOperator.value = false
             cache.clear()
             if (_state.value != AccountState.Unavailable) _state.value = AccountState.SignedOut
             return
@@ -193,12 +213,17 @@ class AccountStore(
         refreshProfile()
     }
 
-    /** Re-reads the profile. A profile already on screen stays when the read fails. */
+    /**
+     * Re-reads the profile, and the operator claim with it. The token is force-refreshed for the claim:
+     * a claim set by an admin rides only on a new token, and an operator's repdigit tag makes every
+     * profile write fail the rules until it does. A profile already on screen stays when the read fails.
+     */
     suspend fun refreshProfile() {
         if (isDemo()) return
         val profiles = profiles ?: return
         val user = auth.currentUser ?: return
         if (profile == null) _state.value = AccountState.Loading
+        _isOperator.value = auth.isOperator(forceRefresh = true)
         when (val result = profiles.fetchProfile(user.uid)) {
             is PlayerProfileClient.FetchResult.Found -> apply(result.profile, user.uid)
             PlayerProfileClient.FetchResult.NotFound -> {
@@ -277,13 +302,14 @@ class AccountStore(
     private suspend fun resetLocal() {
         currentUid = null
         _methods.value = emptyList()
+        _isOperator.value = false
         cache.clear()
         _state.value = AccountState.SignedOut
     }
 
     // MARK: Profile
 
-    /** The first profile save: the nickname reservation and the profile go out in one commit. */
+    /** The first profile save: a random tag is drawn, and its reservation and the profile go out in one commit. */
     suspend fun createProfile(nickname: String, avatarId: String, termsAccepted: Boolean): SaveOutcome {
         val profiles = profiles
         val uid = currentUid
@@ -295,39 +321,48 @@ class AccountStore(
         if (!termsAccepted) return SaveOutcome.Invalid(NicknameError.TERMS_REQUIRED)
         val lower = NicknamePolicy.lower(normalized)
         return working {
-            when (profiles.nicknameAvailability(lower, uid)) {
-                PlayerProfileClient.Availability.TAKEN -> return@working SaveOutcome.Invalid(NicknameError.TAKEN)
-                PlayerProfileClient.Availability.FAILED -> {
-                    _notice.value = AccountNotice.SaveFailed
-                    return@working SaveOutcome.Failed
-                }
-                PlayerProfileClient.Availability.AVAILABLE -> Unit
-            }
             profiles.ensureServerTime(uid)
-            val now = profiles.nowMs
-            val profile = PlayerProfile(
-                nickname = normalized,
-                nicknameLower = lower,
-                nicknameChangedAtMs = now,
-                avatarId = avatarId,
-                termsAcceptedVersion = PlayerProfile.CURRENT_TERMS_VERSION,
-                createdAtMs = now,
-                updatedAtMs = now,
-            )
-            when (profiles.commit(profiles.documents.create(uid, profile), uid, lower)) {
-                PlayerProfileClient.CommitResult.OK -> {
-                    apply(profile, uid)
-                    SaveOutcome.Saved
+            repeat(TAG_ATTEMPTS) {
+                val tag = NicknamePolicy.randomTag(draw = drawTag)
+                val key = NicknamePolicy.nametagKey(lower, tag)
+                when (profiles.nametagAvailability(key, uid)) {
+                    PlayerProfileClient.Availability.TAKEN -> return@repeat
+                    PlayerProfileClient.Availability.FAILED -> {
+                        _notice.value = AccountNotice.SaveFailed
+                        return@working SaveOutcome.Failed
+                    }
+                    PlayerProfileClient.Availability.AVAILABLE -> Unit
                 }
-                PlayerProfileClient.CommitResult.TAKEN -> SaveOutcome.Invalid(NicknameError.TAKEN)
-                PlayerProfileClient.CommitResult.FAILED -> {
-                    _notice.value = AccountNotice.SaveFailed
-                    SaveOutcome.Failed
+                val now = profiles.nowMs
+                val profile = PlayerProfile(
+                    nickname = normalized,
+                    nicknameLower = lower,
+                    tag = tag,
+                    nicknameChangedAtMs = now,
+                    avatarId = avatarId,
+                    termsAcceptedVersion = PlayerProfile.CURRENT_TERMS_VERSION,
+                    createdAtMs = now,
+                    updatedAtMs = now,
+                )
+                when (profiles.commit(profiles.documents.create(uid, profile), uid, key)) {
+                    PlayerProfileClient.CommitResult.OK -> {
+                        apply(profile, uid)
+                        return@working SaveOutcome.Saved
+                    }
+                    // Another account took the same tag in between: draw again.
+                    PlayerProfileClient.CommitResult.TAKEN -> return@repeat
+                    PlayerProfileClient.CommitResult.FAILED -> {
+                        _notice.value = AccountNotice.SaveFailed
+                        return@working SaveOutcome.Failed
+                    }
                 }
             }
+            // The nickname's tags are all but used up (practically never happens).
+            SaveOutcome.Invalid(NicknameError.TAKEN)
         }
     }
 
+    /** Nickname change (once every 30 days). Every change draws a new tag, different from the previous one. */
     suspend fun changeNickname(nickname: String): SaveOutcome {
         val current = profile
         val profiles = profiles
@@ -340,38 +375,42 @@ class AccountStore(
             profiles.ensureServerTime(uid)
             if (nicknameCooldownRemainingMs() > 0) return@working SaveOutcome.Invalid(NicknameError.COOLDOWN)
             val lower = NicknamePolicy.lower(normalized)
-            if (lower != current.nicknameLower) {
-                when (profiles.nicknameAvailability(lower, uid)) {
-                    PlayerProfileClient.Availability.TAKEN -> return@working SaveOutcome.Invalid(NicknameError.TAKEN)
+            repeat(TAG_ATTEMPTS) {
+                val tag = NicknamePolicy.randomTag(excluding = current.tag, draw = drawTag)
+                val key = NicknamePolicy.nametagKey(lower, tag)
+                when (profiles.nametagAvailability(key, uid)) {
+                    PlayerProfileClient.Availability.TAKEN -> return@repeat
                     PlayerProfileClient.Availability.FAILED -> {
                         _notice.value = AccountNotice.SaveFailed
                         return@working SaveOutcome.Failed
                     }
                     PlayerProfileClient.Availability.AVAILABLE -> Unit
                 }
-            }
-            val now = profiles.nowMs
-            val writes = profiles.documents.changeNickname(uid, current.nicknameLower, normalized, lower, now)
-            when (profiles.commit(writes, uid, lower)) {
-                PlayerProfileClient.CommitResult.OK -> {
-                    apply(
-                        current.copy(
-                            nickname = normalized,
-                            nicknameLower = lower,
-                            nicknameChangedAtMs = now,
-                            updatedAtMs = now,
-                        ),
-                        uid,
-                    )
-                    log(AnalyticsEvent.ProfileUpdate(ProfileField.NICKNAME))
-                    SaveOutcome.Saved
+                val now = profiles.nowMs
+                val writes = profiles.documents.changeNickname(uid, current.nametagKey, normalized, lower, tag, now)
+                when (profiles.commit(writes, uid, key)) {
+                    PlayerProfileClient.CommitResult.OK -> {
+                        apply(
+                            current.copy(
+                                nickname = normalized,
+                                nicknameLower = lower,
+                                tag = tag,
+                                nicknameChangedAtMs = now,
+                                updatedAtMs = now,
+                            ),
+                            uid,
+                        )
+                        log(AnalyticsEvent.ProfileUpdate(ProfileField.NICKNAME))
+                        return@working SaveOutcome.Saved
+                    }
+                    PlayerProfileClient.CommitResult.TAKEN -> return@repeat
+                    PlayerProfileClient.CommitResult.FAILED -> {
+                        _notice.value = AccountNotice.SaveFailed
+                        return@working SaveOutcome.Failed
+                    }
                 }
-                PlayerProfileClient.CommitResult.TAKEN -> SaveOutcome.Invalid(NicknameError.TAKEN)
-                PlayerProfileClient.CommitResult.FAILED -> {
-                    _notice.value = AccountNotice.SaveFailed
-                    SaveOutcome.Failed
-                }
             }
+            SaveOutcome.Invalid(NicknameError.TAKEN)
         }
     }
 
@@ -404,6 +443,7 @@ class AccountStore(
             PlayerProfileCache(
                 uid = uid,
                 nickname = profile.nickname,
+                tag = profile.tag,
                 avatarId = profile.avatarId,
                 nicknameChangedAtMs = profile.nicknameChangedAtMs,
             ),
@@ -439,7 +479,7 @@ class AccountStore(
             }
         }
         if (previous is AccountState.SignedIn) {
-            val writes = profiles.documents.delete(uid, previous.profile.nicknameLower)
+            val writes = profiles.documents.delete(uid, previous.profile.nametagKey)
             if (profiles.commit(writes, uid) != PlayerProfileClient.CommitResult.OK) {
                 _state.value = previous
                 _notice.value = AccountNotice.DeleteFailed
@@ -456,6 +496,11 @@ class AccountStore(
         }
         resetLocal()
         log(AnalyticsEvent.AccountDelete)
+    }
+
+    private companion object {
+        /** How many times a tag is drawn before giving up with `taken`. */
+        const val TAG_ATTEMPTS = 6
     }
 
     private suspend fun <T> working(block: suspend () -> T): T {

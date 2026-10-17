@@ -4,6 +4,8 @@ import java.io.File
 import java.security.MessageDigest
 import kotlin.random.Random
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -52,6 +54,32 @@ class AvatarCatalogTest {
         val catalog = AvatarCatalog.fromFiles(listOf("not json".toByteArray()))
         assertEquals(listOf("slime"), catalog.ids)
         assertEquals("slime", catalog.resolve("warrior").id)
+    }
+
+    @Test fun operatorOnlyAvatarsAreDrawnButNeverOffered() {
+        // No operator bitmap is bundled yet.
+        assertEquals(emptyList<String>(), AvatarCatalog.EXCLUSIVE_FILES)
+        val today = AvatarCatalog.fromFiles(listOf(bundled))
+        assertNull(today.operatorAvatar)
+        assertEquals(today.selectable, today.all)
+
+        val exclusive = file(entry(AvatarCatalog.OPERATOR_AVATAR_ID), entry("cat", nameEn = "impostor"))
+        val catalog = AvatarCatalog.fromFiles(listOf(bundled), listOf(exclusive))
+        // The grid and the random pick only ever see the public list.
+        assertEquals(expectedIds, catalog.ids)
+        assertFalse(catalog.selectable.any { it.id == AvatarCatalog.OPERATOR_AVATAR_ID })
+        repeat(50) { assertTrue(catalog.random(Random(it)).id in expectedIds) }
+        // Drawing resolves it, and an operator-only file cannot replace a public avatar.
+        assertEquals(AvatarCatalog.OPERATOR_AVATAR_ID, catalog.operatorAvatar?.id)
+        assertEquals(AvatarCatalog.OPERATOR_AVATAR_ID, catalog.resolve(AvatarCatalog.OPERATOR_AVATAR_ID).id)
+        assertTrue(catalog.resolve("cat").nameEn != "impostor")
+        assertEquals(17, catalog.all.size)
+    }
+
+    @Test fun aBrokenOperatorFileDrawsNoFallback() {
+        val catalog = AvatarCatalog.fromFiles(listOf(bundled), listOf("not json".toByteArray()))
+        assertNull(catalog.operatorAvatar)
+        assertEquals(16, catalog.all.size)
     }
 
     @Test fun registryMergesFilesInOrderAndKeepsTheFirstDuplicate() {

@@ -189,8 +189,9 @@ fun AvatarPicker(
     enabled: Boolean = true,
 ) {
     // A plain column of rows rather than a lazy grid: 16 still images inside a scrolling screen.
+    // Only the public list: operator-only avatars must never be offered here.
     Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        catalog.all.chunked(COLUMNS).forEach { row ->
+        catalog.selectable.chunked(COLUMNS).forEach { row ->
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 row.forEach { avatar ->
                     AvatarCell(

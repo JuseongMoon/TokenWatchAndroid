@@ -96,9 +96,12 @@ fun L10n.nicknameError(error: NicknameError): String = when (error) {
     NicknameError.TOO_SHORT -> choose("닉네임은 2자 이상이어야 해요.", "Nickname must be at least 2 characters.")
     NicknameError.TOO_LONG -> choose("닉네임은 12자까지 쓸 수 있어요.", "Nickname can be up to 12 characters.")
     NicknameError.INVALID_CHARS -> choose("한글·영문·숫자·_·-만 쓸 수 있어요.", "Use only Korean, English letters, numbers, _ and -.")
-    NicknameError.TAKEN -> choose("이미 쓰고 있는 닉네임이에요.", "That nickname is already taken.")
+    NicknameError.TAKEN -> choose(
+        "이 닉네임은 쓸 수 있는 #번호가 남지 않았어요. 다른 닉네임을 써 주세요.",
+        "No #numbers are left for this nickname. Please try another one.",
+    )
     NicknameError.BANNED_WORD -> choose("쓸 수 없는 단어가 들어 있어요.", "That nickname contains a word that isn't allowed.")
-    NicknameError.COOLDOWN -> choose("닉네임은 7일에 한 번 바꿀 수 있어요.", "You can change your nickname once every 7 days.")
+    NicknameError.COOLDOWN -> choose("닉네임은 30일에 한 번 바꿀 수 있어요.", "You can change your nickname once every 30 days.")
     NicknameError.TERMS_REQUIRED -> choose("이용약관과 개인정보 처리방침에 동의해 주세요.", "Please agree to the Terms and Privacy Policy.")
 }
 
@@ -113,12 +116,24 @@ fun L10n.nicknameCooldownRemaining(days: Int, hours: Int): String = if (lang == 
 
 val L10n.profileSetupIntro: String
     get() = choose(
-        "다른 사용자에게 보일 닉네임과 아바타를 골라 주세요. 아바타는 언제든, 닉네임은 7일에 한 번 바꿀 수 있어요.",
-        "Pick the nickname and avatar others will see. You can change your avatar anytime and your nickname once every 7 days.",
+        "다른 사용자에게 보일 닉네임과 아바타를 골라 주세요. 닉네임 뒤에는 구분용 #번호(예: #8571)가 붙어요. " +
+            "아바타는 언제든, 닉네임은 30일에 한 번 바꿀 수 있어요.",
+        "Pick the nickname and avatar others will see. A #number (like #8571) is added after your nickname to " +
+            "tell people apart. You can change your avatar anytime and your nickname once every 30 days.",
     )
 val L10n.nicknamePlaceholder: String get() = choose("2–12자", "2–12 chars")
 val L10n.nicknameRule: String
     get() = choose("한글·영문·숫자·_·- / 2–12자", "Korean, English, numbers, _ - / 2–12 chars")
+val L10n.nicknameTagHint: String
+    get() = choose(
+        "닉네임을 바꾸면 #번호도 새로 정해져요. 30일에 한 번 바꿀 수 있어요.",
+        "Changing your nickname also gives you a new #number. You can change it once every 30 days.",
+    )
+val L10n.operatorAvatarNote: String
+    get() = choose(
+        "운영자 계정은 고른 아바타와 상관없이 전용 아바타로 보여요.",
+        "Operator accounts always appear with the operator avatar, whatever you pick here.",
+    )
 val L10n.termsAgree: String
     get() = choose("이용약관과 개인정보 처리방침에 동의합니다", "I agree to the Terms of Service and Privacy Policy")
 val L10n.termsLink: String get() = choose("이용약관 ↗", "terms ↗")

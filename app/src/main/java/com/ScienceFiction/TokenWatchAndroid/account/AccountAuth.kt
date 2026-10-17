@@ -75,6 +75,12 @@ interface AccountAuth {
     suspend fun deleteUser(): Boolean
     suspend fun signOut()
     suspend fun idToken(forceRefresh: Boolean): String?
+
+    /**
+     * Whether the ID token carries the operator custom claim (`tokenwatchOperator`), set by an admin
+     * through the Admin API. A freshly set claim shows up only after a forced token refresh.
+     */
+    suspend fun isOperator(forceRefresh: Boolean): Boolean
 }
 
 /** No Firebase (previews, tests of the hidden state). Everything fails. */
@@ -90,4 +96,5 @@ object UnavailableAccountAuth : AccountAuth {
     override suspend fun deleteUser(): Boolean = false
     override suspend fun signOut() = Unit
     override suspend fun idToken(forceRefresh: Boolean): String? = null
+    override suspend fun isOperator(forceRefresh: Boolean): Boolean = false
 }

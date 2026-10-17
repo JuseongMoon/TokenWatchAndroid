@@ -10,6 +10,10 @@ import kotlin.random.Random
  *
  * Bundled files are read in order and merged. Publishing more avatars later appends a new file and
  * never changes the bytes (hash) of an existing one; on a duplicate id the earlier file wins.
+ *
+ * The public list (the selection grid) is kept apart from the operator-only list (drawing only — it
+ * never appears in the grid). Operator accounts draw with the operator avatar whatever they picked
+ * (see `AccountStore.displayAvatarId`).
  */
 
 /** One decoded avatar. Colors are 0xRRGGBB, so the domain stays free of Compose types. */
@@ -86,9 +90,21 @@ object AvatarDecoder {
     }
 }
 
-/** The published avatar list, merged from the bundled files in order. */
-class AvatarCatalog(val all: List<AvatarPreset>) {
-    val ids: List<String> get() = all.map { it.id }
+/**
+ * The avatar lists, each merged from bundled files in order. [selectable] is the public list shown in
+ * the selection grid; [all] adds the operator-only avatars, which are only ever drawn.
+ */
+class AvatarCatalog(
+    val selectable: List<AvatarPreset>,
+    exclusive: List<AvatarPreset> = emptyList(),
+) {
+    /** Public plus operator-only, for drawing. An operator-only id that repeats a public one is dropped. */
+    val all: List<AvatarPreset> = selectable + exclusive.filter { avatar -> selectable.none { it.id == avatar.id } }
+
+    val ids: List<String> get() = selectable.map { it.id }
+
+    /** The operator avatar, when its bitmap is bundled. */
+    val operatorAvatar: AvatarPreset? get() = all.firstOrNull { it.id == OPERATOR_AVATAR_ID }
 
     /** Looks an id up; unknown ids (for example from a newer app version) draw as the fallback. */
     fun resolve(id: String): AvatarPreset = all.firstOrNull { it.id == id }
@@ -96,21 +112,33 @@ class AvatarCatalog(val all: List<AvatarPreset>) {
         ?: all.first()
 
     /** One avatar picked ahead of time on the sign-up screen. Nothing is written until saving. */
-    fun random(random: Random = Random.Default): AvatarPreset = all.random(random)
+    fun random(random: Random = Random.Default): AvatarPreset = selectable.random(random)
 
     companion object {
-        /** Bundled asset files, in publication order. */
+        /** Bundled public asset files, in publication order. These fill the selection grid. */
         val BUNDLED_FILES = listOf("avatars-v1.json")
+
+        /** Operator-only asset files: drawn, never offered in the grid. Add the file name once the bitmap exists. */
+        val EXCLUSIVE_FILES: List<String> = emptyList()
+
+        /** The operator avatar id. */
+        const val OPERATOR_AVATAR_ID = "operator"
 
         /** Drawn for unknown ids; also what non-preset server avatars decode to. */
         const val FALLBACK_ID = "slime"
 
         /** Merges decoded files in order; on a duplicate id the earlier file wins. */
-        fun fromFiles(files: List<ByteArray>): AvatarCatalog {
+        fun fromFiles(files: List<ByteArray>, exclusiveFiles: List<ByteArray> = emptyList()): AvatarCatalog {
+            // A broken public bundle still draws something (the unit tests catch it before release).
+            return AvatarCatalog(
+                selectable = merge(files).ifEmpty { listOf(BUILT_IN_FALLBACK) },
+                exclusive = merge(exclusiveFiles),
+            )
+        }
+
+        private fun merge(files: List<ByteArray>): List<AvatarPreset> {
             val seen = mutableSetOf<String>()
-            val merged = files.flatMap(AvatarDecoder::decode).filter { seen.add(it.id) }
-            // A broken bundle still draws something (the unit tests catch it before release).
-            return AvatarCatalog(merged.ifEmpty { listOf(BUILT_IN_FALLBACK) })
+            return files.flatMap(AvatarDecoder::decode).filter { seen.add(it.id) }
         }
 
         private val BUILT_IN_FALLBACK = AvatarPreset(

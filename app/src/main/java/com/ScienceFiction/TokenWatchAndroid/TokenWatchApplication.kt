@@ -145,11 +145,10 @@ class TokenWatchContainer(context: Context) : Closeable {
 
     /** Bundled avatar artwork for the app account, decoded once on first use. */
     val avatarCatalog: AvatarCatalog by lazy {
-        AvatarCatalog.fromFiles(
-            AvatarCatalog.BUNDLED_FILES.mapNotNull { name ->
-                runCatching { applicationContext.assets.open(name).use { it.readBytes() } }.getOrNull()
-            },
-        )
+        fun read(names: List<String>) = names.mapNotNull { name ->
+            runCatching { applicationContext.assets.open(name).use { it.readBytes() } }.getOrNull()
+        }
+        AvatarCatalog.fromFiles(read(AvatarCatalog.BUNDLED_FILES), read(AvatarCatalog.EXCLUSIVE_FILES))
     }
 
     /** Main-thread scope for the app account, so its state changes are confined to one thread. */

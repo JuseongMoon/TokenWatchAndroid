@@ -200,6 +200,17 @@ class FirebaseAccountAuth(
         }
     }
 
+    override suspend fun isOperator(forceRefresh: Boolean): Boolean {
+        val user = auth?.currentUser ?: return false
+        return try {
+            user.getIdToken(forceRefresh).await().claims[OPERATOR_CLAIM] == true
+        } catch (cancel: CancellationException) {
+            throw cancel
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     // MARK: Credentials
 
     private sealed class CredentialOutcome {
@@ -285,6 +296,9 @@ class FirebaseAccountAuth(
 
     private companion object {
         const val APPLE_PROVIDER_ID = "apple.com"
+
+        /** Operator custom claim name; the same value as the server rules and the admin script. */
+        const val OPERATOR_CLAIM = "tokenwatchOperator"
 
         fun FirebaseUser.toAccountUser(): AccountUser {
             val ids = providerData.map { it.providerId }.toSet()
