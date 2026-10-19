@@ -12,6 +12,7 @@ import org.junit.Test
 class AvatarCatalogTest {
     /** Unit tests run from the module directory; AssetManager is not available on the JVM. */
     private val bundled = File("src/main/assets/avatars-v1.json").readBytes()
+    private val operatorFile = File("src/main/assets/avatars-operator.json").readBytes()
 
     private val expectedIds = listOf(
         "warrior", "mage", "archer", "rogue", "cleric", "knight", "bard", "hacker",
@@ -23,6 +24,20 @@ class AvatarCatalogTest {
         val digest = MessageDigest.getInstance("SHA-256").digest(bundled).joinToString("") { "%02x".format(it) }
         assertEquals("a71c42a62000e3177983f101f1e757cb44d039ec3cae7a940d3d1396a9deffe1", digest)
         assertEquals(listOf("avatars-v1.json"), AvatarCatalog.BUNDLED_FILES)
+    }
+
+    @Test fun operatorFileIsByteIdenticalToIos() {
+        // The same constant is asserted by the iOS tests. Changing the file changes both.
+        val digest = MessageDigest.getInstance("SHA-256").digest(operatorFile).joinToString("") { "%02x".format(it) }
+        assertEquals("b9eef2ce50a0422c3408a0d9d9eeef4950f7ee55f9d44a829e61362bbe36f2c5", digest)
+        assertEquals(listOf("avatars-operator.json"), AvatarCatalog.EXCLUSIVE_FILES)
+    }
+
+    @Test fun bundledOperatorAvatarIsDrawnButNeverOffered() {
+        val catalog = AvatarCatalog.fromFiles(listOf(bundled), listOf(operatorFile))
+        assertEquals(AvatarCatalog.OPERATOR_AVATAR_ID, catalog.operatorAvatar?.id)
+        assertEquals(expectedIds, catalog.ids)
+        assertEquals(expectedIds + AvatarCatalog.OPERATOR_AVATAR_ID, catalog.all.map { it.id })
     }
 
     @Test fun bundledFileDecodesAllSixteenInOrder() {
@@ -57,8 +72,7 @@ class AvatarCatalogTest {
     }
 
     @Test fun operatorOnlyAvatarsAreDrawnButNeverOffered() {
-        // No operator bitmap is bundled yet.
-        assertEquals(emptyList<String>(), AvatarCatalog.EXCLUSIVE_FILES)
+        // Without an operator file nothing extra is drawn.
         val today = AvatarCatalog.fromFiles(listOf(bundled))
         assertNull(today.operatorAvatar)
         assertEquals(today.selectable, today.all)

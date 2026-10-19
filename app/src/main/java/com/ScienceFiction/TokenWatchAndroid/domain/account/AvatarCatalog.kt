@@ -118,8 +118,8 @@ class AvatarCatalog(
         /** Bundled public asset files, in publication order. These fill the selection grid. */
         val BUNDLED_FILES = listOf("avatars-v1.json")
 
-        /** Operator-only asset files: drawn, never offered in the grid. Add the file name once the bitmap exists. */
-        val EXCLUSIVE_FILES: List<String> = emptyList()
+        /** Operator-only asset files (the crowned slime): drawn, never offered in the grid. */
+        val EXCLUSIVE_FILES = listOf("avatars-operator.json")
 
         /** The operator avatar id. */
         const val OPERATOR_AVATAR_ID = "operator"
