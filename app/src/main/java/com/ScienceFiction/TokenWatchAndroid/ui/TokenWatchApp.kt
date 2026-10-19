@@ -558,6 +558,8 @@ internal fun TokenWatchApp(
                     },
                     playerSection = if (accountState != AccountState.Unavailable) {
                         {
+                            // An account deleted on the web or another device shows as signed out, not as the cache.
+                            LaunchedEffect(Unit) { account.perform { revalidate() } }
                             PlayerSection(
                                 state = accountState,
                                 methods = accountMethods,

@@ -41,6 +41,17 @@ sealed class AccountAuthResult {
     data object AlreadyInUse : AccountAuthResult()
 }
 
+/** The sign-in state as re-checked with the server. */
+enum class AccountSessionStatus {
+    VALID,
+
+    /** The account was deleted or disabled, or its session is no longer valid (deleted on the web or another device). */
+    REVOKED,
+
+    /** Could not check (offline and the like) — the current state stays. */
+    UNKNOWN,
+}
+
 enum class AccountReauthResult {
     OK,
     CANCELLED,
@@ -61,6 +72,9 @@ interface AccountAuth {
 
     /** Sign-in state changes (restore, expiry, sign-out). Registered once for the app's lifetime. */
     fun startListening(onChange: (AccountUser?) -> Unit)
+
+    /** Re-checks the sign-in with the server: the local session survives the account being deleted there. */
+    suspend fun reloadUser(): AccountSessionStatus
 
     /**
      * An Apple web sign-in that finished while the activity was reclaimed, or null. Firebase keeps the
@@ -89,6 +103,7 @@ object UnavailableAccountAuth : AccountAuth {
     override val isGoogleAvailable: Boolean = false
     override val currentUser: AccountUser? = null
     override fun startListening(onChange: (AccountUser?) -> Unit) = Unit
+    override suspend fun reloadUser(): AccountSessionStatus = AccountSessionStatus.UNKNOWN
     override suspend fun pendingSignIn(): AccountAuthResult? = null
     override suspend fun signIn(method: AccountMethod): AccountAuthResult = AccountAuthResult.Unavailable
     override suspend fun link(method: AccountMethod): AccountAuthResult = AccountAuthResult.Unavailable

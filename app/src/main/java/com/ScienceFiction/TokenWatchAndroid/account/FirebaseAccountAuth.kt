@@ -23,6 +23,7 @@ import com.google.firebase.auth.AuthCredential
 import com.google.firebase.auth.AuthResult
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseAuthException
+import com.google.firebase.auth.FirebaseAuthInvalidUserException
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.GoogleAuthProvider
 import com.google.firebase.auth.OAuthCredential
@@ -88,6 +89,21 @@ class FirebaseAccountAuth(
         if (listener != null) return
         listener = FirebaseAuth.AuthStateListener { onChange(it.currentUser?.toAccountUser()) }
             .also(auth::addAuthStateListener)
+    }
+
+    override suspend fun reloadUser(): AccountSessionStatus {
+        val user = auth?.currentUser ?: return AccountSessionStatus.REVOKED
+        return try {
+            user.reload().await()
+            AccountSessionStatus.VALID
+        } catch (cancel: CancellationException) {
+            throw cancel
+        } catch (_: FirebaseAuthInvalidUserException) {
+            // Deleted, disabled, or its token expired or was revoked.
+            AccountSessionStatus.REVOKED
+        } catch (_: Exception) {
+            AccountSessionStatus.UNKNOWN
+        }
     }
 
     override suspend fun pendingSignIn(): AccountAuthResult? {

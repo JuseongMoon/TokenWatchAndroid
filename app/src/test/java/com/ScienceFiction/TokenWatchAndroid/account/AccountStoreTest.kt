@@ -41,11 +41,16 @@ class AccountStoreTest {
         var pending: AccountAuthResult? = null
         var listener: ((AccountUser?) -> Unit)? = null
         var operatorClaim = false
+        var sessionStatus = AccountSessionStatus.VALID
         val operatorRefreshes = mutableListOf<Boolean>()
 
         override fun startListening(onChange: (AccountUser?) -> Unit) {
             listener = onChange
         }
+
+        // Not logged: the call sequences pinned below are about the network and the deletion steps.
+        override suspend fun reloadUser(): AccountSessionStatus =
+            if (currentUser == null) AccountSessionStatus.REVOKED else sessionStatus
 
         override suspend fun pendingSignIn(): AccountAuthResult? = pending?.also { result ->
             log += "pending"
@@ -180,6 +185,42 @@ class AccountStoreTest {
         awaitUntil { auth.listener != null }
         assertNull(cache.value)
         assertEquals(AccountState.SignedOut, store.state.value)
+    }
+
+    @Test fun anAccountDeletedElsewhereSignsOutOnTheNextRead() = runBlocking {
+        auth.signInResult = AccountAuthResult.Success(user, isNew = false)
+        val transport = LoggingTransport(response(200, PROFILE_BODY))
+        val store = store(this, transport)
+        store.signIn(AccountMethod.APPLE)
+        assertTrue(store.state.value is AccountState.SignedIn)
+        auth.sessionStatus = AccountSessionStatus.REVOKED
+        store.refreshProfile()
+        assertEquals(AccountState.SignedOut, store.state.value)
+        assertNull(cache.value)
+        assertTrue("signOut" in log)
+        assertEquals(1, transport.requests.size) // no Firestore read for a deleted account
+        assertFalse(events.any { it is AnalyticsEvent.AccountLogout }) // not a sign-out the user chose
+    }
+
+    @Test fun anUncheckableSessionKeepsTheProfileOnScreen() = runBlocking {
+        auth.signInResult = AccountAuthResult.Success(user, isNew = false)
+        val store = store(this, LoggingTransport(response(200, PROFILE_BODY))) // the second read gets a 500
+        store.signIn(AccountMethod.APPLE)
+        auth.sessionStatus = AccountSessionStatus.UNKNOWN
+        store.refreshProfile()
+        assertEquals("Tok", (store.state.value as AccountState.SignedIn).profile.nickname)
+        assertFalse("signOut" in log)
+    }
+
+    @Test fun revalidateRightAfterAReadDoesNotCallTheServer() = runBlocking {
+        auth.signInResult = AccountAuthResult.Success(user, isNew = false)
+        val transport = LoggingTransport(response(200, PROFILE_BODY))
+        val store = store(this, transport)
+        store.signIn(AccountMethod.APPLE)
+        auth.sessionStatus = AccountSessionStatus.REVOKED
+        store.revalidate()
+        assertTrue(store.state.value is AccountState.SignedIn)
+        assertEquals(1, transport.requests.size)
     }
 
     @Test fun firstSignInLeadsToProfileSetup() = runBlocking {

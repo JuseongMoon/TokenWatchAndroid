@@ -24,7 +24,9 @@ import kotlin.random.Random
  *
  * - In demo mode every entry point returns immediately: zero server calls. Entering demo is not a
  *   sign-out.
- * - The server holds the profile. A minimal cache only lets the PLAYER box draw offline.
+ * - The server holds the profile. A minimal cache only lets the PLAYER box draw offline. When the
+ *   PLAYER box shows, the server is asked again, and an account deleted on the web or another device
+ *   is tidied up into the signed-out state.
  * - Deletion is reauthenticate → (Apple) revoke → profile delete commit → Auth user delete. A cancelled
  *   reauthentication or a failed revocation stops it before anything is erased.
  * - Nicknames carry a random four-digit tag (`nickname#1234`); saving draws one, checks the nametag
@@ -121,6 +123,10 @@ class AccountStore(
     @Volatile
     private var currentUid: String? = null
     private var started = false
+
+    /** When the profile was last re-read from the server (for the [revalidate] interval). */
+    @Volatile
+    private var lastRefreshAtMs: Long? = null
 
     val isAvailable: Boolean get() = _state.value != AccountState.Unavailable
     val isGoogleAvailable: Boolean get() = auth.isGoogleAvailable
@@ -222,7 +228,14 @@ class AccountStore(
         if (isDemo()) return
         val profiles = profiles ?: return
         val user = auth.currentUser ?: return
+        lastRefreshAtMs = System.currentTimeMillis()
         if (profile == null) _state.value = AccountState.Loading
+        // Deleted on the web or another device: sign out here too rather than keep showing the cache.
+        if (auth.reloadUser() == AccountSessionStatus.REVOKED) {
+            auth.signOut()
+            resetLocal()
+            return
+        }
         _isOperator.value = auth.isOperator(forceRefresh = true)
         when (val result = profiles.fetchProfile(user.uid)) {
             is PlayerProfileClient.FetchResult.Found -> apply(result.profile, user.uid)
@@ -232,6 +245,19 @@ class AccountStore(
             }
             PlayerProfileClient.FetchResult.Failed -> if (profile == null) _state.value = AccountState.LoadFailed
         }
+    }
+
+    /**
+     * Called when the PLAYER box shows. Picks up an account deleted, or a profile changed, on the web or
+     * another device. Skipped shortly after the last read so reopening settings does not call the server
+     * each time.
+     */
+    suspend fun revalidate() {
+        val state = _state.value
+        if (currentUid == null || _isWorking.value || state is AccountState.SigningIn || state == AccountState.Deleting) return
+        val last = lastRefreshAtMs
+        if (last != null && System.currentTimeMillis() - last < REVALIDATE_INTERVAL_MS) return
+        refreshProfile()
     }
 
     // MARK: Sign-in, linking, sign-out
@@ -501,6 +527,9 @@ class AccountStore(
     private companion object {
         /** How many times a tag is drawn before giving up with `taken`. */
         const val TAG_ATTEMPTS = 6
+
+        /** The minimum gap between two [revalidate] reads. */
+        const val REVALIDATE_INTERVAL_MS = 30_000L
     }
 
     private suspend fun <T> working(block: suspend () -> T): T {
