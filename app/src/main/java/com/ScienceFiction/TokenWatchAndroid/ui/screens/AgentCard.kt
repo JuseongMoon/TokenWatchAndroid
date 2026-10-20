@@ -56,6 +56,7 @@ fun AgentCard(
         ) {
             AgentCardTitleBar(agent = agent, serviceHealth = serviceHealth, loc = loc)
             AgentUsageContent(
+                agent = agent,
                 snapshot = snapshot,
                 isLoading = isLoading,
                 hideUnusedWindows = hideUnusedWindows,
@@ -167,6 +168,7 @@ internal fun visibleUsageWindows(
 
 @Composable
 private fun AgentUsageContent(
+    agent: Agent,
     snapshot: AgentSnapshot?,
     isLoading: Boolean,
     hideUnusedWindows: Boolean,
@@ -191,6 +193,7 @@ private fun AgentUsageContent(
                         now = now,
                         gaugeCritterEnabled = gaugeCritterEnabled,
                         workHoursSchedule = workHoursSchedule,
+                        agent = agent,
                     )
                 }
             }

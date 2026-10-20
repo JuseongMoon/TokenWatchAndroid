@@ -195,6 +195,13 @@ class AgentStore(
 
     private val _isDemo = MutableStateFlow(false)
     val isDemo: StateFlow<Boolean> = _isDemo.asStateFlow()
+
+    /**
+     * Called after each agent refresh with its windows (monster spawns — the app connects the monster
+     * store). Background refreshes call it too; the receiver decides whether to reach its server.
+     */
+    @Volatile
+    var onRefreshed: (suspend (Agent, List<UsageWindow>) -> Unit)? = null
     private var backupAgents = emptyList<Agent>()
     private var backupSnapshots = emptyMap<UUID, AgentSnapshot>()
     private var backupServiceStatus = emptyMap<AgentProvider, ServiceHealth>()
@@ -460,6 +467,8 @@ class AgentStore(
             scheduleResetRefresh()
             detectAndNotifyResets(agent.id)
             rescheduleResetNotifications()
+            // Monster spawns read the last-good merged windows, right where resets are detected.
+            _snapshots.value[agent.id]?.windows?.let { windows -> onRefreshed?.invoke(agent, windows) }
             refreshStatus(agent.provider)
         } catch (cancelled: CancellationException) {
             loadingMutex.withLock { lastFetchAt.remove(agent.id) }

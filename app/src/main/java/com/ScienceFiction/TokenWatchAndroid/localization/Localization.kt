@@ -85,8 +85,8 @@ data class L10n(val lang: Lang) {
         "Hides unused graphs from the list and detail. Percentage covers plan graphs at 0%; credit covers prepaid balances never spent (e.g. Extra usage). Balances with an unknown total always stay visible.",
     )
     val settingsGaugeCritterHelp get() = choose(
-        "사용률 100%가 된 게이지 위를 픽셀 슬라임이 통통 튀며 지나갑니다.",
-        "A pixel slime hops across any gauge that hits 100%.",
+        "사용률 100%가 된 게이지에 몬스터가 나타나고, 가끔은 쓰고 있는 게이지에도 나타나요. 게이지 줄을 눌러 잡을 수 있어요. 끄면 몬스터 출현도 멈춰요.",
+        "Monsters appear on gauges that hit 100%, and now and then on gauges in use. Tap the gauge row to fight them. Turning this off also stops monsters from appearing.",
     )
     val settingsHeartbeatHelp get() = choose(
         "'$ watching …' 뒤 커서를 언더바 대신 하트로 표시합니다.",

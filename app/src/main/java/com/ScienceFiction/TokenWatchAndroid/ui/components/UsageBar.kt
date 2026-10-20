@@ -15,11 +15,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.ScienceFiction.TokenWatchAndroid.domain.Agent
 import com.ScienceFiction.TokenWatchAndroid.domain.UsageStyle
 import com.ScienceFiction.TokenWatchAndroid.domain.UsageWindow
 import com.ScienceFiction.TokenWatchAndroid.domain.WindowKind
@@ -44,21 +46,36 @@ fun UsageBar(
     now: Instant? = null,
     gaugeCritterEnabled: Boolean = true,
     workHoursSchedule: WorkHoursSchedule? = null,
+    /** The window's agent, for its monsters (V2). Without one the row draws no monster. */
+    agent: Agent? = null,
 ) {
     val currentNow = rememberMinuteInstant(now)
+    val monsters = rememberGaugeMonsters(agent, window, gaugeCritterEnabled, currentNow)
+    val target = monsters?.target
     Column(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            // The whole row is the hit area while a monster lives on it (ahead of the card's tap).
+            .monsterHitTarget(monsters, loc, LocalHapticFeedback.current),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        Text(
-            text = window.label.uppercase(loc.dateLocale),
-            color = Term.Cyan,
-            style = TextStyle(
-                fontFamily = FontFamily.Monospace,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.SemiBold,
-            ),
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = window.label.uppercase(loc.dateLocale),
+                color = Term.Cyan,
+                style = TextStyle(
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                ),
+                modifier = Modifier.weight(1f),
+            )
+            target?.let { MonsterHpHearts(hp = it.hp, maxHp = it.maxHp) }
+        }
 
         when (window.style) {
             UsageStyle.BALANCE -> BalanceValue(window.valueText)
@@ -73,6 +90,7 @@ fun UsageBar(
                 now = currentNow,
                 gaugeCritterEnabled = gaugeCritterEnabled,
                 workHoursSchedule = workHoursSchedule,
+                monsters = monsters,
             )
         }
 
@@ -114,6 +132,7 @@ private fun GaugeValue(
     now: Instant,
     gaugeCritterEnabled: Boolean,
     workHoursSchedule: WorkHoursSchedule?,
+    monsters: GaugeMonsters?,
 ) {
     val statusColor = Term.statusColor(window.remainingPercent)
     val weeklySchedule = workHoursSchedule.takeIf { window.kind == WindowKind.WEEKLY }
@@ -133,6 +152,7 @@ private fun GaugeValue(
             critterVariant = GaugeCritterVariant.from(window.kind),
             gaugeCritterEnabled = gaugeCritterEnabled,
             usedContentDescription = loc::a11yUsed,
+            monsters = monsters,
         )
         Text(
             text = String.format(Locale.US, "%3d%% used", window.usedPercent.roundToInt()),

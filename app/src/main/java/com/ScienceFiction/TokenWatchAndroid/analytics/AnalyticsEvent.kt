@@ -5,6 +5,8 @@ import com.ScienceFiction.TokenWatchAndroid.domain.Announcement
 import com.ScienceFiction.TokenWatchAndroid.domain.account.AccountMethod
 import com.ScienceFiction.TokenWatchAndroid.domain.AgentProvider
 import com.ScienceFiction.TokenWatchAndroid.domain.AuthKind
+import com.ScienceFiction.TokenWatchAndroid.monster.MonsterApiClient
+import com.ScienceFiction.TokenWatchAndroid.monster.MonsterEncounter
 import com.ScienceFiction.TokenWatchAndroid.network.core.UsageException
 import java.io.IOException
 
@@ -74,6 +76,9 @@ enum class ScreenName(val wireId: String, val screenClass: String) {
     ACCOUNT_LOGIN("account_login", "AccountLoginScreen"),
     PROFILE_SETUP("profile_setup", "ProfileSetupScreen"),
     ACCOUNT("account", "AccountScreen"),
+    // Monster hunt and guild (V2).
+    LEADERBOARD("leaderboard", "LeaderboardScreen"),
+    MONSTER_CONSENT("monster_consent", "MonsterConsentScreen"),
 }
 
 enum class DemoSource(val wireId: String) {
@@ -264,6 +269,31 @@ sealed class AnalyticsEvent(
         "profile_update",
         mapOf("field" to field.wireId),
         isProviderScoped = false,
+    )
+
+    // Monster hunt (V2): catalog ids (enumerations the developer defines), the spawn source, HP and
+    // score only. No encounter key, window name, provider, nickname or uid. Provider-scoped, so demo
+    // mode drops them entirely.
+
+    class MonsterSpawn(monsterId: String, source: MonsterEncounter.Source) : AnalyticsEvent(
+        "monster_spawn",
+        mapOf("monster_id" to monsterId.take(40), "source" to source.wireId),
+    )
+
+    class MonsterKill(monsterId: String, hp: Int, score: Int, source: MonsterEncounter.Source) : AnalyticsEvent(
+        "monster_kill",
+        // Strings, like every Android parameter (iOS sends hp and score as integers).
+        mapOf(
+            "monster_id" to monsterId.take(40),
+            "hp" to hp.toString(),
+            "score" to score.toString(),
+            "source" to source.wireId,
+        ),
+    )
+
+    class GuildReport(reason: MonsterApiClient.ReportReason) : AnalyticsEvent(
+        "guild_report",
+        mapOf("reason" to reason.wireId),
     )
 }
 

@@ -7,9 +7,10 @@
 The Android sources mirror the portable iOS patches through commit `bfdb4ed` on `dev`, the iOS
 1.3.0 (16) content: the review prompt, login failure diagnostics, the two analytics additions,
 the split "hide unused graphs" setting, and the credit-gauge reset confirmation described below.
-On the `feature/account` branch it also mirrors the optional app account through iOS commit
-`26b74fc` on `feature/account` (`a8fc3a9`, `2d268f8`, `dfae3ea`, `26b74fc`), described under
-"Optional app account" below.
+On the `feature/account` branch it also mirrors the optional app account and the monster hunt
+through iOS commit `e2e2152` on `feature/account` (`a8fc3a9`, `2d268f8`, `dfae3ea`, `26b74fc`,
+`0ab185e`, `816d6aa`, `8e5ab75`, `bef30eb`, `6bc67ae`, `b5aa200`, `e2e2152`), described under
+"Optional app account" and "Monster hunt and adventurers' guild" below.
 Uncommitted iOS working-tree changes are deliberately not part of this baseline.
 
 Firebase Analytics runs against the Android app's own Firebase registration and
@@ -143,11 +144,43 @@ Firebase Analytics runs against the Android app's own Firebase registration and
   another account is redrawn (up to six attempts) rather than overwritten. The offline profile
   cache holds only the uid, nickname, tag and avatar ID.
 - Accounts carrying the operator custom claim are drawn with a dedicated avatar that never appears
-  in the picker; the stored avatar stays an ordinary preset. No operator artwork is bundled yet, so
-  operators currently show the avatar they picked.
+  in the picker; the stored avatar stays an ordinary preset. The operator artwork ships as the same
+  JSON bytes as iOS, verified by SHA-256 in the unit tests.
+- An account deleted on the web or another device is noticed when the PLAYER box next appears (at
+  most every 30 seconds): the app signs out and drops the cached profile. Offline, the profile on
+  screen stays.
 - Analytics adds `account_login` (method, `is_new`), `account_login_fail` (method, stage),
   `account_link`, `account_logout`, `account_delete` and `profile_update` (which field changed,
   never its value), plus one screen event per account screen. No uid, nickname or email is sent.
+
+## Monster hunt and adventurers' guild
+
+- Monsters appear on subscription gauges that have a future reset: a completion monster when a
+  gauge reaches 100% (one per provider and reset, however many windows share that reset), and now
+  and then a random monster on a gauge in use (one draw per account per time slot). Credit gauges
+  and balances never carry one. Tapping anywhere on the gauge row hits the monster, ahead of the
+  card's detail tap; special monsters show their HP as hearts after the first hit, and TalkBack
+  offers an "attack" action. A defeat holds the sword briefly, plays the monster's own death
+  animation, then the monster walks on in gray with a halo at half speed. The "gauge monsters"
+  setting switches both spawning and drawing off.
+- Signed-in players who agree to the monster terms get server-judged spawns and defeats that count
+  on the guild leaderboard. Everyone else hunts as a guest with deterministic device draws that
+  stay unranked and are merged once, as history, after agreeing. Spawns are requested only from
+  foreground refreshes. The server receives the provider, window name, reset bucket, period, slot,
+  platform and app version — never usage percentages or AI service account details. Session keys
+  (300-second reset buckets, Copilot's UTC-midnight date, the language-free Codex label, the period
+  table), the draw and the gray tone match iOS bit for bit and are pinned by the same test
+  constants. The monster sprites ship as the same JSON bytes as iOS, verified by SHA-256.
+- A guild sign in the main header, left of the announcements button, opens the leaderboard: the
+  top 100 by score (ties go to whoever got there first), the player's own rank, reporting with four
+  reasons and an on-device block. Before agreeing it opens the consent screen instead and carries a
+  dot. Demo mode dims the sign and shows memory-only sample monsters on the sample 100% gauges; they
+  play the same defeat animation as real ones.
+- A device session ledger remembers which account received each session on this device, so
+  switching accounts does not collect the same usage twice.
+- Analytics adds `monster_spawn` (monster ID, source), `monster_kill` (monster ID, HP, score,
+  source) and `guild_report` (reason), plus `leaderboard` and `monster_consent` screen events; all
+  are dropped in demo mode.
 
 ## Android identity
 
@@ -206,6 +239,15 @@ Firebase Analytics runs against the Android app's own Firebase registration and
   excluded from cloud backup and device transfer. AI service tokens stay in the Keystore vault.
 - The sign-in buttons are drawn by the app to match iOS: white, 50 dp tall, 12 dp corners, a black
   logo and an English "Sign in with …" / "Continue with …" label.
+- The monster device session ledger lives in Block Store (device-only, cloud backup off, a compact
+  form split into 4 KB entries) with a copy in the monster DataStore file for when Play services is
+  missing; iOS keeps it in the Keychain. Block Store only survives a reinstall when the device
+  backup is on, so it is weaker than the Keychain; clearing it also clears every AI service login,
+  since app data is excluded from backup.
+- The refresh hook hands each refreshed agent to the monster store without waiting for it, so a slow
+  monster server never holds up the usage refresh; iOS awaits the hook.
+- The leaderboard and the monster consent are full screens rather than sheets, like the other
+  secondary screens on Android.
 - The popup is suppressed on the add and settings routes, which are full screens here rather
   than sheets and would otherwise be covered mid-login, and while running under instrumentation,
   where a modal scrim would swallow taps in the UI tests.

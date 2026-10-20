@@ -94,6 +94,8 @@ fun MainScreen(
     onRefreshAll: () -> Unit,
     onEnterDemo: () -> Unit = {},
     onExitDemo: () -> Unit = {},
+    /** The guild sign (V2), left of the announcements button; null while the app account is unavailable. */
+    guildSign: (@Composable () -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -111,6 +113,7 @@ fun MainScreen(
             onSettings = onSettings,
             onAnnouncements = onAnnouncements,
             isDemo = isDemo,
+            guildSign = guildSign,
             modifier = Modifier.statusBarsPadding(),
         )
         PullToRefreshBox(
@@ -191,6 +194,7 @@ private fun MainHeader(
     onSettings: () -> Unit,
     onAnnouncements: () -> Unit,
     isDemo: Boolean,
+    guildSign: (@Composable () -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
     Row(
@@ -218,7 +222,8 @@ private fun MainHeader(
                 demo = isDemo,
             )
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+            guildSign?.invoke()
             TerminalGlyphButton(
                 icon = Icons.Default.MailOutline,
                 onClick = onAnnouncements,

@@ -34,6 +34,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ScienceFiction.TokenWatchAndroid.ui.theme.Term
 import com.ScienceFiction.TokenWatchAndroid.domain.WindowKind
+import com.ScienceFiction.TokenWatchAndroid.monster.MonsterEncounter
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlin.math.abs
@@ -76,11 +77,14 @@ fun TerminalGauge(
     reduceMotion: Boolean = !ValueAnimator.areAnimatorsEnabled(),
     usedContentDescription: (Int) -> String = { "$it% used" },
     remainingContentDescription: (Int) -> String = { "$it% left" },
+    /** This window's monsters (V2). A completion monster replaces the slime critter's march. */
+    monsters: GaugeMonsters? = null,
 ) {
     val used = usedFraction.coerceIn(0.0, 1.0)
     val fill = TerminalGaugeMath.fillFraction(used = used, fillsRemaining = fillsRemaining)
     val elapsed = elapsedFraction?.coerceIn(0.0, 1.0)
-    val showCritter = gaugeCritterEnabled && used >= GaugeCritterMath.Threshold
+    val showCritter = gaugeCritterEnabled && used >= GaugeCritterMath.Threshold &&
+        monsters?.encounters.orEmpty().none { it.source == MonsterEncounter.Source.COMPLETION }
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -94,14 +98,14 @@ fun TerminalGauge(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         GaugeBracket("[", bracketSize)
+        // Not clipped as a whole: a monster's sword and halo rise above the bar. Each layer clips itself.
         Box(
             modifier = Modifier
                 .weight(1f)
                 .padding(horizontal = 3.dp)
-                .height(height)
-                .clipToBounds(),
+                .height(height),
         ) {
-            Canvas(modifier = Modifier.fillMaxSize()) {
+            Canvas(modifier = Modifier.fillMaxSize().clipToBounds()) {
                 drawDottedTrack(Term.Dim)
                 drawRect(
                     color = fillColor,
@@ -121,6 +125,14 @@ fun TerminalGauge(
                 reduceMotion = reduceMotion,
                 variant = critterVariant,
             )
+            if (gaugeCritterEnabled && monsters != null) {
+                GaugeMonsterLayer(
+                    monsters = monsters,
+                    sessionWindow = critterVariant == GaugeCritterVariant.SESSION,
+                    modifier = Modifier.fillMaxSize(),
+                    reduceMotion = reduceMotion,
+                )
+            }
         }
         GaugeBracket("]", bracketSize)
     }

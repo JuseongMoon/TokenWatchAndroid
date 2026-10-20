@@ -1,6 +1,8 @@
 * text=auto
 *.bat text eol=crlf
 
-# The avatar file is pinned byte for byte (SHA-256 parity with iOS); no line-ending conversion.
+# The bundled pixel-art files (avatars, monsters) are pinned byte for byte (SHA-256 parity with
+# iOS); no line-ending conversion.
 app/src/main/assets/avatars-v1.json -text
 app/src/main/assets/avatars-operator.json -text
+app/src/main/assets/monsters-v1.json -text

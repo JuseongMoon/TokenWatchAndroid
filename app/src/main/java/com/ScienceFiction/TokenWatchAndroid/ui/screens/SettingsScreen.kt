@@ -450,7 +450,7 @@ private fun DisplaySection(
             }
             SettingWithHelp(
                 checked = settings.gaugeCritter,
-                title = "gauge slime",
+                title = "gauge monsters",
                 help = loc.settingsGaugeCritterHelp,
                 onClick = { onSettingsChange(settings.copy(gaugeCritter = !settings.gaugeCritter)) },
                 trailing = {

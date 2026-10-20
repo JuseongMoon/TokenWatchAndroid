@@ -174,4 +174,34 @@ class LocalizationTest {
         assertNotEquals(ko.operatorAvatarNote, en.operatorAvatarNote)
         assertNotEquals(ko.nicknameTagHint, en.nicknameTagHint)
     }
+
+    @Test
+    fun monsterCopyMatchesIos() {
+        val ko = L10n(Lang.KO)
+        val en = L10n(Lang.EN)
+        assertEquals("모험가 길드 순위" to "Adventurers' Guild", ko.guildBoardTitle to en.guildBoardTitle)
+        assertEquals("이 기기에서 3마리 처치", ko.guildBoardGuestKills(3))
+        assertEquals("고블린, 남은 체력 2/3", ko.monsterA11yValue(ko.monsterName("goblin"), 2, 3))
+        assertEquals("Goblin, 2 of 3 HP left", en.monsterA11yValue(en.monsterName("goblin"), 2, 3))
+        assertEquals("pumpkin", en.monsterName("pumpkin"))
+        assertEquals("공격" to "Attack", ko.monsterAttack to en.monsterAttack)
+        assertEquals("슬라임 7 · 특수 2", ko.leaderboardMine(7, 2))
+        assertEquals("Report David #0000", en.reportTitle("David #0000"))
+        assertEquals(
+            listOf("부적절한 닉네임", "부적절한 아바타", "부정행위 의심", "기타"),
+            com.ScienceFiction.TokenWatchAndroid.monster.MonsterApiClient.ReportReason.entries.map(ko::reportReason),
+        )
+        assertEquals(3, ko.consentSent.size)
+        assertEquals("그 창의 리셋 시각과 주기", ko.consentSent[1])
+        assertEquals(
+            "사용률 수치, AI 서비스 계정·이메일·토큰은 보내지 않아요. 닉네임 #번호와 아바타, 점수는 길드 순위에서 다른 사람에게 보여요.",
+            ko.consentNotSent,
+        )
+        assertEquals(
+            "Monsters appear on gauges that hit 100%, and now and then on gauges in use. Tap the gauge row to fight them. " +
+                "Turning this off also stops monsters from appearing.",
+            en.settingsGaugeCritterHelp,
+        )
+        assertNotEquals(ko.consentIntro, en.consentIntro)
+    }
 }

@@ -16,6 +16,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -57,6 +58,8 @@ import com.ScienceFiction.TokenWatchAndroid.analytics.DemoSource
 import com.ScienceFiction.TokenWatchAndroid.account.AccountState
 import com.ScienceFiction.TokenWatchAndroid.analytics.ScreenName
 import com.ScienceFiction.TokenWatchAndroid.ui.components.AnnouncementDialog
+import com.ScienceFiction.TokenWatchAndroid.ui.components.LocalMonsterUi
+import com.ScienceFiction.TokenWatchAndroid.ui.components.MonsterUi
 import com.ScienceFiction.TokenWatchAndroid.ui.add.AddAgentPhase
 import com.ScienceFiction.TokenWatchAndroid.ui.add.AddAgentScreen
 import com.ScienceFiction.TokenWatchAndroid.ui.add.AddAgentFlowViewModel
@@ -64,6 +67,9 @@ import com.ScienceFiction.TokenWatchAndroid.ui.screens.AnnouncementDetailScreen
 import com.ScienceFiction.TokenWatchAndroid.ui.screens.AnnouncementsScreen
 import com.ScienceFiction.TokenWatchAndroid.ui.screens.DetailAccountUiState
 import com.ScienceFiction.TokenWatchAndroid.ui.screens.DetailScreen
+import com.ScienceFiction.TokenWatchAndroid.ui.screens.GuildSignButton
+import com.ScienceFiction.TokenWatchAndroid.ui.screens.LeaderboardScreen
+import com.ScienceFiction.TokenWatchAndroid.ui.screens.MonsterConsentScreen
 import com.ScienceFiction.TokenWatchAndroid.ui.screens.MainScreen
 import com.ScienceFiction.TokenWatchAndroid.ui.screens.PlayerEntry
 import com.ScienceFiction.TokenWatchAndroid.ui.screens.PlayerScreen
@@ -82,6 +88,9 @@ private const val ROUTE_ANNOUNCEMENTS = "announcements"
 private const val ROUTE_ANNOUNCEMENT_PREFIX = "announcement:"
 // The app account screen; the suffix is the PlayerEntry it was opened for.
 private const val ROUTE_PLAYER_PREFIX = "player:"
+// Monster hunt (V2): the guild leaderboard and the consent screen.
+private const val ROUTE_GUILD = "guild"
+private const val ROUTE_MONSTER_CONSENT = "monster-consent"
 
 @Composable
 fun TokenWatchApp(
@@ -99,6 +108,20 @@ internal fun TokenWatchApp(
     addAgentFlow: AddAgentFlowViewModel,
     notificationAgentId: String? = null,
     onNotificationHandled: () -> Unit = {},
+) {
+    // The gauges find their monsters through this; previews and component tests leave it unset.
+    val monsterUi = remember(container) { MonsterUi(container.monsterStore, container.monsterSprites) }
+    CompositionLocalProvider(LocalMonsterUi provides monsterUi) {
+        TokenWatchAppContent(container, addAgentFlow, notificationAgentId, onNotificationHandled)
+    }
+}
+
+@Composable
+private fun TokenWatchAppContent(
+    container: TokenWatchContainer,
+    addAgentFlow: AddAgentFlowViewModel,
+    notificationAgentId: String?,
+    onNotificationHandled: () -> Unit,
 ) {
     val store = container.agentStore
     val announcements = container.announcementStore
@@ -128,9 +151,14 @@ internal fun TokenWatchApp(
     val accountMethods by account.methods.collectAsStateWithLifecycle()
     val accountNotice by account.notice.collectAsStateWithLifecycle()
     val accountIsOperator by account.isOperator.collectAsStateWithLifecycle()
+    val monsters = container.monsterStore
+    val monsterState by monsters.state.collectAsStateWithLifecycle()
     val loc = remember(settings.language) { L10n(settings.language.resolved()) }
 
     var route by rememberSaveable { mutableStateOf(ROUTE_MAIN) }
+    // Where the PLAYER and consent screens return to (they open from settings and from the guild).
+    var playerReturnRoute by rememberSaveable { mutableStateOf(ROUTE_SETTINGS) }
+    var consentReturnRoute by rememberSaveable { mutableStateOf(ROUTE_MAIN) }
     var initialLoadFinished by remember { mutableStateOf(false) }
     var isForeground by remember { mutableStateOf(false) }
     var isRefreshingAll by remember { mutableStateOf(false) }
@@ -156,26 +184,36 @@ internal fun TokenWatchApp(
             when (event) {
                 Lifecycle.Event.ON_START -> {
                     isForeground = true
+                    container.appInForeground.set(true)
                     container.backgroundRefreshScheduler.cancel()
                     // Both cold start and foreground return land here; the store throttles.
                     announcements.check()
                 }
-                Lifecycle.Event.ON_RESUME -> isForeground = true
+                Lifecycle.Event.ON_RESUME -> {
+                    isForeground = true
+                    container.appInForeground.set(true)
+                }
                 // Keep the screen-awake flag across ON_PAUSE (notification shade, permission UI,
                 // and other transient interruptions). ON_STOP is the actual background boundary,
                 // matching iOS c983971's active/inactive versus background distinction.
                 Lifecycle.Event.ON_STOP -> {
                     isForeground = false
+                    container.appInForeground.set(false)
                     container.backgroundRefreshScheduler.schedule(store.nextResetInstant())
                 }
-                Lifecycle.Event.ON_DESTROY -> isForeground = false
+                Lifecycle.Event.ON_DESTROY -> {
+                    isForeground = false
+                    container.appInForeground.set(false)
+                }
                 else -> Unit
             }
         }
         lifecycle.addObserver(observer)
         isForeground = lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
+        container.appInForeground.set(isForeground)
         onDispose {
             lifecycle.removeObserver(observer)
+            container.appInForeground.set(false)
             store.stopAutoRefresh()
         }
     }
@@ -332,6 +370,8 @@ internal fun TokenWatchApp(
             route == ROUTE_ANNOUNCEMENTS -> ScreenName.ANNOUNCEMENTS
             route.startsWith(ROUTE_ANNOUNCEMENT_PREFIX) -> ScreenName.ANNOUNCEMENT_DETAIL
             route.startsWith(ROUTE_DETAIL_PREFIX) -> ScreenName.AGENT_DETAIL
+            route == ROUTE_GUILD -> ScreenName.LEADERBOARD
+            route == ROUTE_MONSTER_CONSENT -> ScreenName.MONSTER_CONSENT
             else -> null
         } ?: return@LaunchedEffect
         analytics.log(AnalyticsEvent.ScreenView(screen, selectedAgent?.provider))
@@ -461,6 +501,25 @@ internal fun TokenWatchApp(
                     analytics.log(AnalyticsEvent.DemoEnd)
                     scope.launch { store.exitDemo(); store.startAutoRefresh(settings.refreshInterval) }
                 },
+                guildSign = if (accountState != AccountState.Unavailable) {
+                    {
+                        GuildSignButton(
+                            needsConsent = monsterState.needsConsent,
+                            isDemo = isDemo,
+                            loc = loc,
+                            onClick = {
+                                if (monsterState.needsConsent) {
+                                    consentReturnRoute = ROUTE_MAIN
+                                    route = ROUTE_MONSTER_CONSENT
+                                } else {
+                                    route = ROUTE_GUILD
+                                }
+                            },
+                        )
+                    }
+                } else {
+                    null
+                },
             )
         }
 
@@ -570,6 +629,7 @@ internal fun TokenWatchApp(
                                 loc = loc,
                                 onOpen = { entry ->
                                     account.clearNotice()
+                                    playerReturnRoute = ROUTE_SETTINGS
                                     route = "$ROUTE_PLAYER_PREFIX${entry.wireId}"
                                 },
                                 onRetry = { account.perform { refreshProfile() } },
@@ -591,8 +651,37 @@ internal fun TokenWatchApp(
                 loc = loc,
                 // The three inner screens log themselves as they appear (see PlayerScreen).
                 onScreen = { analytics.log(AnalyticsEvent.ScreenView(it)) },
-                onDone = { route = ROUTE_SETTINGS },
+                onDone = { route = playerReturnRoute },
             )
+
+            ROUTE_GUILD -> {
+                BackHandler { route = ROUTE_MAIN }
+                LeaderboardScreen(
+                    monsters = monsters,
+                    account = account,
+                    catalog = container.avatarCatalog,
+                    loc = loc,
+                    onSignIn = {
+                        account.clearNotice()
+                        playerReturnRoute = ROUTE_GUILD
+                        route = ROUTE_PLAYER_PREFIX + PlayerEntry.LOGIN.wireId
+                    },
+                    onOpenConsent = {
+                        consentReturnRoute = ROUTE_GUILD
+                        route = ROUTE_MONSTER_CONSENT
+                    },
+                    onDone = { route = ROUTE_MAIN },
+                )
+            }
+
+            ROUTE_MONSTER_CONSENT -> {
+                BackHandler { route = consentReturnRoute }
+                MonsterConsentScreen(
+                    monsters = monsters,
+                    loc = loc,
+                    onDone = { route = consentReturnRoute },
+                )
+            }
 
             else -> if (selectedAnnouncement != null) {
                 BackHandler { route = ROUTE_ANNOUNCEMENTS }

@@ -26,6 +26,15 @@ import com.ScienceFiction.TokenWatchAndroid.domain.account.AvatarCatalog
 import com.ScienceFiction.TokenWatchAndroid.data.ReviewPromptRepository
 import com.ScienceFiction.TokenWatchAndroid.data.SettingsRepository
 import com.ScienceFiction.TokenWatchAndroid.localization.AppLocaleState
+import com.ScienceFiction.TokenWatchAndroid.monster.BlockStoreSessionLedger
+import com.ScienceFiction.TokenWatchAndroid.monster.CombinedSessionLedger
+import com.ScienceFiction.TokenWatchAndroid.monster.MonsterAccount
+import com.ScienceFiction.TokenWatchAndroid.monster.MonsterApiClient
+import com.ScienceFiction.TokenWatchAndroid.monster.MonsterConfigClient
+import com.ScienceFiction.TokenWatchAndroid.monster.MonsterDataStore
+import com.ScienceFiction.TokenWatchAndroid.monster.MonsterSpriteDecoder
+import com.ScienceFiction.TokenWatchAndroid.monster.MonsterSpriteSet
+import com.ScienceFiction.TokenWatchAndroid.monster.MonsterStore
 import com.ScienceFiction.TokenWatchAndroid.network.announcements.AnnouncementFeedClient
 import com.ScienceFiction.TokenWatchAndroid.network.core.HttpTransport
 import com.ScienceFiction.TokenWatchAndroid.network.orchestration.ProviderUsageRegistry
@@ -42,11 +51,14 @@ import com.google.firebase.FirebaseApp
 import java.io.Closeable
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 
 class TokenWatchApplication : Application() {
@@ -175,6 +187,74 @@ class TokenWatchContainer(context: Context) : Closeable {
         ).also(AccountStore::start)
     }
 
+    /** Whether the app is in front (the activity flips it). Monster spawns are only requested then. */
+    val appInForeground = AtomicBoolean(false)
+
+    /** Bundled monster and effect sprites, decoded once on first use. */
+    val monsterSprites: MonsterSpriteSet by lazy {
+        MonsterSpriteSet.fromFile(
+            runCatching {
+                applicationContext.assets.open(MonsterSpriteDecoder.BUNDLED_FILE).use { it.readBytes() }
+            }.getOrNull(),
+        )
+    }
+
+    /**
+     * The monster hunt (V2). It only reads the usage and account stores. Its server calls share the HTTP
+     * transport and carry the app account's ID token; without Firebase it stays guest-only and local.
+     */
+    val monsterStore: MonsterStore = run {
+        val options = runCatching { FirebaseApp.getInstance().options }.getOrNull()
+        val projectId = options?.projectId?.takeIf { it.isNotBlank() && accountStore.isAvailable }
+        val apiKey = options?.apiKey?.takeIf { it.isNotBlank() }
+        val dataStore = MonsterDataStore(applicationContext)
+        MonsterStore(
+            account = object : MonsterAccount {
+                override val uid: String? get() = accountStore.uid
+                override val termsAcceptedVersion: Int? get() = accountStore.profile?.termsAcceptedVersion
+                override fun markTermsAccepted(version: Int) = accountStore.markTermsAccepted(version)
+            },
+            api = projectId?.let {
+                MonsterApiClient(it, apiKey, accountStore::idToken, transport, BuildConfig.VERSION_NAME)
+            },
+            env = MonsterStore.Environment(
+                isDemo = { agentStore.isDemo.value },
+                crittersEnabled = { agentStore.settings.value.gaugeCritter },
+                isForeground = appInForeground::get,
+                nowMs = System::currentTimeMillis,
+                appVersion = BuildConfig.VERSION_NAME,
+                snapshots = {
+                    val snapshots = agentStore.snapshots.value
+                    agentStore.agents.value.mapNotNull { agent -> snapshots[agent.id]?.let { agent to it.windows } }
+                },
+            ),
+            storage = dataStore,
+            sessionStorage = CombinedSessionLedger(BlockStoreSessionLedger(applicationContext), dataStore.sessionLedgerCopy),
+            preferences = dataStore,
+            fetchConfig = projectId?.let { MonsterConfigClient(transport, it, apiKey)::fetchPayload },
+            scope = scope,
+            log = analytics::log,
+        )
+    }
+
+    /**
+     * Monster hooks: each refresh is observed off the refresh path (a slow monster server must never hold
+     * up usage), a deleted account's records are dropped, and the owner follows sign-in and demo changes.
+     */
+    private val monsterJobs: List<Job> = run {
+        agentStore.onRefreshed = { agent, windows ->
+            scope.launch { monsterStore.observe(agent, windows) }
+            Unit
+        }
+        accountStore.onAccountDeleted = monsterStore::forgetAccount
+        listOf(
+            scope.launch { monsterStore.load() },
+            scope.launch {
+                combine(accountStore.state, agentStore.isDemo) { _, _ -> }.collect { monsterStore.syncAccount() }
+            },
+        )
+    }
+
     /**
      * Last known outcome per agent. Only transitions are reported: a provider that keeps failing
      * logs one error, not one per refresh, and the recovery is what closes the pair.
@@ -212,6 +292,7 @@ class TokenWatchContainer(context: Context) : Closeable {
     }
 
     override fun close() {
+        monsterJobs.forEach(Job::cancel)
         languageSyncJob.cancel()
         analyticsSyncJob.cancel()
         providerMigrationJob.cancel()

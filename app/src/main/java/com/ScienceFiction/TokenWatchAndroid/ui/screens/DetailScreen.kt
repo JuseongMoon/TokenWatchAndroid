@@ -27,6 +27,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -42,6 +43,9 @@ import com.ScienceFiction.TokenWatchAndroid.localization.L10n
 import com.ScienceFiction.TokenWatchAndroid.localization.resetExactText
 import com.ScienceFiction.TokenWatchAndroid.localization.resetRemainingText
 import com.ScienceFiction.TokenWatchAndroid.ui.components.KvRow
+import com.ScienceFiction.TokenWatchAndroid.ui.components.MonsterHpHearts
+import com.ScienceFiction.TokenWatchAndroid.ui.components.monsterHitTarget
+import com.ScienceFiction.TokenWatchAndroid.ui.components.rememberGaugeMonsters
 import com.ScienceFiction.TokenWatchAndroid.ui.components.GaugeCritterVariant
 import com.ScienceFiction.TokenWatchAndroid.ui.components.TerminalBox
 import com.ScienceFiction.TokenWatchAndroid.ui.components.TerminalBlink
@@ -134,6 +138,7 @@ fun DetailScreen(
             ) {
                 AccountCard(agent = agent, snapshot = snapshot, account = account, loc = loc)
                 DetailUsageCard(
+                    agent = agent,
                     snapshot = snapshot,
                     isLoading = isLoading,
                     hideUnusedWindows = hideUnusedWindows,
@@ -229,6 +234,7 @@ private fun AccountCard(
 
 @Composable
 private fun DetailUsageCard(
+    agent: Agent,
     snapshot: AgentSnapshot?,
     isLoading: Boolean,
     hideUnusedWindows: Boolean,
@@ -265,6 +271,7 @@ private fun DetailUsageCard(
                         windows.forEachIndexed { index, window ->
                             if (index > 0) TerminalDivider()
                             DetailUsageRow(
+                                agent = agent,
                                 window = window,
                                 loc = loc,
                                 gaugeCritterEnabled = gaugeCritterEnabled,
@@ -320,6 +327,7 @@ private fun UsageLegend(loc: L10n) {
 
 @Composable
 private fun DetailUsageRow(
+    agent: Agent,
     window: UsageWindow,
     loc: L10n,
     gaugeCritterEnabled: Boolean,
@@ -340,6 +348,7 @@ private fun DetailUsageRow(
             },
         )
         UsageStyle.GAUGE -> GaugeDetailRow(
+            agent = agent,
             window = window,
             loc = loc,
             now = now,
@@ -440,6 +449,7 @@ private fun BalanceDetailRow(window: UsageWindow, loc: L10n, now: Instant) {
 
 @Composable
 private fun GaugeDetailRow(
+    agent: Agent,
     window: UsageWindow,
     loc: L10n,
     now: Instant,
@@ -448,14 +458,24 @@ private fun GaugeDetailRow(
 ) {
     val statusColor = Term.statusColor(window.remainingPercent)
     val weeklySchedule = workHoursSchedule.takeIf { window.kind == WindowKind.WEEKLY }
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(modifier = Modifier.fillMaxWidth()) {
+    val monsters = rememberGaugeMonsters(agent, window, gaugeCritterEnabled, now)
+    // The whole row is the monster's hit area while one lives on it.
+    Column(
+        modifier = Modifier.monsterHitTarget(monsters, loc, LocalHapticFeedback.current),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Text(
                 text = window.label.uppercase(loc.dateLocale),
                 color = Term.Cyan,
                 style = terminalTextStyle(12.sp, FontWeight.SemiBold),
                 modifier = Modifier.weight(1f),
             )
+            monsters?.target?.let { MonsterHpHearts(hp = it.hp, maxHp = it.maxHp) }
             Text(
                 text = "${window.usedPercent.roundToInt()}% used",
                 color = statusColor,
@@ -472,6 +492,7 @@ private fun GaugeDetailRow(
             critterVariant = GaugeCritterVariant.from(window.kind),
             gaugeCritterEnabled = gaugeCritterEnabled,
             usedContentDescription = loc::a11yUsed,
+            monsters = monsters,
         )
         KvRow(
             key = "remaining",

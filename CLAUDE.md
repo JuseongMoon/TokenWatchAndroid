@@ -56,6 +56,7 @@ app/src/main/java/com/ScienceFiction/TokenWatchAndroid/
 ├── auth/              CredentialVault(Android Keystore AES-GCM), OAuth code/루프백/device, 세션
 ├── data/              AppSettings, SettingsRepository, 코덱
 ├── domain/            WorkHoursSchedule, Announcement, 새로고침 정책
+├── monster/           몬스터 사냥(V2): 세션 키·추첨·원장·기기 세션 장부(Block Store)·callable REST·상태 머신
 ├── network/
 │   ├── core/          NetworkTransport
 │   ├── providers/     서비스 10종 (apikey / session / subscription)

@@ -133,6 +133,23 @@ class AccountStore(
 
     val profile: PlayerProfile? get() = (_state.value as? AccountState.SignedIn)?.profile
 
+    /** The signed-in account's uid, with or without a profile. The monster store keys its records with it. */
+    val uid: String? get() = currentUid
+
+    /** Called with the uid once an in-app deletion finishes, so the app can drop that account's monster records. */
+    @Volatile
+    var onAccountDeleted: ((String) -> Unit)? = null
+
+    /** An ID token for the monster server calls, fetched right before each request. Null in demo mode. */
+    suspend fun idToken(forceRefresh: Boolean): String? = if (isDemo()) null else auth.idToken(forceRefresh)
+
+    /** Shows a monster consent (terms version 2) the server just recorded in the on-screen profile. */
+    fun markTermsAccepted(version: Int) {
+        val current = _state.value as? AccountState.SignedIn ?: return
+        if (current.profile.termsAcceptedVersion >= version) return
+        _state.value = AccountState.SignedIn(current.profile.copy(termsAcceptedVersion = version))
+    }
+
     fun clearNotice() {
         _notice.value = null
     }
@@ -521,6 +538,7 @@ class AccountStore(
             return
         }
         resetLocal()
+        onAccountDeleted?.invoke(uid)
         log(AnalyticsEvent.AccountDelete)
     }
 
