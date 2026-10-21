@@ -83,6 +83,28 @@ class MonsterApiClientTest {
         assertEquals(mapOf("kills" to mapOf("slime" to 2.0), "firstAtMs" to 5.0), data)
     }
 
+    @Test fun theGuestHistoryIsCappedBeforeSending() = runBlocking {
+        val transport = ScriptedTransport(response(200, """{"result":{"merged":true}}"""))
+        client(transport).mergeGuestHistory(
+            MonsterGuestProgress(kills = mapOf("slime" to 480, "goblin" to 30, "orc" to 2), firstAtMs = 1, lastAtMs = 9),
+        )
+        val data = transport.requests.single().json()["data"] as Map<*, *>
+        assertEquals(mapOf("slime" to 480.0, "goblin" to 20.0), data["kills"])
+        assertEquals(1.0 to 9.0, data["firstAtMs"] to data["lastAtMs"])
+    }
+
+    @Test fun anExpiredDefeatHasNoStats() = runBlocking {
+        val transport = ScriptedTransport(
+            response(
+                200,
+                """{"result":{"encounter":{"key":"k","source":"completion","provider":"claude","windowLabel":"w","monsterId":"orc","maxHP":8,"state":"expired","spawnedAtMs":1,"expiresAtMs":2}}}""",
+            ),
+        )
+        val (dto, stats) = (client(transport).defeat("k", 5) as MonsterApiClient.CallResult.Success).value
+        assertEquals("expired", dto?.state)
+        assertNull(stats)
+    }
+
     @Test fun signedOutCallsNothing() = runBlocking {
         val none = ScriptedTransport()
         assertEquals(

@@ -98,13 +98,17 @@ class MonsterApiClient(
         }
     }
 
-    suspend fun defeat(key: String, defeatedAtMs: Long): CallResult<Pair<MonsterEncounterDto?, MonsterStats>> =
+    /**
+     * Confirms a defeat. A defeat outside the time window comes back expired without `stats` (null): the
+     * caller keeps the stats it has.
+     */
+    suspend fun defeat(key: String, defeatedAtMs: Long): CallResult<Pair<MonsterEncounterDto?, MonsterStats?>> =
         call(
             "defeatEncounter",
             mapOf("key" to key, "defeatedAtMs" to defeatedAtMs, "platform" to PLATFORM, "appVersion" to appVersion),
         ).map { result ->
             (result["encounter"] as? Map<*, *>)?.let(MonsterEncounterDto::fromJson) to
-                MonsterStats.fromJson(result["stats"] as? Map<*, *>)
+                (result["stats"] as? Map<*, *>)?.let(MonsterStats::fromJson)
         }
 
     // MARK: Account and guild
@@ -118,7 +122,7 @@ class MonsterApiClient(
 
     suspend fun mergeGuestHistory(progress: MonsterGuestProgress): CallResult<Boolean> {
         val data = buildMap<String, Any> {
-            put("kills", progress.kills)
+            put("kills", cappedKills(progress.kills))
             progress.firstAtMs?.let { put("firstAtMs", it) }
             progress.lastAtMs?.let { put("lastAtMs", it) }
         }
@@ -201,6 +205,22 @@ class MonsterApiClient(
         const val REGION = "asia-northeast3"
         const val PLATFORM = "android"
         const val SPRITE_FORMAT = 1
+
+        /** The guest history the server accepts (the total over every species); it refuses more. */
+        const val GUEST_HISTORY_CAP = 500
+
+        /** Kills trimmed to [cap], the most-hunted species first (ties by id). Pure. */
+        fun cappedKills(kills: Map<String, Int>, cap: Int = GUEST_HISTORY_CAP): Map<String, Int> {
+            var remaining = cap
+            val out = linkedMapOf<String, Int>()
+            for ((id, count) in kills.entries.sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key })) {
+                if (remaining <= 0 || count <= 0) continue
+                val take = minOf(count, remaining)
+                out[id] = take
+                remaining -= take
+            }
+            return out
+        }
 
         private val JSON = "application/json; charset=utf-8".toMediaType()
         private val moshi = Moshi.Builder().build()

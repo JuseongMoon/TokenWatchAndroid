@@ -327,6 +327,16 @@ class MonsterLogicTest {
         assertEquals(listOf(LeaderboardEntry("uid1", "David", "0000", "operator", 420, 5, 7, 2)), rows)
     }
 
+    /** The guest history goes up to 500 in total, the most-hunted species first (the iOS case). */
+    @Test fun guestHistoryIsCapped() {
+        val capped = MonsterApiClient.cappedKills(mapOf("slime" to 480, "goblin" to 30, "orc" to 2))
+        assertEquals(500, capped.values.sum())
+        assertEquals(mapOf("slime" to 480, "goblin" to 20), capped)
+        assertEquals(mapOf("slime" to 3), MonsterApiClient.cappedKills(mapOf("slime" to 3)))
+        // Ties go by id.
+        assertEquals(mapOf("goblin" to 2, "orc" to 1), MonsterApiClient.cappedKills(mapOf("orc" to 2, "goblin" to 2), cap = 3))
+    }
+
     @Test fun encounterDtoDecoding() {
         val dto = MonsterEncounterDto.fromJson(
             mapOf(

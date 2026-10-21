@@ -378,6 +378,47 @@ class MonsterStoreTest {
         assertEquals(setOf("key", "defeatedAtMs", "platform", "appVersion"), functions.data("defeatEncounter").keys)
     }
 
+    @Test fun anExpiredDefeatKeepsTheStats() = runBlocking {
+        val s = store(terms = 2)
+        functions.respond("myRank", 200, """{"result":{"listed":true,"rank":4,"totalScore":120,"commonKills":3,"specialKills":1}}""")
+        s.refreshGuild()
+        assertEquals(MonsterStats(120, 3, 1), s.state.value.stats)
+        functions.respond("spawnEncounter", 200, encounterJson(completionKey))
+        s.observe(agent, listOf(window()))
+        functions.respond(
+            "defeatEncounter",
+            200,
+            """{"result":{"encounter":{"key":"$completionKey","source":"completion","provider":"claude","windowLabel":"w","monsterId":"goblin","maxHP":3,"state":"expired","spawnedAtMs":1,"expiresAtMs":2}}}""",
+        )
+        repeat(3) {
+            clock += 500
+            s.hit(completionKey)
+        }
+        val e = s.state.value.ledger.encounters.first { it.key == completionKey }
+        assertEquals(MonsterEncounter.State.EXPIRED, e.state)
+        assertEquals(0, e.awardedScore)
+        assertFalse(e.pendingDefeat)
+        assertEquals(MonsterStats(120, 3, 1), s.state.value.stats)
+    }
+
+    @Test fun aRefusedGuestHistoryIsNotSentAgainButOfflineRetries() = runBlocking {
+        val s = store(terms = 1)
+        s.observe(agent, listOf(window()))
+        s.hit(s.state.value.ledger.encounters[0].key)
+        account.termsAcceptedVersion = 2
+        s.syncAccount()
+        // Offline: not settled, so the next observation tries again.
+        functions.failTransport = true
+        s.mergeGuestHistoryIfNeeded()
+        functions.failTransport = false
+        assertTrue(s.state.value.ledger.mergedUids.isEmpty())
+        functions.respond("mergeGuestHistory", 400, """{"error":{"status":"INVALID_ARGUMENT","details":{"code":"invalid_argument"}}}""")
+        s.mergeGuestHistoryIfNeeded()
+        assertEquals(listOf("u1"), s.state.value.ledger.mergedUids)
+        s.mergeGuestHistoryIfNeeded()
+        assertEquals(1, functions.count("mergeGuestHistory"))
+    }
+
     @Test fun forgettingAnAccountRemovesItsMonsters() = runBlocking {
         val s = store(terms = 2)
         functions.respond("spawnEncounter", 200, encounterJson(completionKey))

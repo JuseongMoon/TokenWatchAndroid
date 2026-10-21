@@ -213,13 +213,21 @@ class MonsterStore(
         }
     }
 
-    /** Merges the guest defeats into the account once, as unranked history. */
+    /**
+     * Merges the guest defeats into the account once, as unranked history. A history the server refuses
+     * is not sent again; a transport failure retries on the next observation.
+     */
     suspend fun mergeGuestHistoryIfNeeded() {
         val api = api ?: return
         val owner = activeOwner ?: return
         val ledger = _state.value.ledger
         if (owner in ledger.mergedUids) return
-        if (ledger.guest.kills.isEmpty() || api.mergeGuestHistory(ledger.guest) is CallResult.Success) {
+        val settled = ledger.guest.kills.isEmpty() || when (val result = api.mergeGuestHistory(ledger.guest)) {
+            // Merged, or already merged before (merged = false).
+            is CallResult.Success -> true
+            is CallResult.Failure -> result.error is CallError.Server
+        }
+        if (settled) {
             editLedger { if (owner in it.mergedUids) it else it.copy(mergedUids = it.mergedUids + owner) }
             save()
         }
@@ -545,7 +553,8 @@ class MonsterStore(
                 val (dto, stats) = result.value
                 edit { state ->
                     state.copy(
-                        stats = stats,
+                        // An expired defeat carries no stats: keep the current ones.
+                        stats = stats ?: state.stats,
                         ledger = state.ledger.copy(
                             encounters = state.ledger.encounters.map {
                                 if (it.key != key) return@map it

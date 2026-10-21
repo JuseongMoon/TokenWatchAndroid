@@ -8,9 +8,10 @@ The Android sources mirror the portable iOS patches through commit `bfdb4ed` on 
 1.3.0 (16) content: the review prompt, login failure diagnostics, the two analytics additions,
 the split "hide unused graphs" setting, and the credit-gauge reset confirmation described below.
 On the `feature/account` branch it also mirrors the optional app account and the monster hunt
-through iOS commit `5a452e8` on `feature/account` (`a8fc3a9`, `2d268f8`, `dfae3ea`, `26b74fc`,
-`0ab185e`, `816d6aa`, `8e5ab75`, `bef30eb`, `6bc67ae`, `b5aa200`, `e2e2152`, `5a452e8`),
-described under "Optional app account" and "Monster hunt and adventurers' guild" below.
+through iOS commit `35c4764` on `feature/account` (`a8fc3a9`, `2d268f8`, `dfae3ea`, `26b74fc`,
+`0ab185e`, `816d6aa`, `8e5ab75`, `bef30eb`, `6bc67ae`, `b5aa200`, `e2e2152`, `5a452e8`,
+`35c4764`), described under "Optional app account" and "Monster hunt and adventurers' guild"
+below.
 Uncommitted iOS working-tree changes are deliberately not part of this baseline.
 
 Firebase Analytics runs against the Android app's own Firebase registration and
@@ -165,7 +166,8 @@ Firebase Analytics runs against the Android app's own Firebase registration and
   setting switches both spawning and drawing off.
 - Signed-in players who agree to the monster terms get server-judged spawns and defeats that count
   on the guild leaderboard. Everyone else hunts as a guest with deterministic device draws that
-  stay unranked and are merged once, as history, after agreeing. Spawns are requested only from
+  stay unranked and are merged once, as history, after agreeing (up to 500 defeats, the most-hunted
+  species first). Spawns are requested only from
   foreground refreshes. The server receives the provider, window name, reset bucket, period, slot,
   platform and app version — never usage percentages or AI service account details. Session keys
   (300-second reset buckets, Copilot's UTC-midnight date, the language-free Codex label, the period
