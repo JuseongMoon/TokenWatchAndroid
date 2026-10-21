@@ -193,9 +193,15 @@ class LocalizationTest {
         )
         assertEquals(3, ko.consentSent.size)
         assertEquals("그 창의 리셋 시각과 주기", ko.consentSent[1])
+        // The public part names the defeat counts too: the leaderboard document carries them.
         assertEquals(
-            "사용률 수치, AI 서비스 계정·이메일·토큰은 보내지 않아요. 닉네임 #번호와 아바타, 점수는 길드 순위에서 다른 사람에게 보여요.",
+            "사용률 수치, AI 서비스 계정·이메일·토큰은 보내지 않아요. 닉네임 #번호, 아바타, 점수와 처치 수는 길드 순위에서 다른 사람에게 보여요.",
             ko.consentNotSent,
+        )
+        assertEquals(
+            "Usage percentages and your AI service accounts, emails, and tokens are never sent. " +
+                "Your nickname #number, avatar, score, and defeat counts are shown to others in the guild ranks.",
+            en.consentNotSent,
         )
         assertEquals(
             "Monsters appear on gauges that hit 100%, and now and then on gauges in use. Tap the gauge row to fight them. " +

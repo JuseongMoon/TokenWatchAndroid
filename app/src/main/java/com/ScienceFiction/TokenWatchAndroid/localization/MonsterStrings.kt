@@ -106,8 +106,8 @@ val L10n.consentSent: List<String>
     }
 val L10n.consentNotSent: String
     get() = choose(
-        "사용률 수치, AI 서비스 계정·이메일·토큰은 보내지 않아요. 닉네임 #번호와 아바타, 점수는 길드 순위에서 다른 사람에게 보여요.",
-        "Usage percentages and your AI service accounts, emails, and tokens are never sent. Your nickname #number, avatar, and score are shown to others in the guild ranks.",
+        "사용률 수치, AI 서비스 계정·이메일·토큰은 보내지 않아요. 닉네임 #번호, 아바타, 점수와 처치 수는 길드 순위에서 다른 사람에게 보여요.",
+        "Usage percentages and your AI service accounts, emails, and tokens are never sent. Your nickname #number, avatar, score, and defeat counts are shown to others in the guild ranks.",
     )
 val L10n.consentAgree: String
     get() = choose(
