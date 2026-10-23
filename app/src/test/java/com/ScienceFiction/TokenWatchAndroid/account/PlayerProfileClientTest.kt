@@ -5,7 +5,6 @@ import com.ScienceFiction.TokenWatchAndroid.network.core.NetworkTransport
 import java.io.IOException
 import kotlinx.coroutines.runBlocking
 import okhttp3.Request
-import okio.Buffer
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -40,8 +39,6 @@ internal const val PROFILE_BODY = """{"fields":{
     "updatedAtMs":{"integerValue":"1000"},"termsAcceptedVersion":{"integerValue":"1"},
     "avatar":{"mapValue":{"fields":{"kind":{"stringValue":"preset"},"id":{"stringValue":"cat"}}}}}}"""
 
-internal fun ownerBody(uid: String) = """{"fields":{"uid":{"stringValue":"$uid"}}}"""
-
 class PlayerProfileClientTest {
     private val tokens = mutableListOf<Boolean>()
 
@@ -52,8 +49,6 @@ class PlayerProfileClientTest {
             token = { force -> tokens += force; token },
             clock = ServerClock { localNow },
         )
-
-    private fun Request.bodyText(): String = Buffer().also { body!!.writeTo(it) }.readUtf8()
 
     @Test fun getsTheProfileWithABearerTokenAndNoApiKey() = runBlocking {
         val transport = ScriptedTransport(response(200, PROFILE_BODY))
@@ -98,9 +93,8 @@ class PlayerProfileClientTest {
 
     @Test fun a403AlsoRefreshesTheTokenOnce() = runBlocking {
         // An operator claim set after the cached token was issued: the rules refuse until a new token.
-        val retried = ScriptedTransport(response(403), response(200))
-        val c = client(retried)
-        assertEquals(PlayerProfileClient.CommitResult.OK, c.commit(c.documents.changeAvatar("u", "cat", 1), "u"))
+        val retried = ScriptedTransport(response(403), response(200, PROFILE_BODY))
+        assertTrue(client(retried).fetchProfile("u") is PlayerProfileClient.FetchResult.Found)
         assertEquals(listOf(false, true), tokens)
         assertEquals(2, retried.requests.size)
 
@@ -109,67 +103,6 @@ class PlayerProfileClientTest {
         assertEquals(PlayerProfileClient.FetchResult.Failed, client(twice).fetchProfile("u"))
         assertEquals(2, twice.requests.size)
         assertEquals(listOf(false, true), tokens)
-    }
-
-    @Test fun nametagAvailabilityTreatsTheOwnReservationAsFree() = runBlocking {
-        assertEquals(
-            PlayerProfileClient.Availability.AVAILABLE,
-            client(ScriptedTransport(response(404))).nametagAvailability("tok#0042", "me"),
-        )
-        assertEquals(
-            PlayerProfileClient.Availability.AVAILABLE,
-            client(ScriptedTransport(response(200, ownerBody("me")))).nametagAvailability("tok#0042", "me"),
-        )
-        assertEquals(
-            PlayerProfileClient.Availability.TAKEN,
-            client(ScriptedTransport(response(200, ownerBody("other")))).nametagAvailability("tok#0042", "me"),
-        )
-        assertEquals(
-            PlayerProfileClient.Availability.FAILED,
-            client(ScriptedTransport(response(500))).nametagAvailability("tok#0042", "me"),
-        )
-    }
-
-    @Test fun nametagIdsArePercentEncodedInThePath() = runBlocking {
-        val transport = ScriptedTransport(response(404))
-        client(transport).nametagAvailability("토큰#0042", "me")
-        val url = transport.requests.single().url
-        // `#` must travel as %23, or everything after it would become a URL fragment.
-        assertTrue(url.encodedPath, url.encodedPath.endsWith("/documents/nametags/%ED%86%A0%ED%81%B0%230042"))
-        assertNull(url.fragment)
-        assertEquals("토큰#0042", url.pathSegments.last())
-    }
-
-    @Test fun commitPostsTheBatchToTheCommitEndpoint() = runBlocking {
-        val transport = ScriptedTransport(response(200))
-        val c = client(transport)
-        val result = c.commit(c.documents.changeAvatar("uid1", "cat", 5), "uid1")
-
-        assertEquals(PlayerProfileClient.CommitResult.OK, result)
-        val request = transport.requests.single()
-        assertEquals("POST", request.method)
-        assertEquals(
-            "https://firestore.googleapis.com/v1/projects/tokenwatch-app/databases/(default)/documents:commit",
-            request.url.toString(),
-        )
-        assertTrue(request.bodyText().contains("\"updateMask\""))
-        // The body names documents by their raw path, not the encoded URL form.
-        assertTrue(request.bodyText().contains("projects/tokenwatch-app/databases/(default)/documents/players/uid1"))
-    }
-
-    @Test fun aFailedCommitIsTakenOnlyWhenAnotherUidHoldsTheNametag() = runBlocking {
-        val taken = ScriptedTransport(response(409), response(200, ownerBody("other")))
-        val c = client(taken)
-        assertEquals(PlayerProfileClient.CommitResult.TAKEN, c.commit(emptyList(), "me", nametagKey = "tok#0042"))
-        assertEquals(2, taken.requests.size)
-        assertTrue(taken.requests[1].url.encodedPath.endsWith("/nametags/tok%230042"))
-
-        val mine = ScriptedTransport(response(409), response(200, ownerBody("me")))
-        assertEquals(PlayerProfileClient.CommitResult.FAILED, client(mine).commit(emptyList(), "me", nametagKey = "tok#0042"))
-
-        val noNametag = ScriptedTransport(response(400))
-        assertEquals(PlayerProfileClient.CommitResult.FAILED, client(noNametag).commit(emptyList(), "me"))
-        assertEquals(1, noNametag.requests.size)
     }
 
     @Test fun theDateHeaderCorrectsTheClock() = runBlocking {
@@ -192,13 +125,10 @@ class PlayerProfileClientTest {
     }
 
     @Test fun theTokenNeverLeavesTheAuthorizationHeader() = runBlocking {
-        val transport = ScriptedTransport(response(200))
-        val c = client(transport)
-        c.commit(c.documents.create("uid1", com.ScienceFiction.TokenWatchAndroid.domain.account.PlayerProfile(
-            "Tok", "tok", "0042", 1, "cat", 1, 1, 1,
-        )), "uid1")
+        val transport = ScriptedTransport(response(200, PROFILE_BODY))
+        client(transport).fetchProfile("uid1")
         val request = transport.requests.single()
         assertFalse(request.url.toString().contains("id-token-secret"))
-        assertFalse(request.bodyText().contains("id-token-secret"))
+        assertNull(request.body)
     }
 }

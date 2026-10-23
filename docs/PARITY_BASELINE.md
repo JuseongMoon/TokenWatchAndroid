@@ -8,10 +8,10 @@ The Android sources mirror the portable iOS patches through commit `bfdb4ed` on 
 1.3.0 (16) content: the review prompt, login failure diagnostics, the two analytics additions,
 the split "hide unused graphs" setting, and the credit-gauge reset confirmation described below.
 On the `feature/account` branch it also mirrors the optional app account and the monster hunt
-through iOS commit `35c4764` on `feature/account` (`a8fc3a9`, `2d268f8`, `dfae3ea`, `26b74fc`,
+through iOS commit `e5309c2` on `feature/account` (`a8fc3a9`, `2d268f8`, `dfae3ea`, `26b74fc`,
 `0ab185e`, `816d6aa`, `8e5ab75`, `bef30eb`, `6bc67ae`, `b5aa200`, `e2e2152`, `5a452e8`,
-`35c4764`), described under "Optional app account" and "Monster hunt and adventurers' guild"
-below.
+`35c4764`, `e5309c2`), described under "Optional app account" and "Monster hunt and adventurers'
+guild" below.
 Uncommitted iOS working-tree changes are deliberately not part of this baseline.
 
 Firebase Analytics runs against the Android app's own Firebase registration and
@@ -127,23 +127,28 @@ Firebase Analytics runs against the Android app's own Firebase registration and
   mode disables it. Settings gains a PLAYER box that opens the sign-in, profile setup or account
   screen depending on the account state.
 - First sign-in leads to profile setup: a nickname (2–12 characters of Korean, English, digits,
-  `_` and `-`, checked against the shared banned-word list on save, never while typing), one of
-  sixteen pixel-art avatars, and agreement to the terms and privacy policy. Nicknames may repeat:
-  a random four-digit tag makes the pair unique, and it is always shown as `nickname #1234` with
-  the tag dimmed. Tags with four identical digits are never assigned. The avatar set ships
-  as the same JSON bytes as iOS and is verified by SHA-256 in the unit tests. The first avatar is
-  picked at random, as on iOS.
+  `_` and `-`, screened against the shared banned-word list on save, never while typing; the
+  server's wider list decides), one of sixteen pixel-art avatars, and agreement to the terms and
+  privacy policy. That agreement is terms version 2, which covers the monster hunt, so a new account
+  never sees the monster consent; a note under it says what goes to the server and what is public.
+  Nicknames may repeat: a random four-digit tag, drawn by the server, makes the pair unique, and it
+  is always shown as `nickname #1234` with the tag dimmed. Tags with four identical digits are never
+  assigned. The avatar set ships as the same JSON bytes as iOS and is verified by SHA-256 in the
+  unit tests. The first avatar is picked at random, as on iOS.
 - The account screen changes the avatar at any time and the nickname once every thirty days
-  (measured against the server's `Date` header; every change, even a case-only one, draws a new
-  tag different from the last), links the other sign-in method, signs out, and
-  deletes the account. Deletion re-authenticates first; for Apple it revokes the Apple token and
-  stops if revocation fails.
-- Profiles are read and written over Firestore REST with the signed-in user's ID token, which is
-  fetched right before each request and never stored by the app; a 401 or 403 fetches a fresh
-  token and retries once, which also picks up a custom claim set after sign-in. The
-  `nickname#tag` pair is reserved case-insensitively in the same commit; a tag already held by
-  another account is redrawn (up to six attempts) rather than overwritten. The offline profile
-  cache holds only the uid, nickname, tag and avatar ID.
+  (checked first against the server's `Date` header; every change, even a case-only one, gets a new
+  tag different from the last), links the other sign-in method, signs out, and deletes the account.
+  Deletion re-authenticates first (for Apple it revokes the Apple token and stops if revocation
+  fails), then the server erases the profile, the monster records, the guild rank and the sign-in
+  record; an answer lost after the sign-in record is already gone still counts as done.
+- Profiles are read over Firestore REST, and written and deleted through server callables
+  (`setProfile`, `deleteAccount`), with the signed-in user's ID token, fetched right before each
+  request and never stored by the app. A 401 (or 403 on a read) fetches a fresh token and retries
+  once, which also picks up a custom claim set after sign-in; deletion always sends a token
+  refreshed right after re-authenticating. Nickname errors from the server show as input errors;
+  a failed creation re-reads the profile in case only the answer was lost. The offline profile
+  cache holds only the uid, nickname, tag, avatar ID and accepted terms version; a cache from
+  before the terms version reads as not yet consented until the server answers.
 - Accounts carrying the operator custom claim are drawn with a dedicated avatar that never appears
   in the picker; the stored avatar stays an ordinary preset. The operator artwork ships as the same
   JSON bytes as iOS, verified by SHA-256 in the unit tests.

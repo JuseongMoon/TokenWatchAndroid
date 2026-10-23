@@ -19,6 +19,18 @@ class PlayerProfileRepositoryTest {
         assertEquals("tokenwatch.player.profile.v1", PlayerProfileCache.STORAGE_KEY)
     }
 
+    @Test fun theTermsVersionIsAnOptionalKey() {
+        val consented = PlayerProfileCache("uid1", "토큰", "0042", "cat", 1, termsAcceptedVersion = 2)
+        val json = PlayerProfileRepository.encode(consented)
+        assert(json.contains("\"termsAcceptedVersion\":2")) { json }
+        assertEquals(consented, PlayerProfileRepository.decode(json))
+        // Written before the key existed: still read, without it.
+        val legacy = """{"uid":"u","nickname":"David","tag":"0042","avatarId":"slime","nicknameChangedAtMs":1}"""
+        assertEquals(null, PlayerProfileRepository.decode(legacy)?.termsAcceptedVersion)
+        assertEquals("0042", PlayerProfileRepository.decode(legacy)?.tag)
+        assertFalse(PlayerProfileRepository.encode(consented.copy(termsAcceptedVersion = null)).contains("termsAcceptedVersion"))
+    }
+
     @Test fun theCacheHoldsNoCredentials() {
         val json = PlayerProfileRepository.encode(PlayerProfileCache("u", "n", "1234", "cat", 1))
         assertFalse(json.contains("token", ignoreCase = true))

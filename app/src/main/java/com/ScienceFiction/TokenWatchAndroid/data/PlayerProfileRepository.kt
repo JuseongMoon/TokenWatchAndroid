@@ -13,9 +13,10 @@ import kotlinx.coroutines.flow.first
 
 /**
  * The app account's offline profile cache (`tokenwatch.player.profile.v1`, same key and JSON fields
- * as iOS). Only uid, nickname, tag, avatar id and the nickname change time — never a token or an email.
- * The server is authoritative; this only lets the PLAYER box draw before the profile is re-read. A cache
- * written before nametags existed has no tag and reads as absent, so the profile is re-read instead.
+ * as iOS). Only uid, nickname, tag, avatar id, the nickname change time and the accepted terms version —
+ * never a token or an email. The server is authoritative; this only lets the PLAYER box draw before the
+ * profile is re-read. A cache written before nametags existed has no tag and reads as absent, so the
+ * profile is re-read instead; one written before the terms version existed reads without it.
  */
 class PlayerProfileRepository(
     private val dataStore: DataStore<Preferences>,
@@ -40,13 +41,14 @@ class PlayerProfileRepository(
         )
 
         fun encode(cache: PlayerProfileCache): String = adapter.toJson(
-            mapOf(
-                "uid" to cache.uid,
-                "nickname" to cache.nickname,
-                "tag" to cache.tag,
-                "avatarId" to cache.avatarId,
-                "nicknameChangedAtMs" to cache.nicknameChangedAtMs,
-            ),
+            buildMap {
+                put("uid", cache.uid)
+                put("nickname", cache.nickname)
+                put("tag", cache.tag)
+                put("avatarId", cache.avatarId)
+                put("nicknameChangedAtMs", cache.nicknameChangedAtMs)
+                cache.termsAcceptedVersion?.let { put("termsAcceptedVersion", it) }
+            },
         )
 
         fun decode(json: String): PlayerProfileCache? {
@@ -57,6 +59,7 @@ class PlayerProfileRepository(
                 tag = map["tag"] as? String ?: return null,
                 avatarId = map["avatarId"] as? String ?: return null,
                 nicknameChangedAtMs = (map["nicknameChangedAtMs"] as? Number)?.toLong() ?: return null,
+                termsAcceptedVersion = (map["termsAcceptedVersion"] as? Number)?.toInt(),
             )
         }
     }

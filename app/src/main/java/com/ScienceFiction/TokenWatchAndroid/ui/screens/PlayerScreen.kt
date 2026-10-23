@@ -73,6 +73,7 @@ import com.ScienceFiction.TokenWatchAndroid.localization.profileSetupIntro
 import com.ScienceFiction.TokenWatchAndroid.localization.profileSetupQuit
 import com.ScienceFiction.TokenWatchAndroid.localization.termsAgree
 import com.ScienceFiction.TokenWatchAndroid.localization.termsLink
+import com.ScienceFiction.TokenWatchAndroid.localization.termsMonsterNote
 import com.ScienceFiction.TokenWatchAndroid.ui.auth.InAppBrowser
 import com.ScienceFiction.TokenWatchAndroid.ui.components.AccountBrandButtons
 import com.ScienceFiction.TokenWatchAndroid.ui.components.AccountNoticeLine
@@ -273,6 +274,13 @@ private fun ProfileSetupContent(
                         weight = FontWeight.Normal,
                     )
                 }
+                // The sign-up covers the monster hunt terms too: what goes to the server and what is public.
+                Text(
+                    text = loc.termsMonsterNote,
+                    color = Term.Dim,
+                    style = terminalTextStyle(10.sp),
+                    modifier = Modifier.padding(start = 30.dp),
+                )
                 if (error == NicknameError.TERMS_REQUIRED) {
                     AccountNoticeLine(text = loc.nicknameError(NicknameError.TERMS_REQUIRED))
                 }

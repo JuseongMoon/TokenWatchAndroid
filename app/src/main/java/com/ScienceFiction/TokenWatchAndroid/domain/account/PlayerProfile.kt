@@ -1,7 +1,6 @@
 package com.ScienceFiction.TokenWatchAndroid.domain.account
 
 import java.text.Normalizer
-import kotlin.random.Random
 
 /**
  * The optional TokenWatch app account — separate from the provider accounts. This file holds the
@@ -10,8 +9,8 @@ import kotlin.random.Random
  * iOS and the server rule regex.
  *
  * Nametags work like battle tags: nicknames may repeat, and `nickname#1234` (a four-digit tag) is the
- * unique pair, always shown together. Every nickname change draws a new tag; tags whose four digits
- * are all the same (0000, 1111…) are reserved for operators.
+ * unique pair, always shown together. The server (`setProfile`) draws the tag, a new one on every
+ * nickname change; tags whose four digits are all the same (0000, 1111…) are reserved for operators.
  */
 
 /** App account sign-in method. Also the analytics `method` value. */
@@ -38,15 +37,16 @@ data class PlayerProfile(
     val createdAtMs: Long,
     val updatedAtMs: Long,
 ) {
-    /** `nickname #1234` for display (one space before the tag). The reservation key has no space. */
+    /** `nickname #1234` for display (one space before the tag). */
     val nametag: String get() = "$nickname #$tag"
 
-    /** The unique reservation document key (`nametags/{key}`): lowercase nickname, `#`, tag. */
-    val nametagKey: String get() = NicknamePolicy.nametagKey(nicknameLower, tag)
-
     companion object {
-        /** Terms and privacy consent version. Bump it when the terms change and ask again. */
-        const val CURRENT_TERMS_VERSION = 1
+        /**
+         * Terms and privacy consent version. Bump it when the terms change and ask again. 2 = the monster
+         * hunt and guild ranks: new sign-ups are created at 2, and accounts that agreed to 1 accept 2 on
+         * the monster consent screen.
+         */
+        const val CURRENT_TERMS_VERSION = 2
     }
 }
 
@@ -100,33 +100,16 @@ object NicknamePolicy {
 
     // MARK: Nametags
 
-    /** Exactly four ASCII digits. */
+    /** Exactly four ASCII digits. The server draws them. */
     fun isValidTag(tag: String): Boolean = tag.length == 4 && tag.all { it in '0'..'9' }
-
-    /** All four digits the same (0000, 1111 … 9999): operator-only, so never assigned normally. */
-    fun isRepdigit(tag: String): Boolean = isValidTag(tag) && tag.all { it == tag[0] }
-
-    /**
-     * A random tag that is not a repdigit and differs from [excluding] (the previous tag). [draw]
-     * returns an integer in 0..9999; tests pass fixed values.
-     */
-    fun randomTag(excluding: String? = null, draw: () -> Int = { Random.nextInt(0, 10_000) }): String {
-        while (true) {
-            val tag = draw().toString().padStart(4, '0')
-            if (!isRepdigit(tag) && tag != excluding) return tag
-        }
-    }
-
-    /** The reservation document key. `#` is not an allowed nickname character, so the split is unambiguous. */
-    fun nametagKey(lower: String, tag: String): String = "$lower#$tag"
 
     /** Milliseconds until the next change; 0 means now (allowed from exactly 30 days on). */
     fun cooldownRemainingMs(lastChangedAtMs: Long, nowMs: Long): Long =
         maxOf(0L, lastChangedAtMs + COOLDOWN_MS - nowMs)
 
     /**
-     * Banned words (lowercase, substring match). Nicknames are only visible to their owner for now, so
-     * this is a client-side check. Same list as iOS.
+     * Banned words (lowercase, substring match), a check before saving. The server (`setProfile`) judges
+     * with a wider list and is authoritative. Same list as iOS.
      */
     val BANNED_WORDS: List<String> = listOf(
         // Impersonating the operator
@@ -142,7 +125,8 @@ object NicknamePolicy {
 
 /**
  * Minimal cache for drawing the PLAYER box offline; the server is authoritative. Holds non-credential
- * data only (uid, nickname, tag, avatar id) — never a token or an email. Key and JSON fields match iOS.
+ * data only (uid, nickname, tag, avatar id, accepted terms version) — never a token or an email. Key and
+ * JSON fields match iOS.
  */
 data class PlayerProfileCache(
     val uid: String,
@@ -150,6 +134,8 @@ data class PlayerProfileCache(
     val tag: String,
     val avatarId: String,
     val nicknameChangedAtMs: Long,
+    /** The accepted terms version. Caches written before it existed have none (null). */
+    val termsAcceptedVersion: Int? = null,
 ) {
     companion object {
         const val STORAGE_KEY = "tokenwatch.player.profile.v1"

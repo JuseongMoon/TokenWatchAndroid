@@ -2,6 +2,8 @@ package com.ScienceFiction.TokenWatchAndroid.monster
 
 import com.ScienceFiction.TokenWatchAndroid.account.FirestoreValue
 import com.ScienceFiction.TokenWatchAndroid.domain.account.AvatarCatalog
+import com.ScienceFiction.TokenWatchAndroid.domain.account.NicknamePolicy
+import com.ScienceFiction.TokenWatchAndroid.domain.account.PlayerProfile
 import com.ScienceFiction.TokenWatchAndroid.network.core.NetworkTransport
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.Types
@@ -17,7 +19,8 @@ import okhttp3.RequestBody.Companion.toRequestBody
  * `{"result": …}`. Errors are told apart by the `error.details.code` enumeration only — `message` is
  * neither shown nor logged. The ID token is fetched right before each request and only placed in its
  * header; a 401 force-refreshes it and retries once. The top 100 is read directly with a Firestore REST
- * `runQuery` (public read rules).
+ * `runQuery` (public read rules). The app account's profile writes (`setProfile`) and in-app deletion
+ * (`deleteAccount`) go through this client too (AccountStore).
  *
  * What is sent: provider, window label, period, reset bucket, slot, platform and app version. Never a
  * usage figure, AI service account information or a device identifier.
@@ -131,6 +134,41 @@ class MonsterApiClient(
 
     suspend fun report(targetUid: String, reason: ReportReason): CallResult<Unit> =
         call("reportPlayer", mapOf("targetUid" to targetUid, "reason" to reason.wireId)).map { }
+
+    // MARK: App account
+
+    /** A profile write. Nickname rules, banned words, the tag draw and the 30-day interval are the server's. */
+    sealed class ProfileChange {
+        data class Create(val nickname: String, val avatarId: String, val termsVersion: Int) : ProfileChange()
+        data class Nickname(val nickname: String) : ProfileChange()
+        data class Avatar(val avatarId: String) : ProfileChange()
+    }
+
+    /** Writes the profile; the answer is the server's profile, which the screen and the cache take as is. */
+    suspend fun setProfile(change: ProfileChange): CallResult<PlayerProfile> {
+        val data = when (change) {
+            is ProfileChange.Create -> mapOf(
+                "op" to "create",
+                "nickname" to change.nickname,
+                "avatarId" to change.avatarId,
+                "termsAcceptedVersion" to change.termsVersion,
+            )
+            is ProfileChange.Nickname -> mapOf("op" to "nickname", "nickname" to change.nickname)
+            is ProfileChange.Avatar -> mapOf("op" to "avatar", "avatarId" to change.avatarId)
+        }
+        return when (val result = call("setProfile", data)) {
+            is CallResult.Success -> (result.value["profile"] as? Map<*, *>)?.let(::decodeProfile)
+                ?.let { CallResult.Success(it) }
+                ?: CallResult.Failure(CallError.Transport)
+            is CallResult.Failure -> result
+        }
+    }
+
+    /**
+     * Deletes the account. The server erases the profile, monster records, rank and reports, and the Auth
+     * user too. It only takes a token from a sign-in within five minutes (`requires_recent_login`).
+     */
+    suspend fun deleteAccount(): CallResult<Unit> = call("deleteAccount", emptyMap()).map { }
 
     // MARK: Leaderboard
 
@@ -246,6 +284,30 @@ class MonsterApiClient(
                 (error["status"] as? String)?.let { return CallResult.Failure(CallError.Server(it.lowercase())) }
             }
             return CallResult.Failure(CallError.Transport)
+        }
+
+        /**
+         * `setProfile`'s `profile` (plain JSON, no Firestore value wrapping) → profile. An avatar of any kind
+         * other than `preset` reads as the fallback; a profile without a valid tag is null.
+         */
+        fun decodeProfile(json: Map<*, *>): PlayerProfile? {
+            val nickname = json["nickname"] as? String ?: return null
+            val lower = json["nicknameLower"] as? String ?: return null
+            val tag = (json["tag"] as? String)?.takeIf(NicknamePolicy::isValidTag) ?: return null
+            val changed = json["nicknameChangedAtMs"].asLooseLong() ?: return null
+            val created = json["createdAtMs"].asLooseLong() ?: return null
+            val avatar = json["avatar"] as? Map<*, *>
+            val avatarId = (avatar?.get("id") as? String).takeIf { avatar?.get("kind") == "preset" }
+            return PlayerProfile(
+                nickname = nickname,
+                nicknameLower = lower,
+                tag = tag,
+                nicknameChangedAtMs = changed,
+                avatarId = avatarId ?: AvatarCatalog.FALLBACK_ID,
+                termsAcceptedVersion = json["termsAcceptedVersion"].asLooseInt() ?: 0,
+                createdAtMs = created,
+                updatedAtMs = json["updatedAtMs"].asLooseLong() ?: created,
+            )
         }
 
         /** runQuery's array (a `document` per element) → leaderboard rows. Documents missing fields are dropped. */

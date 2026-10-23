@@ -176,6 +176,31 @@ class LocalizationTest {
     }
 
     @Test
+    fun accountSwitchCopyMatchesIos() {
+        val ko = L10n(Lang.KO)
+        val en = L10n(Lang.EN)
+        assertEquals(
+            "몬스터 사냥을 위해 AI 서비스 종류·사용량 창 이름·리셋 시각과 처치 기록을 서버로 보내요. 사용률 수치와 AI 서비스 계정 정보는 보내지 않아요. " +
+                "닉네임 #번호, 아바타, 점수와 처치 수는 길드 순위에 공개돼요.",
+            ko.termsMonsterNote,
+        )
+        assertEquals(
+            "For the monster hunt, the app sends the AI service type, usage window name, reset time, and defeat records to the server. " +
+                "Usage percentages and AI service account details are never sent. Your nickname #number, avatar, score, and defeat counts appear in the guild ranks.",
+            en.termsMonsterNote,
+        )
+        assertEquals(
+            "닉네임·아바타·몬스터 기록과 길드 순위·로그인 연결이 서버에서 지워지고 되돌릴 수 없어요. 확인을 위해 한 번 더 로그인해요. 위 ACCOUNTS의 AI 서비스 계정은 영향을 받지 않아요.",
+            ko.accountDeleteMessage,
+        )
+        assertEquals(
+            "Your nickname, avatar, monster records, guild rank, and sign-in links will be erased from the server. This can't be undone. " +
+                "You'll sign in once more to confirm. Your AI service accounts under ACCOUNTS are not affected.",
+            en.accountDeleteMessage,
+        )
+    }
+
+    @Test
     fun monsterCopyMatchesIos() {
         val ko = L10n(Lang.KO)
         val en = L10n(Lang.EN)

@@ -52,7 +52,7 @@ JBR 21을 가리켜야 합니다. Android Studio에서 빌드하면 번들 JBR�
 
 ```text
 app/src/main/java/com/ScienceFiction/TokenWatchAndroid/
-├── account/           앱 계정(선택): Firebase Auth 래퍼, 상태 머신, Firestore REST 프로필
+├── account/           앱 계정(선택): Firebase Auth 래퍼, 상태 머신, 프로필 읽기(Firestore REST)·쓰기/삭제(callable)
 ├── auth/              CredentialVault(Android Keystore AES-GCM), OAuth code/루프백/device, 세션
 ├── data/              AppSettings, SettingsRepository, 코덱
 ├── domain/            WorkHoursSchedule, Announcement, 새로고침 정책
@@ -105,7 +105,7 @@ ANNOUNCEMENT_FEED_DOC=android
   받아들인 예외입니다(2026-10-16 승인). 아래 백업 제외 설정과 다음 규칙으로 보완합니다.
   - 앱 코드는 Firebase·Apple·Google 토큰을 저장하지 않습니다. ID 토큰은 요청 직전에 SDK에서 받아
     `Authorization` 헤더에만 싣습니다.
-  - 프로필 캐시(`tokenwatch.player.profile.v1`)에는 uid·닉네임·아바타 ID만 둡니다.
+  - 프로필 캐시(`tokenwatch.player.profile.v1`)에는 uid·닉네임·태그·아바타 ID·닉네임 변경 시각·약관 버전만 둡니다.
   - provider 토큰과 API key에는 이 예외가 적용되지 않습니다.
 - 앱 데이터는 cloud backup과 device transfer 대상에서 제외돼 있습니다
   (`allowBackup="false"`, `fullBackupContent="false"`, `dataExtractionRules`).

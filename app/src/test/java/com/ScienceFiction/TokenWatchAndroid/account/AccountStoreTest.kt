@@ -7,8 +7,10 @@ import com.ScienceFiction.TokenWatchAndroid.domain.account.AvatarPreset
 import com.ScienceFiction.TokenWatchAndroid.domain.account.NicknameError
 import com.ScienceFiction.TokenWatchAndroid.domain.account.NicknamePolicy
 import com.ScienceFiction.TokenWatchAndroid.domain.account.PlayerProfileCache
+import com.ScienceFiction.TokenWatchAndroid.monster.MonsterApiClient
 import com.ScienceFiction.TokenWatchAndroid.network.core.NetworkResponse
 import com.ScienceFiction.TokenWatchAndroid.network.core.NetworkTransport
+import com.squareup.moshi.Moshi
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.launch
@@ -37,7 +39,6 @@ class AccountStoreTest {
         var signInResult: AccountAuthResult = AccountAuthResult.Success(user, isNew = true)
         var linkResult: AccountAuthResult = AccountAuthResult.Success(user.copy(methods = AccountMethod.entries), false)
         var reauthResult = AccountReauthResult.OK
-        var deleteResult = true
         var pending: AccountAuthResult? = null
         var listener: ((AccountUser?) -> Unit)? = null
         var operatorClaim = false
@@ -73,18 +74,16 @@ class AccountStoreTest {
             return reauthResult
         }
 
-        override suspend fun deleteUser(): Boolean {
-            log += "deleteUser"
-            if (deleteResult) currentUser = null
-            return deleteResult
-        }
-
         override suspend fun signOut() {
             log += "signOut"
             currentUser = null
         }
 
-        override suspend fun idToken(forceRefresh: Boolean): String? = currentUser?.let { "token" }
+        override suspend fun idToken(forceRefresh: Boolean): String? {
+            // Forced refreshes are logged: deletion needs a token carrying the reauthentication.
+            if (forceRefresh) log += "token:refresh"
+            return currentUser?.let { "token" }
+        }
 
         override suspend fun isOperator(forceRefresh: Boolean): Boolean {
             operatorRefreshes += forceRefresh
@@ -112,30 +111,52 @@ class AccountStoreTest {
         }
     }
 
+    /** The callable server: queued answers per function, every call's `data` recorded and logged. */
+    private inner class FakeCallables : NetworkTransport {
+        val responses = mutableMapOf<String, ArrayDeque<NetworkResponse>>()
+        val calls = mutableListOf<Pair<String, Map<*, *>>>()
+        var failTransport = false
+
+        fun respond(name: String, status: Int, body: String) {
+            responses.getOrPut(name) { ArrayDeque() } += response(status, body)
+        }
+
+        override suspend fun execute(request: Request): NetworkResponse {
+            val name = request.url.pathSegments.last()
+            log += "call:$name"
+            if (failTransport) throw java.io.IOException("offline")
+            val body = Buffer().also { request.body!!.writeTo(it) }.readUtf8()
+            val json = Moshi.Builder().build().adapter(Any::class.java).fromJson(body) as Map<*, *>
+            calls += name to (json["data"] as Map<*, *>)
+            return responses[name]?.removeFirstOrNull() ?: response(500)
+        }
+
+        fun data(name: String) = calls.first { it.first == name }.second
+    }
+
     private val auth = FakeAuth()
     private val cache = FakeCache()
+    private val callables = FakeCallables()
     private var demo = false
 
-    private fun store(
-        scope: CoroutineScope,
-        transport: NetworkTransport,
-        profiles: Boolean = true,
-        /** Tag draws in order; when it runs dry, draws fall back to random. */
-        tags: List<Int> = emptyList(),
-    ): AccountStore {
-        val queue = ArrayDeque(tags)
-        return AccountStore(
+    private fun store(scope: CoroutineScope, transport: NetworkTransport, profiles: Boolean = true): AccountStore =
+        AccountStore(
             auth = auth,
             profiles = if (profiles) PlayerProfileClient("p", transport, auth::idToken, ServerClock { 1_000_000L }) else null,
+            server = if (profiles) MonsterApiClient("p", null, auth::idToken, callables, "1.0") else null,
             cache = cache,
             scope = scope,
             isDemo = { demo },
             log = { events += it },
-            drawTag = { queue.removeFirstOrNull() ?: kotlin.random.Random.nextInt(0, 10_000) },
         )
-    }
 
-    private fun Request.bodyText(): String = Buffer().also { body!!.writeTo(it) }.readUtf8()
+    /** A `setProfile` answer (the server's public profile, plain JSON). */
+    private fun profileResult(nickname: String = "Tok", tag: String = "8571", terms: Int = 2) =
+        """{"result":{"profile":{"nickname":"$nickname","nicknameLower":"${NicknamePolicy.lower(nickname)}","tag":"$tag",""" +
+            """"nicknameChangedAtMs":5,"avatar":{"kind":"preset","id":"cat"},"termsAcceptedVersion":$terms,""" +
+            """"createdAtMs":5,"updatedAtMs":5}}}"""
+
+    private fun serverError(code: String) = """{"error":{"status":"INVALID_ARGUMENT","details":{"code":"$code"}}}"""
 
     /** Lets work launched on the test scope run until [done] holds (bounded, so a bug cannot hang). */
     private suspend fun awaitUntil(done: () -> Boolean) {
@@ -280,95 +301,65 @@ class AccountStoreTest {
         assertEquals(SaveOutcome.Invalid(NicknameError.BANNED_WORD), store.createProfile("admin1", "cat", true))
         assertEquals(SaveOutcome.Invalid(NicknameError.TERMS_REQUIRED), store.createProfile("Tok", "cat", false))
         assertTrue(transport.requests.isEmpty())
+        assertTrue(callables.calls.isEmpty())
     }
 
-    @Test fun profileCreationReservesAndCommitsInOneBatch() = runBlocking {
-        val transport = LoggingTransport(
-            response(404, date = DATE), // GET players (sign-in)
-            response(404), // GET nametags: free
-            response(200), // commit
-        )
+    @Test fun profileCreationCallsTheServerWithTheCurrentTerms() = runBlocking {
+        val transport = LoggingTransport(response(404, date = DATE))
         val store = store(this, transport)
         store.signIn(AccountMethod.APPLE)
-        val outcome = store.createProfile("  Tok_1 ", "dragon", termsAccepted = true)
+        callables.respond("setProfile", 200, profileResult(nickname = "Tok_1"))
+        assertEquals(SaveOutcome.Saved, store.createProfile("  Tok_1 ", "dragon", termsAccepted = true))
 
-        assertEquals(SaveOutcome.Saved, outcome)
-        val profile = (store.state.value as AccountState.SignedIn).profile
-        assertEquals("Tok_1", profile.nickname)
-        assertEquals("tok_1", profile.nicknameLower)
-        assertTrue(NicknamePolicy.isValidTag(profile.tag) && !NicknamePolicy.isRepdigit(profile.tag))
-        assertEquals(profile.createdAtMs, profile.nicknameChangedAtMs)
-        assertEquals("nametags", transport.requests[1].url.pathSegments.dropLast(1).last())
-        assertEquals("tok_1#${profile.tag}", transport.requests[1].url.pathSegments.last())
-        val commit = transport.requests.last()
-        assertTrue(commit.url.encodedPath.endsWith("documents:commit"))
-        assertTrue(commit.bodyText().contains("\"exists\":false"))
-        assertTrue(commit.bodyText().contains("documents/nametags/tok_1#${profile.tag}"))
-        assertEquals("dragon", cache.value?.avatarId)
-        assertEquals(profile.tag, cache.value?.tag)
-    }
-
-    @Test fun aTakenTagIsRedrawnAndTheUserNeverSeesTaken() = runBlocking {
-        val transport = LoggingTransport(
-            response(404, date = DATE), // GET players (sign-in)
-            response(200, ownerBody("other")), // tag 1 belongs to someone else
-            response(404), // tag 2 is free
-            response(200), // commit
+        // The normalized nickname goes out; the tag is the server's to draw.
+        assertEquals(
+            mapOf("op" to "create", "nickname" to "Tok_1", "avatarId" to "dragon", "termsAcceptedVersion" to 2.0),
+            callables.data("setProfile"),
         )
-        val store = store(this, transport, tags = listOf(1234, 5678))
-        store.signIn(AccountMethod.APPLE)
-        assertEquals(SaveOutcome.Saved, store.createProfile("Tok", "cat", true))
-        assertEquals(4, transport.requests.size)
-        assertEquals("tok#1234", transport.requests[1].url.pathSegments.last())
-        assertEquals("tok#5678", transport.requests[2].url.pathSegments.last())
-        assertEquals("5678", store.profile?.tag)
+        val profile = store.profile!!
+        assertEquals("Tok_1 #8571", profile.nametag)
+        assertEquals(2, profile.termsAcceptedVersion)
+        assertEquals("8571", cache.value?.tag)
+        assertEquals(2, cache.value?.termsAcceptedVersion)
+        // Nothing is written over Firestore REST.
+        assertEquals(1, transport.requests.size)
     }
 
-    @Test fun aCommitLostToARaceIsRedrawnToo() = runBlocking {
-        val transport = LoggingTransport(
-            response(404, date = DATE), // GET players (sign-in)
-            response(404), // tag 1 looks free
-            response(409), // …but another account committed it first
-            response(200, ownerBody("other")), // the re-read shows the other owner
-            response(404), // tag 2 is free
-            response(200), // commit
-        )
-        val store = store(this, transport, tags = listOf(1234, 5678))
+    @Test fun aServerNicknameErrorShowsAsAnInputError() = runBlocking {
+        val store = store(this, LoggingTransport(response(404)))
         store.signIn(AccountMethod.APPLE)
-        assertEquals(SaveOutcome.Saved, store.createProfile("Tok", "cat", true))
-        assertEquals("5678", store.profile?.tag)
-    }
-
-    @Test fun sixTakenTagsEndInTaken() = runBlocking {
-        val responses = listOf(response(404, date = DATE)) + List(6) { response(200, ownerBody("other")) }
-        val transport = LoggingTransport(*responses.toTypedArray())
-        val store = store(this, transport)
-        store.signIn(AccountMethod.APPLE)
-        assertEquals(SaveOutcome.Invalid(NicknameError.TAKEN), store.createProfile("Tok", "cat", true))
-        assertEquals(7, transport.requests.size)
+        callables.respond("setProfile", 400, serverError("banned_word"))
+        assertEquals(SaveOutcome.Invalid(NicknameError.BANNED_WORD), store.createProfile("Tok", "cat", true))
+        assertNull(store.notice.value)
         assertEquals(AccountState.NeedsProfile, store.state.value)
+    }
+
+    @Test fun aLostCreateAnswerRecoversByReading() = runBlocking {
+        val store = store(this, LoggingTransport(response(404), response(200, PROFILE_BODY)))
+        store.signIn(AccountMethod.APPLE)
+        callables.failTransport = true
+        assertEquals(SaveOutcome.Saved, store.createProfile("Tok", "cat", true))
+        assertEquals("0042", store.profile?.tag)
         assertNull(store.notice.value)
     }
 
-    @Test fun aNicknameChangeDrawsANewTagEvenForACaseOnlyChange() = runBlocking {
-        // The Date header puts the server clock decades after the last change, so the cooldown is over.
-        val transport = LoggingTransport(
-            response(200, PROFILE_BODY, date = DATE), // GET players (sign-in), tag 0042
-            response(404), // GET nametags: free
-            response(200), // commit
-        )
-        // 42 repeats the old tag and 7777 is a repdigit: both are skipped.
-        val store = store(this, transport, tags = listOf(42, 7777, 1234))
+    @Test fun aFailedCreateWithNoProfileOnTheServerIsAFailedSave() = runBlocking {
+        val store = store(this, LoggingTransport(response(404), response(404)))
         store.signIn(AccountMethod.APPLE)
-        assertEquals(SaveOutcome.Saved, store.changeNickname("TOK"))
+        callables.respond("setProfile", 500, "{}")
+        assertEquals(SaveOutcome.Failed, store.createProfile("Tok", "cat", true))
+        assertEquals(AccountNotice.SaveFailed, store.notice.value)
+        assertEquals(AccountState.NeedsProfile, store.state.value)
+    }
 
-        val profile = store.profile!!
-        assertEquals("TOK #1234", profile.nametag)
-        assertEquals("tok#1234", transport.requests[1].url.pathSegments.last())
-        val body = transport.requests.last().bodyText()
-        assertTrue(body.contains("documents/nametags/tok#1234"))
-        assertTrue(body.contains("\"delete\":\"projects/p/databases/(default)/documents/nametags/tok#0042\""))
-        assertTrue(body.contains("\"tag\""))
+    @Test fun aNicknameChangeTakesTheServersNewTag() = runBlocking {
+        // The Date header puts the server clock decades after the last change, so the cooldown is over.
+        val store = store(this, LoggingTransport(response(200, PROFILE_BODY, date = DATE)))
+        store.signIn(AccountMethod.APPLE)
+        callables.respond("setProfile", 200, profileResult(nickname = "TOK", tag = "1234", terms = 1))
+        assertEquals(SaveOutcome.Saved, store.changeNickname("TOK"))
+        assertEquals(mapOf("op" to "nickname", "nickname" to "TOK"), callables.data("setProfile"))
+        assertEquals("TOK #1234", store.profile?.nametag)
         assertEquals("1234", cache.value?.tag)
         assertEquals(mapOf("field" to "nickname"), events.last().parameters)
     }
@@ -380,33 +371,53 @@ class AccountStoreTest {
         store.signIn(AccountMethod.APPLE)
         assertTrue(store.nicknameCooldownRemainingMs() > 0)
         assertEquals(SaveOutcome.Invalid(NicknameError.COOLDOWN), store.changeNickname("Other"))
-        // Same nickname after normalization is a no-op save.
+        // Same nickname after normalization is saved without a call (the server refuses it).
         assertEquals(SaveOutcome.Saved, store.changeNickname(" Tok "))
+        assertTrue(callables.calls.isEmpty())
     }
 
-    @Test fun avatarChangeIsMaskedAndLogged() = runBlocking {
-        val transport = LoggingTransport(response(200, PROFILE_BODY, date = DATE), response(200))
-        val store = store(this, transport)
+    @Test fun theServersCooldownIsAnInputErrorToo() = runBlocking {
+        val store = store(this, LoggingTransport(response(200, PROFILE_BODY, date = DATE)))
         store.signIn(AccountMethod.APPLE)
+        callables.respond("setProfile", 400, serverError("cooldown"))
+        assertEquals(SaveOutcome.Invalid(NicknameError.COOLDOWN), store.changeNickname("Other"))
+        assertNull(store.notice.value)
+        assertEquals("Tok", store.profile?.nickname)
+    }
+
+    @Test fun anAvatarChangeTakesTheServersProfile() = runBlocking {
+        val store = store(this, LoggingTransport(response(200, PROFILE_BODY)))
+        store.signIn(AccountMethod.APPLE)
+        callables.respond(
+            "setProfile",
+            200,
+            profileResult(tag = "0042", terms = 1).replace(""""id":"cat"""", """"id":"mimic""""),
+        )
         assertEquals(SaveOutcome.Saved, store.changeAvatar("mimic"))
+        assertEquals(mapOf("op" to "avatar", "avatarId" to "mimic"), callables.data("setProfile"))
         assertEquals("mimic", store.profile?.avatarId)
-        assertTrue(transport.requests.last().bodyText().contains("\"fieldPaths\":[\"avatar\",\"updatedAtMs\"]"))
+        assertEquals(5L, store.profile?.updatedAtMs)
         assertEquals(mapOf("field" to "avatar"), events.last().parameters)
+
+        callables.respond("setProfile", 500, "{}")
+        assertEquals(SaveOutcome.Failed, store.changeAvatar("cat"))
+        assertEquals(AccountNotice.SaveFailed, store.notice.value)
     }
 
-    @Test fun deletionRunsReauthThenCommitThenAuthDelete() = runBlocking {
-        val transport = LoggingTransport(response(200, PROFILE_BODY), response(200))
-        val store = store(this, transport)
+    @Test fun deletionReauthenticatesRefreshesTheTokenThenCallsTheServer() = runBlocking {
+        val store = store(this, LoggingTransport(response(200, PROFILE_BODY)))
+        var deleted: String? = null
+        store.onAccountDeleted = { deleted = it }
         store.signIn(AccountMethod.APPLE)
+        callables.respond("deleteAccount", 200, """{"result":{"deleted":true}}""")
         log.clear()
         store.deleteAccount()
 
-        assertEquals(listOf("reauth", "net:POST documents:commit", "deleteUser"), log)
-        val body = transport.requests.last().bodyText()
-        assertTrue(body.contains("documents/nametags/tok#0042"))
-        assertTrue(body.contains("documents/players/uid1"))
+        assertEquals(listOf("reauth", "token:refresh", "call:deleteAccount", "signOut"), log)
+        assertEquals(emptyMap<String, Any>(), callables.data("deleteAccount"))
         assertEquals(AccountState.SignedOut, store.state.value)
         assertNull(cache.value)
+        assertEquals("uid1", deleted)
         assertTrue(events.last() === AnalyticsEvent.AccountDelete)
     }
 
@@ -433,33 +444,65 @@ class AccountStoreTest {
         assertEquals(AccountNotice.RevokeFailed, store.notice.value)
     }
 
-    @Test fun aFailedProfileDeleteKeepsTheAuthUser() = runBlocking {
-        val store = store(this, LoggingTransport(response(200, PROFILE_BODY), response(500)))
+    @Test fun aRefusedServerDeletionKeepsTheAccount() = runBlocking {
+        val store = store(this, LoggingTransport(response(200, PROFILE_BODY)))
         store.signIn(AccountMethod.APPLE)
+        callables.respond(
+            "deleteAccount",
+            400,
+            """{"error":{"status":"FAILED_PRECONDITION","details":{"code":"requires_recent_login"}}}""",
+        )
         log.clear()
         store.deleteAccount()
-        assertEquals(listOf("reauth", "net:POST documents:commit"), log)
+        assertFalse("signOut" in log)
         assertEquals(AccountNotice.DeleteFailed, store.notice.value)
-        assertTrue(store.state.value is AccountState.SignedIn)
+        assertEquals("Tok", store.profile?.nickname)
     }
 
-    @Test fun aFailedAuthDeleteLeavesProfileSetupAndAsksToRetry() = runBlocking {
-        val store = store(this, LoggingTransport(response(200, PROFILE_BODY), response(200)))
+    @Test fun aLostDeleteAnswerCountsWhenTheUserIsGone() = runBlocking {
+        val store = store(this, LoggingTransport(response(200, PROFILE_BODY)))
         store.signIn(AccountMethod.APPLE)
-        auth.deleteResult = false
+        callables.failTransport = true
+        auth.sessionStatus = AccountSessionStatus.REVOKED
         store.deleteAccount()
-        assertEquals(AccountState.NeedsProfile, store.state.value)
-        assertEquals(AccountNotice.DeleteFailed, store.notice.value)
-        assertNull(cache.value)
+        assertEquals(AccountState.SignedOut, store.state.value)
+        assertNull(store.notice.value)
+        assertTrue(events.last() === AnalyticsEvent.AccountDelete)
     }
 
-    @Test fun deletingWithoutAProfileSkipsTheCommit() = runBlocking {
+    @Test fun deletingWithoutAProfileUsesTheSameServerCall() = runBlocking {
         val store = store(this, LoggingTransport(response(404)))
         store.signIn(AccountMethod.APPLE)
+        callables.respond("deleteAccount", 200, """{"result":{"deleted":true}}""")
         log.clear()
         store.deleteAccount()
-        assertEquals(listOf("reauth", "deleteUser"), log)
+        assertEquals(listOf("reauth", "token:refresh", "call:deleteAccount", "signOut"), log)
         assertEquals(AccountState.SignedOut, store.state.value)
+    }
+
+    @Test fun aCacheWithoutTheTermsVersionReadsAsNotConsented() = runBlocking {
+        auth.currentUser = user
+        cache.value = PlayerProfileCache("uid1", "Cached", "0001", "dragon", 5)
+        // The re-read fails, so the cached profile stays on screen.
+        val store = store(this, LoggingTransport(response(500)))
+        store.start()
+        awaitUntil { store.state.value is AccountState.SignedIn }
+        assertEquals(1, store.profile?.termsAcceptedVersion)
+
+        cache.value = PlayerProfileCache("uid1", "Cached", "0001", "dragon", 5, termsAcceptedVersion = 2)
+        val consented = store(this, LoggingTransport(response(500)))
+        consented.start()
+        awaitUntil { consented.state.value is AccountState.SignedIn }
+        assertEquals(2, consented.profile?.termsAcceptedVersion)
+    }
+
+    @Test fun aMonsterConsentUpdatesTheProfileAndTheCache() = runBlocking {
+        val store = store(this, LoggingTransport(response(200, PROFILE_BODY)))
+        store.signIn(AccountMethod.APPLE)
+        assertEquals(1, cache.value?.termsAcceptedVersion)
+        store.markTermsAccepted(2)
+        assertEquals(2, store.profile?.termsAcceptedVersion)
+        awaitUntil { cache.value?.termsAcceptedVersion == 2 }
     }
 
     @Test fun linkingReportsSuccessAndConflicts() = runBlocking {
@@ -512,6 +555,7 @@ class AccountStoreTest {
         store.signOut()
 
         assertTrue(transport.requests.isEmpty())
+        assertTrue(callables.calls.isEmpty())
         assertTrue(log.isEmpty())
         assertTrue(events.isEmpty())
         // Entering demo is not a sign-out.

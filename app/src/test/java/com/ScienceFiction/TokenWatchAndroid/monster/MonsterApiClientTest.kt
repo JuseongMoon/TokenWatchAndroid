@@ -105,6 +105,38 @@ class MonsterApiClientTest {
         assertNull(stats)
     }
 
+    @Test fun setProfileSendsTheOpAndReadsTheServersProfile() = runBlocking {
+        val profile = """{"result":{"profile":{"nickname":"Tok","nicknameLower":"tok","tag":"8571","nicknameChangedAtMs":5,"avatar":{"kind":"preset","id":"cat"},"termsAcceptedVersion":2,"createdAtMs":5,"updatedAtMs":6}}}"""
+        val transport = ScriptedTransport(response(200, profile), response(200, profile), response(200, profile), response(200, "{\"result\":{}}"))
+        val c = client(transport)
+        val created = c.setProfile(MonsterApiClient.ProfileChange.Create("Tok", "cat", 2))
+        assertEquals("8571", (created as MonsterApiClient.CallResult.Success).value.tag)
+        c.setProfile(MonsterApiClient.ProfileChange.Nickname("Tok"))
+        c.setProfile(MonsterApiClient.ProfileChange.Avatar("cat"))
+        assertEquals("https://asia-northeast3-tokenwatch-app.cloudfunctions.net/setProfile", transport.requests[0].url.toString())
+        assertEquals(
+            listOf(
+                mapOf("op" to "create", "nickname" to "Tok", "avatarId" to "cat", "termsAcceptedVersion" to 2.0),
+                mapOf("op" to "nickname", "nickname" to "Tok"),
+                mapOf("op" to "avatar", "avatarId" to "cat"),
+            ),
+            transport.requests.take(3).map { it.json()["data"] },
+        )
+        // An answer without a readable profile is not a save.
+        assertEquals(
+            MonsterApiClient.CallResult.Failure(MonsterApiClient.CallError.Transport),
+            c.setProfile(MonsterApiClient.ProfileChange.Avatar("cat")),
+        )
+    }
+
+    @Test fun deleteAccountIsAnEmptyCall() = runBlocking {
+        val transport = ScriptedTransport(response(200, """{"result":{"deleted":true}}"""))
+        assertEquals(MonsterApiClient.CallResult.Success(Unit), client(transport).deleteAccount())
+        val request = transport.requests.single()
+        assertEquals("https://asia-northeast3-tokenwatch-app.cloudfunctions.net/deleteAccount", request.url.toString())
+        assertEquals(emptyMap<String, Any>(), request.json()["data"])
+    }
+
     @Test fun signedOutCallsNothing() = runBlocking {
         val none = ScriptedTransport()
         assertEquals(

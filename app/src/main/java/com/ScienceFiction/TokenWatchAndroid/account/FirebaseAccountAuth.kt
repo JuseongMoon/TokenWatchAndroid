@@ -187,19 +187,6 @@ class FirebaseAccountAuth(
         }
     }
 
-    override suspend fun deleteUser(): Boolean {
-        val user = auth?.currentUser ?: return false
-        return try {
-            user.delete().await()
-            clearGoogleState()
-            true
-        } catch (cancel: CancellationException) {
-            throw cancel
-        } catch (_: Exception) {
-            false
-        }
-    }
-
     override suspend fun signOut() {
         auth?.signOut()
         clearGoogleState()

@@ -4,13 +4,11 @@ import com.ScienceFiction.TokenWatchAndroid.domain.account.PlayerProfile
 import com.ScienceFiction.TokenWatchAndroid.network.core.NetworkTransport
 import kotlinx.coroutines.CancellationException
 import okhttp3.HttpUrl
-import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
 
 /**
- * Reads and writes the app account profile (`players/{uid}`, `nametags/{nickname#tag}`) over Firestore REST,
- * mirroring iOS `PlayerProfileClient`.
+ * Reads the app account profile (`players/{uid}`) over Firestore REST, mirroring iOS
+ * `PlayerProfileClient`. Writes go through the V2 server callable (`setProfile`).
  *
  * Authentication is the Firebase ID token (`Authorization: Bearer`), fetched right before each request
  * and only ever placed in that header — never stored, logged or put in an exception. No `?key=` is
@@ -33,16 +31,6 @@ class PlayerProfileClient(
         data object Failed : FetchResult()
     }
 
-    enum class Availability { AVAILABLE, TAKEN, FAILED }
-
-    enum class CommitResult {
-        OK,
-
-        /** The nametag reservation belongs to another account, so the whole commit was refused (redraw the tag). */
-        TAKEN,
-        FAILED,
-    }
-
     val documents = PlayerDocuments(projectId)
 
     /** Server time (skew-corrected). Plain device time until the skew is known. */
@@ -50,7 +38,7 @@ class PlayerProfileClient(
     val knowsServerTime: Boolean get() = clock.offsetMs != null
 
     suspend fun fetchProfile(uid: String): FetchResult {
-        val (status, body) = send("GET", listOf("players", uid)) ?: return FetchResult.Failed
+        val (status, body) = get(listOf("players", uid)) ?: return FetchResult.Failed
         return when (status) {
             200 -> PlayerDocuments.decodeProfile(body)?.let { FetchResult.Found(it) } ?: FetchResult.Failed
             404 -> FetchResult.NotFound
@@ -58,46 +46,15 @@ class PlayerProfileClient(
         }
     }
 
-    /** Nametag reservation check. 404 is free, and a reservation held by [uid] itself is available. */
-    suspend fun nametagAvailability(key: String, uid: String): Availability {
-        val (status, body) = send("GET", listOf("nametags", key)) ?: return Availability.FAILED
-        return when (status) {
-            404 -> Availability.AVAILABLE
-            200 -> when (PlayerDocuments.decodeNametagOwner(body)) {
-                null -> Availability.FAILED
-                uid -> Availability.AVAILABLE
-                else -> Availability.TAKEN
-            }
-            else -> Availability.FAILED
-        }
-    }
-
     /**
-     * Commits a write batch atomically. Given [nametagKey], a failure re-reads the reservation to tell
-     * `taken` apart. A duplicate reservation measured as 409 on the emulator, but the re-read decides
-     * rather than the status code.
-     */
-    suspend fun commit(writes: List<FirestoreWrite>, uid: String, nametagKey: String? = null): CommitResult {
-        val response = send("POST", COMMIT, PlayerDocuments.commitBody(writes))
-        if (response != null && response.first in 200..299) return CommitResult.OK
-        if (nametagKey != null && nametagAvailability(nametagKey, uid) == Availability.TAKEN) {
-            return CommitResult.TAKEN
-        }
-        return CommitResult.FAILED
-    }
-
-    /**
-     * Makes sure the server skew is known before timestamps are written (±60 s rule). The profile GET
-     * right after sign-in usually measures it already.
+     * Makes sure the server skew is known, so the 30-day nickname interval is checked on the server's
+     * clock. The profile GET right after sign-in usually measures it already.
      */
     suspend fun ensureServerTime(uid: String) {
-        if (!knowsServerTime) send("GET", listOf("players", uid))
+        if (!knowsServerTime) get(listOf("players", uid))
     }
 
-    /**
-     * The full request URL, exposed for tests. Document ids (Korean nicknames, the `#` of a nametag) are
-     * percent-encoded per segment, so `#` travels as `%23` instead of starting a fragment.
-     */
+    /** The full request URL, exposed for tests. Document ids are percent-encoded per segment. */
     internal fun url(segments: List<String>): HttpUrl {
         val builder = HttpUrl.Builder()
             .scheme("https")
@@ -107,17 +64,13 @@ class PlayerProfileClient(
             .addPathSegment(documents.projectId)
             .addPathSegment("databases")
             .addPathSegment("(default)")
-        if (segments == COMMIT) {
-            builder.addPathSegment("documents:commit")
-        } else {
-            builder.addPathSegment("documents")
-            segments.forEach(builder::addPathSegment)
-        }
+            .addPathSegment("documents")
+        segments.forEach(builder::addPathSegment)
         return builder.build()
     }
 
-    /** Status and body, or null when nothing came back (no token, transport failure). */
-    private suspend fun send(method: String, segments: List<String>, body: String? = null): Pair<Int, String>? {
+    /** A `documents/…` GET: status and body, or null when nothing came back (no token, transport failure). */
+    private suspend fun get(segments: List<String>): Pair<Int, String>? {
         val url = url(segments)
         for (attempt in 0..1) {
             val idToken = token(attempt > 0) ?: return null
@@ -126,7 +79,7 @@ class PlayerProfileClient(
                 .header("Authorization", "Bearer $idToken")
                 .header("Accept", "application/json")
                 .header("Cache-Control", "no-cache")
-                .method(method, body?.toRequestBody(JSON))
+                .get()
                 .build()
             val response = try {
                 transport.execute(request)
@@ -144,7 +97,5 @@ class PlayerProfileClient(
 
     private companion object {
         const val HOST = "firestore.googleapis.com"
-        val COMMIT = listOf(":commit")
-        val JSON = "application/json; charset=utf-8".toMediaType()
     }
 }

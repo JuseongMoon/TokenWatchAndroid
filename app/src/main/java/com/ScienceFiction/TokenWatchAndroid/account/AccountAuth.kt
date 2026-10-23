@@ -86,7 +86,8 @@ interface AccountAuth {
 
     /** Reauthentication right before deletion. With Apple linked, Apple is used and its token revoked. */
     suspend fun reauthenticateForDeletion(): AccountReauthResult
-    suspend fun deleteUser(): Boolean
+
+    /** Ends this device's sign-in (Google's included). Also called after a deletion: the server removes the Auth user. */
     suspend fun signOut()
     suspend fun idToken(forceRefresh: Boolean): String?
 
@@ -108,7 +109,6 @@ object UnavailableAccountAuth : AccountAuth {
     override suspend fun signIn(method: AccountMethod): AccountAuthResult = AccountAuthResult.Unavailable
     override suspend fun link(method: AccountMethod): AccountAuthResult = AccountAuthResult.Unavailable
     override suspend fun reauthenticateForDeletion(): AccountReauthResult = AccountReauthResult.FAILED
-    override suspend fun deleteUser(): Boolean = false
     override suspend fun signOut() = Unit
     override suspend fun idToken(forceRefresh: Boolean): String? = null
     override suspend fun isOperator(forceRefresh: Boolean): Boolean = false

@@ -337,6 +337,27 @@ class MonsterLogicTest {
         assertEquals(mapOf("goblin" to 2, "orc" to 1), MonsterApiClient.cappedKills(mapOf("orc" to 2, "goblin" to 2), cap = 3))
     }
 
+    /** `setProfile`'s public profile (plain JSON). */
+    @Test fun callableProfileDecoding() {
+        val json = mapOf(
+            "nickname" to "Slime왕", "nicknameLower" to "slime왕", "tag" to "0042",
+            "nicknameChangedAtMs" to 1_700_000_000_000.0, "avatar" to mapOf("kind" to "preset", "id" to "mage"),
+            "termsAcceptedVersion" to 2.0, "createdAtMs" to 1_690_000_000_000.0, "updatedAtMs" to 1_700_000_000_001.0,
+        )
+        assertEquals(
+            com.ScienceFiction.TokenWatchAndroid.domain.account.PlayerProfile(
+                nickname = "Slime왕", nicknameLower = "slime왕", tag = "0042", nicknameChangedAtMs = 1_700_000_000_000,
+                avatarId = "mage", termsAcceptedVersion = 2, createdAtMs = 1_690_000_000_000, updatedAtMs = 1_700_000_000_001,
+            ),
+            MonsterApiClient.decodeProfile(json),
+        )
+        // A V1 account: no terms version reads 0, an avatar that is not a preset reads as the fallback.
+        val legacy = json - "termsAcceptedVersion" + ("avatar" to mapOf("kind" to "photo"))
+        val p = MonsterApiClient.decodeProfile(legacy)!!
+        assertEquals(0 to "slime", p.termsAcceptedVersion to p.avatarId)
+        assertNull(MonsterApiClient.decodeProfile(legacy + ("tag" to "42")))
+    }
+
     @Test fun encounterDtoDecoding() {
         val dto = MonsterEncounterDto.fromJson(
             mapOf(

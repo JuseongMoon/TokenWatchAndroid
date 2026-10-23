@@ -180,6 +180,8 @@ class TokenWatchContainer(context: Context) : Closeable {
         AccountStore(
             auth = auth,
             profiles = projectId?.let { PlayerProfileClient(it, transport, auth::idToken) },
+            // Profile writes and deletion are server callables; no API key, the ID token is the credential.
+            server = projectId?.let { MonsterApiClient(it, null, auth::idToken, transport, BuildConfig.VERSION_NAME) },
             cache = PlayerProfileRepository(applicationContext),
             scope = accountScope,
             isDemo = { agentStore.isDemo.value },

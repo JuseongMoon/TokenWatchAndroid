@@ -87,28 +87,14 @@ class NicknamePolicyTest {
         // Non-ASCII digits (Arabic-Indic, full-width) are not tags.
         assertFalse(NicknamePolicy.isValidTag("١٢٣٤"))
         assertFalse(NicknamePolicy.isValidTag("１２３４"))
-        for (d in 0..9) assertTrue(NicknamePolicy.isRepdigit(d.toString().repeat(4)))
-        assertFalse(NicknamePolicy.isRepdigit("1112"))
-        assertEquals("모험가#0042", NicknamePolicy.nametagKey("모험가", "0042"))
     }
 
-    @Test fun randomTagIsNeverARepdigitAndDiffersFromTheOldOne() {
-        repeat(2000) {
-            val tag = NicknamePolicy.randomTag(excluding = "1234")
-            assertTrue(NicknamePolicy.isValidTag(tag))
-            assertFalse(NicknamePolicy.isRepdigit(tag))
-            assertTrue(tag != "1234")
-        }
+    @Test fun termsVersionIsTheMonsterHuntRevision() {
+        // A new sign-up agrees to version 2 (the monster hunt) at once.
+        assertEquals(2, PlayerProfile.CURRENT_TERMS_VERSION)
     }
 
-    @Test fun randomTagSkipsRepdigitsAndTheOldTagFromTheGenerator() {
-        val sequence = ArrayDeque(listOf(0, 1111, 7, 8571))
-        assertEquals("0007", NicknamePolicy.randomTag(draw = sequence::removeFirst))
-        val second = ArrayDeque(listOf(8571, 8571, 42))
-        assertEquals("0042", NicknamePolicy.randomTag(excluding = "8571", draw = second::removeFirst))
-    }
-
-    @Test fun nametagAndKeyKeepLeadingZeros() {
+    @Test fun nametagKeepsLeadingZeros() {
         val profile = PlayerProfile(
             nickname = "David",
             nicknameLower = "david",
@@ -119,9 +105,8 @@ class NicknamePolicyTest {
             createdAtMs = 1,
             updatedAtMs = 1,
         )
-        // Display has one space before the tag; the reservation key has none.
+        // Display has one space before the tag.
         assertEquals("David #0304", profile.nametag)
-        assertEquals("david#0304", profile.nametagKey)
     }
 
     @Test fun errorWireIdsMatchTheContract() {

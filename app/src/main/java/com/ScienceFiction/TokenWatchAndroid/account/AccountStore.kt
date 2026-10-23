@@ -8,6 +8,7 @@ import com.ScienceFiction.TokenWatchAndroid.domain.account.NicknameError
 import com.ScienceFiction.TokenWatchAndroid.domain.account.NicknamePolicy
 import com.ScienceFiction.TokenWatchAndroid.domain.account.PlayerProfile
 import com.ScienceFiction.TokenWatchAndroid.domain.account.PlayerProfileCache
+import com.ScienceFiction.TokenWatchAndroid.monster.MonsterApiClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.async
@@ -15,7 +16,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import kotlin.random.Random
 
 /**
  * App account (TokenWatch's own account) state machine, mirroring iOS `AccountStore`. It coordinates
@@ -27,10 +27,11 @@ import kotlin.random.Random
  * - The server holds the profile. A minimal cache only lets the PLAYER box draw offline. When the
  *   PLAYER box shows, the server is asked again, and an account deleted on the web or another device
  *   is tidied up into the signed-out state.
- * - Deletion is reauthenticate → (Apple) revoke → profile delete commit → Auth user delete. A cancelled
- *   reauthentication or a failed revocation stops it before anything is erased.
- * - Nicknames carry a random four-digit tag (`nickname#1234`); saving draws one, checks the nametag
- *   reservation and redraws on a clash, up to six times.
+ * - Profile writes and deletion go through the V2 server callables (`setProfile`, `deleteAccount`). The
+ *   server judges banned words, draws the four-digit tag (`nickname#1234`) and enforces the 30-day
+ *   interval; the app only screens input errors first to save calls. Profile reads stay on Firestore REST.
+ * - Deletion is reauthenticate → (Apple) revoke → server deletion (every record and the Auth user). A
+ *   cancelled reauthentication or a failed revocation stops it before anything is erased.
  */
 sealed class AccountState {
     /** Firebase is unusable; the PLAYER box is hidden. */
@@ -90,12 +91,12 @@ interface PlayerProfileCacheStore {
 class AccountStore(
     private val auth: AccountAuth,
     private val profiles: PlayerProfileClient?,
+    /** The profile write and deletion callables. */
+    private val server: MonsterApiClient?,
     private val cache: PlayerProfileCacheStore,
     private val scope: CoroutineScope,
     private val isDemo: () -> Boolean = { false },
     private val log: (AnalyticsEvent) -> Unit = {},
-    /** Draws a tag number in 0..9999; tests pass fixed sequences. */
-    private val drawTag: () -> Int = { Random.nextInt(0, 10_000) },
 ) {
     private val _state = MutableStateFlow<AccountState>(
         if (auth.isAvailable && profiles != null) AccountState.SignedOut else AccountState.Unavailable,
@@ -143,11 +144,14 @@ class AccountStore(
     /** An ID token for the monster server calls, fetched right before each request. Null in demo mode. */
     suspend fun idToken(forceRefresh: Boolean): String? = if (isDemo()) null else auth.idToken(forceRefresh)
 
-    /** Shows a monster consent (terms version 2) the server just recorded in the on-screen profile. */
+    /** Shows a monster consent (terms version 2) the server just recorded, in the on-screen profile and the cache. */
     fun markTermsAccepted(version: Int) {
         val current = _state.value as? AccountState.SignedIn ?: return
+        val uid = currentUid ?: return
         if (current.profile.termsAcceptedVersion >= version) return
-        _state.value = AccountState.SignedIn(current.profile.copy(termsAcceptedVersion = version))
+        val updated = current.profile.copy(termsAcceptedVersion = version)
+        _state.value = AccountState.SignedIn(updated)
+        scope.launch { cache.save(cacheOf(updated, uid)) }
     }
 
     fun clearNotice() {
@@ -206,7 +210,9 @@ class AccountStore(
                     tag = cached.tag,
                     nicknameChangedAtMs = cached.nicknameChangedAtMs,
                     avatarId = cached.avatarId,
-                    termsAcceptedVersion = PlayerProfile.CURRENT_TERMS_VERSION,
+                    // Caches from before the terms version have none: read as not yet consented (1); the
+                    // server's profile corrects it right after.
+                    termsAcceptedVersion = cached.termsAcceptedVersion ?: 1,
                     createdAtMs = cached.nicknameChangedAtMs,
                     updatedAtMs = cached.nicknameChangedAtMs,
                 ),
@@ -352,127 +358,89 @@ class AccountStore(
 
     // MARK: Profile
 
-    /** The first profile save: a random tag is drawn, and its reservation and the profile go out in one commit. */
+    /**
+     * The first profile save. The server draws the tag and creates the profile with its reservation. A new
+     * sign-up agrees to the current terms (the monster hunt included), so the consent screen never follows.
+     */
     suspend fun createProfile(nickname: String, avatarId: String, termsAccepted: Boolean): SaveOutcome {
         val profiles = profiles
+        val server = server
         val uid = currentUid
-        if (isDemo() || _state.value != AccountState.NeedsProfile || profiles == null || uid == null || _isWorking.value) {
+        if (isDemo() || _state.value != AccountState.NeedsProfile || profiles == null || server == null ||
+            uid == null || _isWorking.value
+        ) {
             return SaveOutcome.Failed
         }
         val normalized = NicknamePolicy.normalize(nickname)
         NicknamePolicy.validate(normalized)?.let { return SaveOutcome.Invalid(it) }
         if (!termsAccepted) return SaveOutcome.Invalid(NicknameError.TERMS_REQUIRED)
-        val lower = NicknamePolicy.lower(normalized)
         return working {
-            profiles.ensureServerTime(uid)
-            repeat(TAG_ATTEMPTS) {
-                val tag = NicknamePolicy.randomTag(draw = drawTag)
-                val key = NicknamePolicy.nametagKey(lower, tag)
-                when (profiles.nametagAvailability(key, uid)) {
-                    PlayerProfileClient.Availability.TAKEN -> return@repeat
-                    PlayerProfileClient.Availability.FAILED -> {
-                        _notice.value = AccountNotice.SaveFailed
-                        return@working SaveOutcome.Failed
-                    }
-                    PlayerProfileClient.Availability.AVAILABLE -> Unit
+            val change = MonsterApiClient.ProfileChange.Create(normalized, avatarId, PlayerProfile.CURRENT_TERMS_VERSION)
+            when (val result = server.setProfile(change)) {
+                is MonsterApiClient.CallResult.Success -> {
+                    apply(result.value, uid)
+                    SaveOutcome.Saved
                 }
-                val now = profiles.nowMs
-                val profile = PlayerProfile(
-                    nickname = normalized,
-                    nicknameLower = lower,
-                    tag = tag,
-                    nicknameChangedAtMs = now,
-                    avatarId = avatarId,
-                    termsAcceptedVersion = PlayerProfile.CURRENT_TERMS_VERSION,
-                    createdAtMs = now,
-                    updatedAtMs = now,
-                )
-                when (profiles.commit(profiles.documents.create(uid, profile), uid, key)) {
-                    PlayerProfileClient.CommitResult.OK -> {
-                        apply(profile, uid)
+                is MonsterApiClient.CallResult.Failure -> {
+                    nicknameError(result.error)?.let { return@working SaveOutcome.Invalid(it) }
+                    // Only the answer may have been lost (the server never creates twice): read to check.
+                    val fetched = profiles.fetchProfile(uid)
+                    if (fetched is PlayerProfileClient.FetchResult.Found) {
+                        apply(fetched.profile, uid)
                         return@working SaveOutcome.Saved
                     }
-                    // Another account took the same tag in between: draw again.
-                    PlayerProfileClient.CommitResult.TAKEN -> return@repeat
-                    PlayerProfileClient.CommitResult.FAILED -> {
-                        _notice.value = AccountNotice.SaveFailed
-                        return@working SaveOutcome.Failed
-                    }
+                    _notice.value = AccountNotice.SaveFailed
+                    SaveOutcome.Failed
                 }
             }
-            // The nickname's tags are all but used up (practically never happens).
-            SaveOutcome.Invalid(NicknameError.TAKEN)
         }
     }
 
-    /** Nickname change (once every 30 days). Every change draws a new tag, different from the previous one. */
+    /** Nickname change (once every 30 days). The server draws a new tag, different from the previous one. */
     suspend fun changeNickname(nickname: String): SaveOutcome {
         val current = profile
         val profiles = profiles
+        val server = server
         val uid = currentUid
-        if (isDemo() || current == null || profiles == null || uid == null || _isWorking.value) return SaveOutcome.Failed
+        if (isDemo() || current == null || profiles == null || server == null || uid == null || _isWorking.value) {
+            return SaveOutcome.Failed
+        }
         val normalized = NicknamePolicy.normalize(nickname)
+        // The server refuses the same nickname, so it is saved without a call.
         if (normalized == current.nickname) return SaveOutcome.Saved
         NicknamePolicy.validate(normalized)?.let { return SaveOutcome.Invalid(it) }
         return working {
             profiles.ensureServerTime(uid)
             if (nicknameCooldownRemainingMs() > 0) return@working SaveOutcome.Invalid(NicknameError.COOLDOWN)
-            val lower = NicknamePolicy.lower(normalized)
-            repeat(TAG_ATTEMPTS) {
-                val tag = NicknamePolicy.randomTag(excluding = current.tag, draw = drawTag)
-                val key = NicknamePolicy.nametagKey(lower, tag)
-                when (profiles.nametagAvailability(key, uid)) {
-                    PlayerProfileClient.Availability.TAKEN -> return@repeat
-                    PlayerProfileClient.Availability.FAILED -> {
-                        _notice.value = AccountNotice.SaveFailed
-                        return@working SaveOutcome.Failed
-                    }
-                    PlayerProfileClient.Availability.AVAILABLE -> Unit
+            when (val result = server.setProfile(MonsterApiClient.ProfileChange.Nickname(normalized))) {
+                is MonsterApiClient.CallResult.Success -> {
+                    apply(result.value, uid)
+                    log(AnalyticsEvent.ProfileUpdate(ProfileField.NICKNAME))
+                    SaveOutcome.Saved
                 }
-                val now = profiles.nowMs
-                val writes = profiles.documents.changeNickname(uid, current.nametagKey, normalized, lower, tag, now)
-                when (profiles.commit(writes, uid, key)) {
-                    PlayerProfileClient.CommitResult.OK -> {
-                        apply(
-                            current.copy(
-                                nickname = normalized,
-                                nicknameLower = lower,
-                                tag = tag,
-                                nicknameChangedAtMs = now,
-                                updatedAtMs = now,
-                            ),
-                            uid,
-                        )
-                        log(AnalyticsEvent.ProfileUpdate(ProfileField.NICKNAME))
-                        return@working SaveOutcome.Saved
-                    }
-                    PlayerProfileClient.CommitResult.TAKEN -> return@repeat
-                    PlayerProfileClient.CommitResult.FAILED -> {
-                        _notice.value = AccountNotice.SaveFailed
-                        return@working SaveOutcome.Failed
-                    }
+                is MonsterApiClient.CallResult.Failure -> {
+                    nicknameError(result.error)?.let { return@working SaveOutcome.Invalid(it) }
+                    _notice.value = AccountNotice.SaveFailed
+                    SaveOutcome.Failed
                 }
             }
-            SaveOutcome.Invalid(NicknameError.TAKEN)
         }
     }
 
     suspend fun changeAvatar(avatarId: String): SaveOutcome {
         val current = profile
-        val profiles = profiles
+        val server = server
         val uid = currentUid
-        if (isDemo() || current == null || profiles == null || uid == null || _isWorking.value) return SaveOutcome.Failed
+        if (isDemo() || current == null || server == null || uid == null || _isWorking.value) return SaveOutcome.Failed
         if (avatarId == current.avatarId) return SaveOutcome.Saved
         return working {
-            profiles.ensureServerTime(uid)
-            val now = profiles.nowMs
-            when (profiles.commit(profiles.documents.changeAvatar(uid, avatarId, now), uid)) {
-                PlayerProfileClient.CommitResult.OK -> {
-                    apply(current.copy(avatarId = avatarId, updatedAtMs = now), uid)
+            when (val result = server.setProfile(MonsterApiClient.ProfileChange.Avatar(avatarId))) {
+                is MonsterApiClient.CallResult.Success -> {
+                    apply(result.value, uid)
                     log(AnalyticsEvent.ProfileUpdate(ProfileField.AVATAR))
                     SaveOutcome.Saved
                 }
-                PlayerProfileClient.CommitResult.TAKEN, PlayerProfileClient.CommitResult.FAILED -> {
+                is MonsterApiClient.CallResult.Failure -> {
                     _notice.value = AccountNotice.SaveFailed
                     SaveOutcome.Failed
                 }
@@ -482,24 +450,25 @@ class AccountStore(
 
     private suspend fun apply(profile: PlayerProfile, uid: String) {
         _state.value = AccountState.SignedIn(profile)
-        cache.save(
-            PlayerProfileCache(
-                uid = uid,
-                nickname = profile.nickname,
-                tag = profile.tag,
-                avatarId = profile.avatarId,
-                nicknameChangedAtMs = profile.nicknameChangedAtMs,
-            ),
-        )
+        cache.save(cacheOf(profile, uid))
     }
+
+    private fun cacheOf(profile: PlayerProfile, uid: String) = PlayerProfileCache(
+        uid = uid,
+        nickname = profile.nickname,
+        tag = profile.tag,
+        avatarId = profile.avatarId,
+        nicknameChangedAtMs = profile.nicknameChangedAtMs,
+        termsAcceptedVersion = profile.termsAcceptedVersion,
+    )
 
     // MARK: Deletion
 
-    /** Deletes the account from inside the app. Without a profile (NeedsProfile) only the Auth user goes. */
+    /** Deletes the account from inside the app. Without a profile (NeedsProfile) the same call removes the sign-in records. */
     suspend fun deleteAccount() {
-        val profiles = profiles
+        val server = server
         val uid = currentUid
-        if (isDemo() || profiles == null || uid == null || _state.value == AccountState.Deleting || _isWorking.value) {
+        if (isDemo() || server == null || uid == null || _state.value == AccountState.Deleting || _isWorking.value) {
             return
         }
         val previous = _state.value
@@ -521,33 +490,32 @@ class AccountStore(
                 return
             }
         }
-        if (previous is AccountState.SignedIn) {
-            val writes = profiles.documents.delete(uid, previous.profile.nametagKey)
-            if (profiles.commit(writes, uid) != PlayerProfileClient.CommitResult.OK) {
+        // The server only takes a token from a sign-in in the last five minutes: fetch one carrying the
+        // reauthentication.
+        auth.idToken(forceRefresh = true)
+        if (server.deleteAccount() is MonsterApiClient.CallResult.Failure) {
+            // Only the answer may have been lost: with the sign-in record already gone, the deletion finished.
+            if (auth.reloadUser() != AccountSessionStatus.REVOKED) {
                 _state.value = previous
                 _notice.value = AccountNotice.DeleteFailed
                 return
             }
         }
-        if (!auth.deleteUser()) {
-            // The profile is gone and only the Auth user is left; the next sign-in starts at profile
-            // setup. The user is told to retry.
-            cache.clear()
-            _state.value = AccountState.NeedsProfile
-            _notice.value = AccountNotice.DeleteFailed
-            return
-        }
+        auth.signOut()
         resetLocal()
         onAccountDeleted?.invoke(uid)
         log(AnalyticsEvent.AccountDelete)
     }
 
     private companion object {
-        /** How many times a tag is drawn before giving up with `taken`. */
-        const val TAG_ATTEMPTS = 6
-
         /** The minimum gap between two [revalidate] reads. */
         const val REVALIDATE_INTERVAL_MS = 30_000L
+    }
+
+    /** A server error that is a nickname input error (the contract's nickname codes). Anything else is a failed save. */
+    private fun nicknameError(error: MonsterApiClient.CallError): NicknameError? {
+        val code = (error as? MonsterApiClient.CallError.Server)?.code ?: return null
+        return NicknameError.entries.firstOrNull { it.wireId == code }
     }
 
     private suspend fun <T> working(block: suspend () -> T): T {
