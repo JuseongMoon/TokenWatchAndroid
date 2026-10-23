@@ -8,10 +8,10 @@ The Android sources mirror the portable iOS patches through commit `bfdb4ed` on 
 1.3.0 (16) content: the review prompt, login failure diagnostics, the two analytics additions,
 the split "hide unused graphs" setting, and the credit-gauge reset confirmation described below.
 On the `feature/account` branch it also mirrors the optional app account and the monster hunt
-through iOS commit `e5309c2` on `feature/account` (`a8fc3a9`, `2d268f8`, `dfae3ea`, `26b74fc`,
+through iOS commit `c18446d` on `feature/account` (`a8fc3a9`, `2d268f8`, `dfae3ea`, `26b74fc`,
 `0ab185e`, `816d6aa`, `8e5ab75`, `bef30eb`, `6bc67ae`, `b5aa200`, `e2e2152`, `5a452e8`,
-`35c4764`, `e5309c2`), described under "Optional app account" and "Monster hunt and adventurers'
-guild" below.
+`35c4764`, `e5309c2`, `c18446d`), described under "Optional app account" and "Monster hunt and
+adventurer ranks" below.
 Uncommitted iOS working-tree changes are deliberately not part of this baseline.
 
 Firebase Analytics runs against the Android app's own Firebase registration and
@@ -139,7 +139,7 @@ Firebase Analytics runs against the Android app's own Firebase registration and
   (checked first against the server's `Date` header; every change, even a case-only one, gets a new
   tag different from the last), links the other sign-in method, signs out, and deletes the account.
   Deletion re-authenticates first (for Apple it revokes the Apple token and stops if revocation
-  fails), then the server erases the profile, the monster records, the guild rank and the sign-in
+  fails), then the server erases the profile, the monster records, the adventurer rank and the sign-in
   record; an answer lost after the sign-in record is already gone still counts as done.
 - Profiles are read over Firestore REST, and written and deleted through server callables
   (`setProfile`, `deleteAccount`), with the signed-in user's ID token, fetched right before each
@@ -159,7 +159,7 @@ Firebase Analytics runs against the Android app's own Firebase registration and
   `account_link`, `account_logout`, `account_delete` and `profile_update` (which field changed,
   never its value), plus one screen event per account screen. No uid, nickname or email is sent.
 
-## Monster hunt and adventurers' guild
+## Monster hunt and adventurer ranks
 
 - Monsters appear on subscription gauges that have a future reset: a completion monster when a
   gauge reaches 100% (one per provider and reset, however many windows share that reset), and now
@@ -170,7 +170,7 @@ Firebase Analytics runs against the Android app's own Firebase registration and
   animation, then the monster walks on in gray with a halo at half speed. The "gauge monsters"
   setting switches both spawning and drawing off.
 - Signed-in players who agree to the monster terms get server-judged spawns and defeats that count
-  on the guild leaderboard. Everyone else hunts as a guest with deterministic device draws that
+  in the adventurer ranks. Everyone else hunts as a guest with deterministic device draws that
   stay unranked and are merged once, as history, after agreeing (up to 500 defeats, the most-hunted
   species first). Spawns are requested only from
   foreground refreshes. The server receives the provider, window name, reset bucket, period, slot,
@@ -178,10 +178,12 @@ Firebase Analytics runs against the Android app's own Firebase registration and
   (300-second reset buckets, Copilot's UTC-midnight date, the language-free Codex label, the period
   table), the draw and the gray tone match iOS bit for bit and are pinned by the same test
   constants. The monster sprites ship as the same JSON bytes as iOS, verified by SHA-256.
-- A guild sign in the main header, left of the announcements button, opens the leaderboard: the
-  top 100 by score (ties go to whoever got there first), the player's own rank, reporting with four
-  reasons and an on-device block. Before agreeing it opens the consent screen instead and carries a
-  dot. Demo mode dims the sign and shows memory-only sample monsters on the sample 100% gauges; they
+- A sign in the main header, left of the announcements button, opens the adventurer ranks: a
+  "this week" tab (starting over every Monday at 00:00 KST, the default) and an "all time" tab, each
+  with the top 100 by score (ties go to whoever got there first) and the player's own rank in it,
+  plus reporting with four reasons and an on-device block. Each tab caches its list for five
+  minutes, and the week tab reads again as soon as the week turns. Before agreeing the sign opens
+  the consent screen instead and carries a dot. Demo mode dims the sign and shows memory-only sample monsters on the sample 100% gauges; they
   play the same defeat animation as real ones.
 - A device session ledger remembers which account received each session on this device, so
   switching accounts does not collect the same usage twice.

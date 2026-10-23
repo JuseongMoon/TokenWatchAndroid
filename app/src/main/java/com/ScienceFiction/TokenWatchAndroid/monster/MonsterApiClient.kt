@@ -18,8 +18,8 @@ import okhttp3.RequestBody.Companion.toRequestBody
  * `POST https://{region}-{project}.cloudfunctions.net/{name}` with body `{"data": …}`, answering
  * `{"result": …}`. Errors are told apart by the `error.details.code` enumeration only — `message` is
  * neither shown nor logged. The ID token is fetched right before each request and only placed in its
- * header; a 401 force-refreshes it and retries once. The top 100 is read directly with a Firestore REST
- * `runQuery` (public read rules). The app account's profile writes (`setProfile`) and in-app deletion
+ * header; a 401 force-refreshes it and retries once. The top 100 (this week and all time) is read
+ * directly with a Firestore REST `runQuery` (public read rules). The app account's profile writes (`setProfile`) and in-app deletion
  * (`deleteAccount`) go through this client too (AccountStore).
  *
  * What is sent: provider, window label, period, reset bucket, slot, platform and app version. Never a
@@ -119,9 +119,7 @@ class MonsterApiClient(
     suspend fun acceptTerms(version: Int): CallResult<Int> =
         call("acceptTerms", mapOf("version" to version)).map { it["termsAcceptedVersion"].asLooseInt() ?: version }
 
-    suspend fun myRank(): CallResult<MyRank> = call("myRank", emptyMap()).map { r ->
-        MyRank(listed = r["listed"] as? Boolean ?: false, rank = r["rank"].asLooseInt(), stats = MonsterStats.fromJson(r))
-    }
+    suspend fun myRank(): CallResult<MyRank> = call("myRank", emptyMap()).map(::decodeMyRank)
 
     suspend fun mergeGuestHistory(progress: MonsterGuestProgress): CallResult<Boolean> {
         val data = buildMap<String, Any> {
@@ -172,8 +170,11 @@ class MonsterApiClient(
 
     // MARK: Leaderboard
 
-    /** The top 100 (total score descending, ties to whoever got there first). Readable signed out too. */
-    suspend fun leaderboardTop(limit: Int = 100): List<LeaderboardEntry>? {
+    /**
+     * The top 100 (score descending, ties to whoever got there first). Readable signed out too. The week
+     * tab ranks only the documents of [weekId] (that week's Monday, KST) by their weekly score.
+     */
+    suspend fun leaderboardTop(scope: LeaderboardScope, weekId: String, limit: Int = 100): List<LeaderboardEntry>? {
         val url = HttpUrl.Builder()
             .scheme("https")
             .host("firestore.googleapis.com")
@@ -185,21 +186,11 @@ class MonsterApiClient(
             .addPathSegment("documents:runQuery")
             .apply { apiKey?.let { addQueryParameter("key", it) } }
             .build()
-        val query = mapOf(
-            "structuredQuery" to mapOf(
-                "from" to listOf(mapOf("collectionId" to "leaderboard")),
-                "orderBy" to listOf(
-                    mapOf("field" to mapOf("fieldPath" to "totalScore"), "direction" to "DESCENDING"),
-                    mapOf("field" to mapOf("fieldPath" to "scoreReachedAtMs"), "direction" to "ASCENDING"),
-                ),
-                "limit" to limit.coerceIn(1, 100),
-            ),
-        )
         val builder = Request.Builder()
             .url(url)
             .header("Accept", "application/json")
             .header("Cache-Control", "no-cache")
-            .post(mapAdapter.toJson(query).toRequestBody(JSON))
+            .post(mapAdapter.toJson(leaderboardQuery(scope, weekId, limit)).toRequestBody(JSON))
         token(false)?.let { builder.header("Authorization", "Bearer $it") }
         val response = try {
             transport.execute(builder.build())
@@ -209,7 +200,7 @@ class MonsterApiClient(
             return null
         }
         if (response.statusCode !in 200..299) return null
-        return decodeLeaderboard(response.bodyText())
+        return decodeLeaderboard(response.bodyText(), scope)
     }
 
     // MARK: Transport
@@ -310,8 +301,47 @@ class MonsterApiClient(
             )
         }
 
-        /** runQuery's array (a `document` per element) → leaderboard rows. Documents missing fields are dropped. */
-        fun decodeLeaderboard(body: String): List<LeaderboardEntry>? {
+        /** The tab's field names: score, reached-at, common and special kills. */
+        private fun fieldNames(scope: LeaderboardScope): List<String> = when (scope) {
+            LeaderboardScope.WEEK -> listOf("weekScore", "weekReachedAtMs", "weekCommonKills", "weekSpecialKills")
+            LeaderboardScope.ALL_TIME -> listOf("totalScore", "scoreReachedAtMs", "commonKills", "specialKills")
+        }
+
+        /** The runQuery body. Pure. */
+        fun leaderboardQuery(scope: LeaderboardScope, weekId: String, limit: Int): Map<String, Any> {
+            val (score, reachedAt) = fieldNames(scope)
+            val structured = buildMap<String, Any> {
+                put("from", listOf(mapOf("collectionId" to "leaderboard")))
+                if (scope == LeaderboardScope.WEEK) {
+                    put(
+                        "where",
+                        mapOf(
+                            "fieldFilter" to mapOf(
+                                "field" to mapOf("fieldPath" to "weekId"),
+                                "op" to "EQUAL",
+                                "value" to mapOf("stringValue" to weekId),
+                            ),
+                        ),
+                    )
+                }
+                put(
+                    "orderBy",
+                    listOf(
+                        mapOf("field" to mapOf("fieldPath" to score), "direction" to "DESCENDING"),
+                        mapOf("field" to mapOf("fieldPath" to reachedAt), "direction" to "ASCENDING"),
+                    ),
+                )
+                put("limit", limit.coerceIn(1, 100))
+            }
+            return mapOf("structuredQuery" to structured)
+        }
+
+        /**
+         * runQuery's array (a `document` per element) → leaderboard rows, with the tab's score and kills.
+         * Documents missing fields (the tab's score included) are dropped.
+         */
+        fun decodeLeaderboard(body: String, scope: LeaderboardScope): List<LeaderboardEntry>? {
+            val (score, reachedAt, common, special) = fieldNames(scope)
             val rows = runCatching { anyAdapter.fromJson(body) }.getOrNull() as? List<*> ?: return null
             return rows.mapNotNull { row ->
                 val doc = (row as? Map<*, *>)?.get("document") as? Map<*, *> ?: return@mapNotNull null
@@ -323,12 +353,32 @@ class MonsterApiClient(
                     nickname = fields["nickname"]?.stringValue ?: return@mapNotNull null,
                     tag = fields["tag"]?.stringValue ?: return@mapNotNull null,
                     avatarId = fields["avatar"]?.stringValue ?: AvatarCatalog.FALLBACK_ID,
-                    totalScore = fields["totalScore"]?.integerValue?.toInt() ?: return@mapNotNull null,
-                    scoreReachedAtMs = fields["scoreReachedAtMs"]?.integerValue ?: 0L,
-                    commonKills = fields["commonKills"]?.integerValue?.toInt() ?: 0,
-                    specialKills = fields["specialKills"]?.integerValue?.toInt() ?: 0,
+                    score = fields[score]?.integerValue?.toInt() ?: return@mapNotNull null,
+                    reachedAtMs = fields[reachedAt]?.integerValue ?: 0L,
+                    commonKills = fields[common]?.integerValue?.toInt() ?: 0,
+                    specialKills = fields[special]?.integerValue?.toInt() ?: 0,
                 )
             }
+        }
+
+        /** `myRank`'s result → the all-time rank plus this week's. Without a `week` the week is unranked. Pure. */
+        fun decodeMyRank(r: Map<String, Any?>): MyRank {
+            val week = (r["week"] as? Map<*, *>)?.let { w ->
+                MyRank.Week(
+                    weekId = w["weekId"] as? String,
+                    listed = w["listed"] as? Boolean ?: false,
+                    rank = w["rank"].asLooseInt(),
+                    score = w["score"].asLooseInt() ?: 0,
+                    commonKills = w["commonKills"].asLooseInt() ?: 0,
+                    specialKills = w["specialKills"].asLooseInt() ?: 0,
+                )
+            } ?: MyRank.Week()
+            return MyRank(
+                listed = r["listed"] as? Boolean ?: false,
+                rank = r["rank"].asLooseInt(),
+                stats = MonsterStats.fromJson(r),
+                week = week,
+            )
         }
     }
 }
@@ -380,19 +430,37 @@ data class MonsterStats(val totalScore: Int = 0, val commonKills: Int = 0, val s
     }
 }
 
-/** One leaderboard row (the public `leaderboard/{uid}` document). */
+/** The ranks' tabs. This week starts over at Monday 00:00 KST. */
+enum class LeaderboardScope { WEEK, ALL_TIME }
+
+/** One leaderboard row (the public `leaderboard/{uid}` document). Score and kills are the tab's (this week or all time). */
 data class LeaderboardEntry(
     val uid: String,
     val nickname: String,
     val tag: String,
     val avatarId: String,
-    val totalScore: Int,
-    val scoreReachedAtMs: Long,
+    val score: Int,
+    val reachedAtMs: Long,
     val commonKills: Int,
     val specialKills: Int,
 )
 
-data class MyRank(val listed: Boolean, val rank: Int?, val stats: MonsterStats)
+data class MyRank(
+    val listed: Boolean,
+    val rank: Int?,
+    val stats: MonsterStats,
+    /** This week's rank. Unranked (0 points) until the server sends weekly values. */
+    val week: Week = Week(),
+) {
+    data class Week(
+        val weekId: String? = null,
+        val listed: Boolean = false,
+        val rank: Int? = null,
+        val score: Int = 0,
+        val commonKills: Int = 0,
+        val specialKills: Int = 0,
+    )
+}
 
 /** A number or a decimal string, truncated like iOS `NSNumber.intValue`. */
 private fun Any?.asLooseLong(): Long? = when (this) {

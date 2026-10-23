@@ -283,6 +283,14 @@ class MonsterLogicTest {
         assertEquals("2026-10-20" to 1, nextDay.spawnDay to nextDay.spawnsToday)
     }
 
+    /** The week starts at Monday 00:00 KST, named by that Monday (the iOS and server values). */
+    @Test fun kstWeekBoundary() {
+        assertEquals("2026-10-19", MonsterDraw.kstWeekId(1_792_335_600_000)) // Mon 2026-10-19 00:00 KST
+        assertEquals("2026-10-19", MonsterDraw.kstWeekId(1_792_940_399_000)) // Sun 23:59:59 KST
+        assertEquals("2026-10-26", MonsterDraw.kstWeekId(1_792_940_400_000)) // the next Monday 00:00 KST
+        assertEquals("2026-10-12", MonsterDraw.kstWeekId(1_792_335_599_000)) // one second before
+    }
+
     @Test fun kstDayBoundary() {
         // 2026-10-19T14:59:59Z = KST 23:59:59; 15:00:00Z is the next KST day.
         assertEquals("2026-10-19", MonsterDraw.kstDay(1_792_421_999_000))
@@ -323,8 +331,63 @@ class MonsterLogicTest {
               "commonKills":{"integerValue":"7"},"specialKills":{"integerValue":"2"}}}},
              {"readTime":"2026-10-20T00:00:00Z"}]
         """.trimIndent()
-        val rows = MonsterApiClient.decodeLeaderboard(json)!!
+        val rows = MonsterApiClient.decodeLeaderboard(json, LeaderboardScope.ALL_TIME)!!
         assertEquals(listOf(LeaderboardEntry("uid1", "David", "0000", "operator", 420, 5, 7, 2)), rows)
+        // Without weekly fields the document has no place in the week tab.
+        assertEquals(emptyList<LeaderboardEntry>(), MonsterApiClient.decodeLeaderboard(json, LeaderboardScope.WEEK))
+    }
+
+    /** The week tab reads the weekly fields and filters to this week. */
+    @Test fun weeklyLeaderboardUsesWeekFields() {
+        val json = """
+            [{"document":{"name":"projects/p/databases/(default)/documents/leaderboard/uid1","fields":{
+              "nickname":{"stringValue":"David"},"tag":{"stringValue":"0000"},"avatar":{"stringValue":"cat"},
+              "totalScore":{"integerValue":"420"},"scoreReachedAtMs":{"integerValue":"5"},
+              "commonKills":{"integerValue":"7"},"specialKills":{"integerValue":"2"},
+              "weekId":{"stringValue":"2026-10-19"},"weekScore":{"integerValue":"60"},
+              "weekReachedAtMs":{"integerValue":"9"},"weekCommonKills":{"integerValue":"1"},
+              "weekSpecialKills":{"integerValue":"1"}}}}]
+        """.trimIndent()
+        assertEquals(
+            listOf(LeaderboardEntry("uid1", "David", "0000", "cat", 60, 9, 1, 1)),
+            MonsterApiClient.decodeLeaderboard(json, LeaderboardScope.WEEK),
+        )
+        val query = MonsterApiClient.leaderboardQuery(LeaderboardScope.WEEK, "2026-10-19", 100)["structuredQuery"] as Map<*, *>
+        assertEquals(
+            mapOf(
+                "fieldFilter" to mapOf(
+                    "field" to mapOf("fieldPath" to "weekId"),
+                    "op" to "EQUAL",
+                    "value" to mapOf("stringValue" to "2026-10-19"),
+                ),
+            ),
+            query["where"],
+        )
+        assertEquals(
+            listOf(
+                mapOf("field" to mapOf("fieldPath" to "weekScore"), "direction" to "DESCENDING"),
+                mapOf("field" to mapOf("fieldPath" to "weekReachedAtMs"), "direction" to "ASCENDING"),
+            ),
+            query["orderBy"],
+        )
+        val allTime = MonsterApiClient.leaderboardQuery(LeaderboardScope.ALL_TIME, "2026-10-19", 500)["structuredQuery"] as Map<*, *>
+        assertNull(allTime["where"])
+        assertEquals(100, allTime["limit"])
+    }
+
+    @Test fun myRankDecodesWeek() {
+        val r = MonsterApiClient.decodeMyRank(
+            mapOf(
+                "listed" to true, "rank" to 3.0, "totalScore" to 420.0, "commonKills" to 7.0, "specialKills" to 2.0,
+                "week" to mapOf(
+                    "weekId" to "2026-10-19", "listed" to true, "rank" to 1.0, "score" to 60.0,
+                    "commonKills" to 1.0, "specialKills" to 1.0,
+                ),
+            ),
+        )
+        assertEquals(MyRank(true, 3, MonsterStats(420, 7, 2), MyRank.Week("2026-10-19", true, 1, 60, 1, 1)), r)
+        // A server without weekly values yet: this week is unranked.
+        assertEquals(MyRank.Week(), MonsterApiClient.decodeMyRank(mapOf("listed" to false)).week)
     }
 
     /** The guest history goes up to 500 in total, the most-hunted species first (the iOS case). */

@@ -57,9 +57,10 @@ data class MonsterState(
     /** The account's stats as the server last returned them. */
     val stats: MonsterStats? = null,
     val rank: MyRank? = null,
-    val leaderboard: List<LeaderboardEntry> = emptyList(),
-    val leaderboardLoadedAtMs: Long? = null,
-    val leaderboardFailed: Boolean = false,
+    /** The top 100 per tab. The week list is for the week it was read in. */
+    val leaderboards: Map<LeaderboardScope, List<LeaderboardEntry>> = emptyMap(),
+    val leaderboardLoadedAtMs: Map<LeaderboardScope, Long> = emptyMap(),
+    val leaderboardFailed: Set<LeaderboardScope> = emptySet(),
     /** Hidden from the leaderboard on this device only. */
     val blockedUids: Set<String> = emptySet(),
     /** Last hit per encounter key (the sword effect). */
@@ -72,8 +73,9 @@ data class MonsterState(
     /** Defeats this device recorded as a guest. */
     val guestKillCount: Int get() = ledger.guest.kills.values.sum()
 
-    /** The leaderboard without the people blocked on this device. */
-    val visibleLeaderboard: List<LeaderboardEntry> get() = leaderboard.filter { it.uid !in blockedUids }
+    /** A tab's leaderboard without the people blocked on this device. */
+    fun visibleLeaderboard(scope: LeaderboardScope): List<LeaderboardEntry> =
+        leaderboards[scope].orEmpty().filter { it.uid !in blockedUids }
 }
 
 /**
@@ -144,6 +146,10 @@ class MonsterStore(
 
     @Volatile
     private var rankLoadedAtMs: Long? = null
+
+    /** The week the week tab's list was read for. */
+    @Volatile
+    private var leaderboardWeekId: String? = null
 
     private fun edit(block: (MonsterState) -> MonsterState) = synchronized(lock) {
         _state.value = block(_state.value)
@@ -617,25 +623,35 @@ class MonsterStore(
 
     // MARK: Guild
 
-    /** Reads the top 100 and the player's rank, unless both were read within five minutes ([force] reads now). */
-    suspend fun refreshGuild(force: Boolean = false) {
+    /**
+     * Reads a tab's top 100 and the player's rank, unless they were read within five minutes ([force] reads
+     * now). The week tab reads again at once when the week has turned (Monday 00:00 KST).
+     */
+    suspend fun refreshGuild(scope: LeaderboardScope, force: Boolean = false) {
         val api = api ?: return
         if (env.isDemo()) return
         val now = env.nowMs()
-        val loadedAt = _state.value.leaderboardLoadedAtMs
-        if (force || loadedAt == null || now - loadedAt > GUILD_CACHE_MS) {
-            val list = api.leaderboardTop()
+        val weekId = MonsterDraw.kstWeekId(now)
+        val stale = scope == LeaderboardScope.WEEK && leaderboardWeekId != weekId
+        val loadedAt = _state.value.leaderboardLoadedAtMs[scope]
+        if (force || stale || loadedAt == null || now - loadedAt > GUILD_CACHE_MS) {
+            val list = api.leaderboardTop(scope, weekId)
+            if (list != null && scope == LeaderboardScope.WEEK) leaderboardWeekId = weekId
             edit {
                 if (list != null) {
-                    it.copy(leaderboard = list, leaderboardLoadedAtMs = now, leaderboardFailed = false)
+                    it.copy(
+                        leaderboards = it.leaderboards + (scope to list),
+                        leaderboardLoadedAtMs = it.leaderboardLoadedAtMs + (scope to now),
+                        leaderboardFailed = it.leaderboardFailed - scope,
+                    )
                 } else {
-                    it.copy(leaderboardFailed = true)
+                    it.copy(leaderboardFailed = it.leaderboardFailed + scope)
                 }
             }
         }
         if (activeOwner == null) return
         val rankAt = rankLoadedAtMs
-        if (!force && rankAt != null && now - rankAt <= GUILD_CACHE_MS) return
+        if (!force && !stale && rankAt != null && now - rankAt <= GUILD_CACHE_MS) return
         val result = api.myRank()
         if (result is CallResult.Success) {
             edit { it.copy(rank = result.value, stats = result.value.stats) }

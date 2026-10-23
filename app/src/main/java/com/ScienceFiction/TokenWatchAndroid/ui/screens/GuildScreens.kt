@@ -71,6 +71,7 @@ import com.ScienceFiction.TokenWatchAndroid.localization.leaderboardIntro
 import com.ScienceFiction.TokenWatchAndroid.localization.leaderboardLoading
 import com.ScienceFiction.TokenWatchAndroid.localization.leaderboardMine
 import com.ScienceFiction.TokenWatchAndroid.localization.leaderboardNotListed
+import com.ScienceFiction.TokenWatchAndroid.localization.leaderboardTab
 import com.ScienceFiction.TokenWatchAndroid.localization.privacyLink
 import com.ScienceFiction.TokenWatchAndroid.localization.reportFailed
 import com.ScienceFiction.TokenWatchAndroid.localization.reportIntro
@@ -80,8 +81,10 @@ import com.ScienceFiction.TokenWatchAndroid.localization.reportSent
 import com.ScienceFiction.TokenWatchAndroid.localization.reportTitle
 import com.ScienceFiction.TokenWatchAndroid.localization.termsLink
 import com.ScienceFiction.TokenWatchAndroid.monster.LeaderboardEntry
+import com.ScienceFiction.TokenWatchAndroid.monster.LeaderboardScope
 import com.ScienceFiction.TokenWatchAndroid.monster.MonsterApiClient
 import com.ScienceFiction.TokenWatchAndroid.monster.MonsterStats
+import com.ScienceFiction.TokenWatchAndroid.monster.MyRank
 import com.ScienceFiction.TokenWatchAndroid.monster.MonsterStore
 import com.ScienceFiction.TokenWatchAndroid.ui.auth.InAppBrowser
 import com.ScienceFiction.TokenWatchAndroid.ui.components.AccountNoticeLine
@@ -95,11 +98,12 @@ import java.util.Locale
 import kotlinx.coroutines.launch
 
 /*
- * Adventurers' guild (V2) screens, mirroring iOS `GuildViews`: the guild sign in the main header (left of
- * the announcements button), the leaderboard (top 100, the player's rank, report and block) and the
- * monster hunt consent.
+ * Adventurer ranks (V2) screens, mirroring iOS `GuildViews`: the guild sign in the main header (left of
+ * the announcements button), the ranks (this week / all time tabs, top 100, the player's rank, report and
+ * block) and the monster hunt consent. Users see the name "adventurer ranks"; the code keeps `Guild…`.
  * - Sign: opens the ranks, or the consent screen before consenting (a cyan dot then).
- * - Leaderboard: public (readable signed out). Reporting needs an account; blocking hides on this device.
+ * - Ranks: public (readable signed out). The week tab starts over at Monday 00:00 KST. Reporting needs an
+ *   account; blocking hides on this device.
  * - Consent: what goes to the server (never usage figures or account information), what is public, and
  *   the terms version 2 agreement.
  */
@@ -189,6 +193,25 @@ internal fun GuildSignButton(
 
 // MARK: Leaderboard
 
+/** The player's line in a tab: rank and score when ranked there, and the kills to show either way. */
+internal data class MineLine(val listed: Boolean, val rank: Int?, val score: Int, val commonKills: Int, val specialKills: Int)
+
+/**
+ * The player's line for [scope] (pure). Unranked this week shows no kills; unranked all time shows the
+ * server's stats.
+ */
+internal fun mineLine(rank: MyRank?, stats: MonsterStats?, scope: LeaderboardScope): MineLine = when (scope) {
+    LeaderboardScope.WEEK -> rank?.week?.takeIf { it.listed }
+        ?.let { MineLine(true, it.rank, it.score, it.commonKills, it.specialKills) }
+        ?: MineLine(false, null, 0, 0, 0)
+    LeaderboardScope.ALL_TIME -> if (rank != null && rank.listed) {
+        MineLine(true, rank.rank, rank.stats.totalScore, rank.stats.commonKills, rank.stats.specialKills)
+    } else {
+        val known = rank?.stats ?: stats ?: MonsterStats()
+        MineLine(false, null, 0, known.commonKills, known.specialKills)
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LeaderboardScreen(
@@ -208,7 +231,8 @@ fun LeaderboardScreen(
     var refreshing by remember { mutableStateOf(false) }
     var menuTarget by remember { mutableStateOf<LeaderboardEntry?>(null) }
     var notice by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
-    LaunchedEffect(Unit) { monsters.refreshGuild() }
+    var tab by rememberSaveable { mutableStateOf(LeaderboardScope.WEEK) }
+    LaunchedEffect(tab) { monsters.refreshGuild(tab) }
 
     Column(
         modifier = Modifier
@@ -216,7 +240,7 @@ fun LeaderboardScreen(
             .background(Term.Background),
     ) {
         ScreenTopBar(
-            title = "GUILD",
+            title = "RANKS",
             modifier = Modifier.statusBarsPadding(),
             trailing = { TerminalTextButton(text = "[done]", color = Term.Green, onClick = onDone) },
         )
@@ -226,7 +250,7 @@ fun LeaderboardScreen(
                 scope.launch {
                     refreshing = true
                     try {
-                        monsters.refreshGuild(force = true)
+                        monsters.refreshGuild(tab, force = true)
                     } finally {
                         refreshing = false
                     }
@@ -243,7 +267,18 @@ fun LeaderboardScreen(
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
-                Text(text = loc.leaderboardIntro, color = Term.Dim, style = terminalTextStyle(11.sp))
+                // This week / all time, drawn like the settings segments.
+                SegmentedRow {
+                    LeaderboardScope.entries.forEach { option ->
+                        SegmentButton(
+                            title = loc.leaderboardTab(option),
+                            selected = option == tab,
+                            onClick = { tab = option },
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                }
+                Text(text = loc.leaderboardIntro(tab), color = Term.Dim, style = terminalTextStyle(11.sp))
                 TerminalBox(title = "ME") {
                     val profile = (accountState as? AccountState.SignedIn)?.profile
                     when {
@@ -255,24 +290,23 @@ fun LeaderboardScreen(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             AvatarView(preset = catalog.resolve(displayAvatarId(profile, isOperator, catalog)), cell = 2.dp)
+                            val mine = mineLine(state.rank, state.stats, tab)
                             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                                 NametagText(profile = profile, size = 13.sp)
-                                val stats = state.rank?.stats ?: state.stats ?: MonsterStats()
                                 Text(
-                                    text = loc.leaderboardMine(stats.commonKills, stats.specialKills),
+                                    text = loc.leaderboardMine(mine.commonKills, mine.specialKills),
                                     color = Term.Dim,
                                     style = terminalTextStyle(10.sp),
                                 )
                             }
                             Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                                val rank = state.rank
-                                if (rank != null && rank.listed) {
+                                if (mine.listed) {
                                     Text(
-                                        text = rank.rank?.let { "#$it" } ?: "—",
+                                        text = mine.rank?.let { "#$it" } ?: "—",
                                         color = Term.Yellow,
                                         style = terminalTextStyle(15.sp, FontWeight.Bold),
                                     )
-                                    Text(text = "${rank.stats.totalScore} pts", color = Term.Green, style = terminalTextStyle(11.sp))
+                                    Text(text = "${mine.score} pts", color = Term.Green, style = terminalTextStyle(11.sp))
                                 } else {
                                     Text(text = loc.leaderboardNotListed, color = Term.Dim, style = terminalTextStyle(10.sp))
                                 }
@@ -299,12 +333,12 @@ fun LeaderboardScreen(
                 }
                 notice?.let { (text, ok) -> AccountNoticeLine(text = text, color = if (ok) Term.Green else Term.Red) }
                 TerminalBox(title = "TOP 100") {
-                    val list = state.visibleLeaderboard
+                    val list = state.visibleLeaderboard(tab)
                     if (list.isEmpty()) {
                         Text(
                             text = when {
-                                state.leaderboardFailed -> loc.leaderboardFailed
-                                state.leaderboardLoadedAtMs == null -> loc.leaderboardLoading
+                                tab in state.leaderboardFailed -> loc.leaderboardFailed
+                                state.leaderboardLoadedAtMs[tab] == null -> loc.leaderboardLoading
                                 else -> loc.leaderboardEmpty
                             },
                             color = Term.Dim,
@@ -388,7 +422,7 @@ private fun LeaderboardRow(
             style = terminalTextStyle(12.sp, FontWeight.SemiBold),
             modifier = Modifier.weight(1f),
         )
-        Text(text = "${entry.totalScore}", color = Term.Green, style = terminalTextStyle(12.sp))
+        Text(text = "${entry.score}", color = Term.Green, style = terminalTextStyle(12.sp))
         if (!isMe) {
             TerminalTextButton(
                 text = "[⋯]",

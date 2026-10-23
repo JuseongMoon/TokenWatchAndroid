@@ -2,6 +2,7 @@ package com.ScienceFiction.TokenWatchAndroid.localization
 
 import com.ScienceFiction.TokenWatchAndroid.domain.UsageWindow
 import com.ScienceFiction.TokenWatchAndroid.domain.WindowKind
+import com.ScienceFiction.TokenWatchAndroid.monster.LeaderboardScope
 import java.time.Instant
 import java.time.ZoneOffset
 import org.junit.Assert.assertEquals
@@ -181,20 +182,20 @@ class LocalizationTest {
         val en = L10n(Lang.EN)
         assertEquals(
             "몬스터 사냥을 위해 AI 서비스 종류·사용량 창 이름·리셋 시각과 처치 기록을 서버로 보내요. 사용률 수치와 AI 서비스 계정 정보는 보내지 않아요. " +
-                "닉네임 #번호, 아바타, 점수와 처치 수는 길드 순위에 공개돼요.",
+                "닉네임 #번호, 아바타, 점수와 처치 수는 모험가 순위에 공개돼요.",
             ko.termsMonsterNote,
         )
         assertEquals(
             "For the monster hunt, the app sends the AI service type, usage window name, reset time, and defeat records to the server. " +
-                "Usage percentages and AI service account details are never sent. Your nickname #number, avatar, score, and defeat counts appear in the guild ranks.",
+                "Usage percentages and AI service account details are never sent. Your nickname #number, avatar, score, and defeat counts appear in the adventurer ranks.",
             en.termsMonsterNote,
         )
         assertEquals(
-            "닉네임·아바타·몬스터 기록과 길드 순위·로그인 연결이 서버에서 지워지고 되돌릴 수 없어요. 확인을 위해 한 번 더 로그인해요. 위 ACCOUNTS의 AI 서비스 계정은 영향을 받지 않아요.",
+            "닉네임·아바타·몬스터 기록과 모험가 순위·로그인 연결이 서버에서 지워지고 되돌릴 수 없어요. 확인을 위해 한 번 더 로그인해요. 위 ACCOUNTS의 AI 서비스 계정은 영향을 받지 않아요.",
             ko.accountDeleteMessage,
         )
         assertEquals(
-            "Your nickname, avatar, monster records, guild rank, and sign-in links will be erased from the server. This can't be undone. " +
+            "Your nickname, avatar, monster records, adventurer rank, and sign-in links will be erased from the server. This can't be undone. " +
                 "You'll sign in once more to confirm. Your AI service accounts under ACCOUNTS are not affected.",
             en.accountDeleteMessage,
         )
@@ -204,7 +205,22 @@ class LocalizationTest {
     fun monsterCopyMatchesIos() {
         val ko = L10n(Lang.KO)
         val en = L10n(Lang.EN)
-        assertEquals("모험가 길드 순위" to "Adventurers' Guild", ko.guildBoardTitle to en.guildBoardTitle)
+        assertEquals("모험가 순위" to "Adventurer Ranks", ko.guildBoardTitle to en.guildBoardTitle)
+        assertEquals("이번 주" to "All time", ko.leaderboardTab(LeaderboardScope.WEEK) to en.leaderboardTab(LeaderboardScope.ALL_TIME))
+        assertEquals(
+            "이번 주에 AI 사용량 게이지에서 잡은 몬스터 점수 순위예요. 매주 월요일 0시(한국 시간)에 새로 시작하고, 동점이면 먼저 도달한 사람이 위예요.",
+            ko.leaderboardIntro(LeaderboardScope.WEEK),
+        )
+        assertEquals(
+            "All-time points from monsters defeated on usage gauges. Ties go to whoever got there first.",
+            en.leaderboardIntro(LeaderboardScope.ALL_TIME),
+        )
+        assertEquals("loading the ranks…", en.leaderboardLoading)
+        assertEquals(
+            "Monsters appear on your usage gauges, and the points you earn put you in the adventurer ranks. " +
+                "The server decides when monsters appear, so the app sends the following to the TokenWatch server.",
+            en.consentIntro,
+        )
         assertEquals("이 기기에서 3마리 처치", ko.guildBoardGuestKills(3))
         assertEquals("고블린, 남은 체력 2/3", ko.monsterA11yValue(ko.monsterName("goblin"), 2, 3))
         assertEquals("Goblin, 2 of 3 HP left", en.monsterA11yValue(en.monsterName("goblin"), 2, 3))
@@ -220,12 +236,12 @@ class LocalizationTest {
         assertEquals("그 창의 리셋 시각과 주기", ko.consentSent[1])
         // The public part names the defeat counts too: the leaderboard document carries them.
         assertEquals(
-            "사용률 수치, AI 서비스 계정·이메일·토큰은 보내지 않아요. 닉네임 #번호, 아바타, 점수와 처치 수는 길드 순위에서 다른 사람에게 보여요.",
+            "사용률 수치, AI 서비스 계정·이메일·토큰은 보내지 않아요. 닉네임 #번호, 아바타, 점수와 처치 수는 모험가 순위에서 다른 사람에게 보여요.",
             ko.consentNotSent,
         )
         assertEquals(
             "Usage percentages and your AI service accounts, emails, and tokens are never sent. " +
-                "Your nickname #number, avatar, score, and defeat counts are shown to others in the guild ranks.",
+                "Your nickname #number, avatar, score, and defeat counts are shown to others in the adventurer ranks.",
             en.consentNotSent,
         )
         assertEquals(

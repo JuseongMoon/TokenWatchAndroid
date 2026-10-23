@@ -171,7 +171,7 @@ class MonsterApiClientTest {
 
     @Test fun theLeaderboardIsARunQueryForTheTopHundred() = runBlocking {
         val transport = ScriptedTransport(response(200, "[]"))
-        assertEquals(emptyList<LeaderboardEntry>(), client(transport).leaderboardTop())
+        assertEquals(emptyList<LeaderboardEntry>(), client(transport).leaderboardTop(LeaderboardScope.ALL_TIME, "2026-10-19"))
         val request = transport.requests.single()
         assertEquals("POST", request.method)
         assertEquals(
@@ -190,10 +190,15 @@ class MonsterApiClientTest {
         assertEquals(100.0, query["limit"])
         // Readable signed out: no token, no header.
         val signedOut = ScriptedTransport(response(200, "[]"))
-        client(signedOut, token = null).leaderboardTop()
+        client(signedOut, token = null).leaderboardTop(LeaderboardScope.ALL_TIME, "2026-10-19")
         assertNull(signedOut.requests.single().header("Authorization"))
         // A failed read is null (the screen keeps the last list).
-        assertNull(client(ScriptedTransport(response(403))).leaderboardTop())
+        assertNull(client(ScriptedTransport(response(403))).leaderboardTop(LeaderboardScope.ALL_TIME, "2026-10-19"))
+        // The week tab sends the week filter.
+        val week = ScriptedTransport(response(200, "[]"))
+        client(week).leaderboardTop(LeaderboardScope.WEEK, "2026-10-19")
+        val where = (week.requests.single().json()["structuredQuery"] as Map<*, *>)["where"] as Map<*, *>
+        assertEquals("2026-10-19", ((where["fieldFilter"] as Map<*, *>)["value"] as Map<*, *>)["stringValue"])
     }
 
     @Test fun theConfigDocumentIsReadWithoutAuthentication() = runBlocking {

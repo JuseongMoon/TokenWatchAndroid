@@ -381,7 +381,7 @@ class MonsterStoreTest {
     @Test fun anExpiredDefeatKeepsTheStats() = runBlocking {
         val s = store(terms = 2)
         functions.respond("myRank", 200, """{"result":{"listed":true,"rank":4,"totalScore":120,"commonKills":3,"specialKills":1}}""")
-        s.refreshGuild()
+        s.refreshGuild(LeaderboardScope.ALL_TIME)
         assertEquals(MonsterStats(120, 3, 1), s.state.value.stats)
         functions.respond("spawnEncounter", 200, encounterJson(completionKey))
         s.observe(agent, listOf(window()))
@@ -442,6 +442,29 @@ class MonsterStoreTest {
         s.block("bad")
         assertEquals(setOf("bad"), preferences.state.blockedUids)
         assertEquals(setOf("bad"), store().state.value.blockedUids)
+    }
+
+    @Test fun eachTabCachesItsListAndTheWeekTabRereadsWhenTheWeekTurns() = runBlocking {
+        clock = 1_792_940_399_000 // Sun 2026-10-25 23:59:59 KST
+        val s = store()
+        val row = """[{"document":{"name":"x/leaderboard/a","fields":{"nickname":{"stringValue":"A"},"tag":{"stringValue":"0001"},"totalScore":{"integerValue":"9"},"weekScore":{"integerValue":"3"}}}}]"""
+        functions.respond("documents:runQuery", 200, row)
+        functions.respond("documents:runQuery", 200, row)
+        functions.respond("documents:runQuery", 200, "[]")
+        s.refreshGuild(LeaderboardScope.WEEK)
+        s.refreshGuild(LeaderboardScope.ALL_TIME)
+        assertEquals(3, s.state.value.visibleLeaderboard(LeaderboardScope.WEEK).single().score)
+        assertEquals(9, s.state.value.visibleLeaderboard(LeaderboardScope.ALL_TIME).single().score)
+        // Within five minutes both tabs are cached…
+        s.refreshGuild(LeaderboardScope.WEEK)
+        s.refreshGuild(LeaderboardScope.ALL_TIME)
+        assertEquals(2, functions.count("documents:runQuery"))
+        // …but the week tab reads again the second Monday 00:00 KST arrives.
+        clock += 1_000
+        s.refreshGuild(LeaderboardScope.WEEK)
+        assertEquals(3, functions.count("documents:runQuery"))
+        assertTrue(s.state.value.visibleLeaderboard(LeaderboardScope.WEEK).isEmpty())
+        assertEquals(1, s.state.value.visibleLeaderboard(LeaderboardScope.ALL_TIME).size)
     }
 
     // MARK: Drawing (pure)

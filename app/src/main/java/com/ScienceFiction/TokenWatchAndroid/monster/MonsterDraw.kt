@@ -1,6 +1,7 @@
 package com.ScienceFiction.TokenWatchAndroid.monster
 
 import java.time.Instant
+import java.time.LocalDate
 import java.time.ZoneId
 
 /**
@@ -46,6 +47,16 @@ object MonsterDraw {
 
     /** The KST date (the daily cap boundary — the server's). */
     fun kstDay(nowMs: Long): String = Instant.ofEpochMilli(nowMs).atZone(seoul).toLocalDate().toString()
+
+    /**
+     * The weekly ranks' week: it starts at Monday 00:00 KST and is named by that Monday's KST date — the
+     * server's formula (1970-01-01 was a Thursday, hence the +3).
+     */
+    fun kstWeekId(nowMs: Long): String {
+        val day = Math.floorDiv(nowMs + 9 * 3_600_000L, 86_400_000L)
+        val monday = day - Math.floorMod(day + 3, 7L)
+        return LocalDate.ofEpochDay(monday).toString()
+    }
 }
 
 /** Guest spawn rules — the server's rules applied on the device. */

@@ -705,7 +705,7 @@ private fun HelpText(text: String) {
 }
 
 @Composable
-private fun SegmentedRow(content: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit) {
+internal fun SegmentedRow(content: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -715,7 +715,7 @@ private fun SegmentedRow(content: @Composable androidx.compose.foundation.layout
 }
 
 @Composable
-private fun SegmentButton(
+internal fun SegmentButton(
     title: String,
     selected: Boolean,
     onClick: () -> Unit,

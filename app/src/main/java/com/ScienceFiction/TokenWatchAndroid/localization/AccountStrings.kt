@@ -136,11 +136,11 @@ val L10n.operatorAvatarNote: String
     )
 val L10n.termsAgree: String
     get() = choose("이용약관과 개인정보 처리방침에 동의합니다", "I agree to the Terms of Service and Privacy Policy")
-/** A new sign-up agrees to the monster hunt terms (version 2) too: what goes to the server and what is public. */
+/** A new sign-up agrees to the monster hunt terms (version 2) too: what goes to the server and what the ranks show. */
 val L10n.termsMonsterNote: String
     get() = choose(
-        "몬스터 사냥을 위해 AI 서비스 종류·사용량 창 이름·리셋 시각과 처치 기록을 서버로 보내요. 사용률 수치와 AI 서비스 계정 정보는 보내지 않아요. 닉네임 #번호, 아바타, 점수와 처치 수는 길드 순위에 공개돼요.",
-        "For the monster hunt, the app sends the AI service type, usage window name, reset time, and defeat records to the server. Usage percentages and AI service account details are never sent. Your nickname #number, avatar, score, and defeat counts appear in the guild ranks.",
+        "몬스터 사냥을 위해 AI 서비스 종류·사용량 창 이름·리셋 시각과 처치 기록을 서버로 보내요. 사용률 수치와 AI 서비스 계정 정보는 보내지 않아요. 닉네임 #번호, 아바타, 점수와 처치 수는 모험가 순위에 공개돼요.",
+        "For the monster hunt, the app sends the AI service type, usage window name, reset time, and defeat records to the server. Usage percentages and AI service account details are never sent. Your nickname #number, avatar, score, and defeat counts appear in the adventurer ranks.",
     )
 val L10n.termsLink: String get() = choose("이용약관 ↗", "terms ↗")
 val L10n.privacyLink: String get() = choose("개인정보 처리방침 ↗", "privacy ↗")
@@ -169,8 +169,8 @@ val L10n.accountDeleteTitle: String
     get() = choose("TokenWatch 계정을 삭제할까요?", "Delete your TokenWatch account?")
 val L10n.accountDeleteMessage: String
     get() = choose(
-        "닉네임·아바타·몬스터 기록과 길드 순위·로그인 연결이 서버에서 지워지고 되돌릴 수 없어요. 확인을 위해 한 번 더 로그인해요. 위 ACCOUNTS의 AI 서비스 계정은 영향을 받지 않아요.",
-        "Your nickname, avatar, monster records, guild rank, and sign-in links will be erased from the server. This can't be undone. You'll sign in once more to confirm. Your AI service accounts under ACCOUNTS are not affected.",
+        "닉네임·아바타·몬스터 기록과 모험가 순위·로그인 연결이 서버에서 지워지고 되돌릴 수 없어요. 확인을 위해 한 번 더 로그인해요. 위 ACCOUNTS의 AI 서비스 계정은 영향을 받지 않아요.",
+        "Your nickname, avatar, monster records, adventurer rank, and sign-in links will be erased from the server. This can't be undone. You'll sign in once more to confirm. Your AI service accounts under ACCOUNTS are not affected.",
     )
 val L10n.accountSignOut: String get() = choose("로그아웃", "Sign out")
 val L10n.accountDelete: String get() = choose("삭제", "Delete")
