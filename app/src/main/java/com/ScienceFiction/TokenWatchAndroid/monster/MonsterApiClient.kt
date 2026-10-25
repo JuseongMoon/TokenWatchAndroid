@@ -80,7 +80,10 @@ class MonsterApiClient(
         ),
     )
 
-    /** One agent's draw. The candidates are that agent's target windows under 100% (1…20); the server picks one. */
+    /**
+     * One agent's draw. The candidates are that agent's target windows (1…20, without a 100% window whose
+     * completion monster is alive); the server picks one.
+     */
     suspend fun spawnRandom(agentKey: String, candidates: List<Pair<String, String>>): CallResult<RandomDraw> =
         call(
             "spawnEncounter",

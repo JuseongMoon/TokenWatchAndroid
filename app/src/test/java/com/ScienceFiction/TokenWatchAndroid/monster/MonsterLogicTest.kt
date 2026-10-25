@@ -118,8 +118,9 @@ class MonsterLogicTest {
         assertFalse(MonsterEligibility.isTarget(credit, now))
         assertTrue(MonsterEligibility.isRandomCandidate(half, 0.0, now))
         assertFalse(MonsterEligibility.isRandomCandidate(half, 50.0, now))
-        // A completed window belongs to its completion monster.
-        assertFalse(MonsterEligibility.isRandomCandidate(full, 0.0, now))
+        // A window at 100% stays in the draw (the store skips it only while its completion monster lives).
+        assertTrue(MonsterEligibility.isRandomCandidate(full, 0.0, now))
+        assertFalse(MonsterEligibility.isRandomCandidate(credit, 0.0, now))
     }
 
     // MARK: Config

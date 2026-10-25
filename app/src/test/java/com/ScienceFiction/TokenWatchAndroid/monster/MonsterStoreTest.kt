@@ -3,6 +3,7 @@ package com.ScienceFiction.TokenWatchAndroid.monster
 import com.ScienceFiction.TokenWatchAndroid.analytics.AnalyticsEvent
 import com.ScienceFiction.TokenWatchAndroid.domain.Agent
 import com.ScienceFiction.TokenWatchAndroid.domain.AgentProvider
+import com.ScienceFiction.TokenWatchAndroid.domain.UsageStyle
 import com.ScienceFiction.TokenWatchAndroid.domain.UsageWindow
 import com.ScienceFiction.TokenWatchAndroid.domain.WindowKind
 import com.ScienceFiction.TokenWatchAndroid.network.core.NetworkResponse
@@ -115,6 +116,10 @@ class MonsterStoreTest {
 
     private fun window(label: String = "Current week (all models)", used: Double = 100.0) =
         UsageWindow(label, used, Instant.ofEpochMilli(clock + 86_400_000), WindowKind.WEEKLY)
+
+    /** A credit gauge: never a monster target. */
+    private fun creditWindow() =
+        UsageWindow("credits", 40.0, Instant.ofEpochMilli(clock + 86_400_000), WindowKind.WEEKLY, style = UsageStyle.CREDIT_GAUGE)
 
     private val completionKey = MonsterSessionKey.completionKey("u1", AgentProvider.CLAUDE, 1_800_086_400_000)
 
@@ -268,18 +273,36 @@ class MonsterStoreTest {
     @Test fun onlyMaxAgentsPerUserAgentsDraw() = runBlocking {
         cachedConfig("""{"spawn":{"random":{"chancePerSlot":1,"maxAgentsPerUser":2}}}""")
         val half = window(used = 40.0)
-        val full = window()
         // An agent with nothing to draw on does not use up the allowance.
-        snapshots = listOf(agent to listOf(full)) + List(3) { Agent(AgentProvider.CODEX) to listOf(half) }
+        snapshots = listOf(agent to listOf(creditWindow())) + List(3) { Agent(AgentProvider.CODEX) to listOf(half) }
         val s = store()
         s.observe(agent, emptyList())
         val drawing = snapshots.drop(1).take(2).map { MonsterSessionKey.agentToken(it.first.id) }.toSet()
         assertEquals(drawing, s.state.value.ledger.randomSchedule.keys)
     }
 
+    @Test fun fullWindowJoinsTheDrawOnceItsCompletionMonsterIsDefeated() = runBlocking {
+        cachedConfig(alwaysRandom)
+        val w = window()
+        snapshots = listOf(agent to listOf(w))
+        val s = store()
+        val token = MonsterSessionKey.agentToken(agent.id)
+        s.observe(agent, listOf(w))
+        val completion = s.state.value.ledger.encounters.single()
+        assertEquals(MonsterEncounter.Source.COMPLETION, completion.source)
+        assertNull(s.state.value.ledger.nextDraw(token)) // not a candidate while its completion monster lives
+        assertEquals(MonsterStore.HitResult.Defeated, s.hit(completion.key)) // slime HP 1
+        s.observe(agent, listOf(w))
+        val due = s.state.value.ledger.nextDraw(token)!! // the schedule runs once it is defeated
+        clock = due
+        s.observe(agent, listOf(w))
+        val random = s.state.value.ledger.encounters.first { it.source == MonsterEncounter.Source.RANDOM }
+        assertEquals(agent.id to w.label, random.agentId to random.displayLabel)
+    }
+
     @Test fun agentWithoutCandidateWindowIsSkipped() = runBlocking {
         cachedConfig(alwaysRandom)
-        snapshots = listOf(agent to listOf(window())) // a 100% window is the completion monster's
+        snapshots = listOf(agent to listOf(creditWindow())) // a credit gauge is never a target
         val s = store()
         s.observe(agent, emptyList())
         assertNull(s.state.value.ledger.nextDraw(MonsterSessionKey.agentToken(agent.id)))
@@ -326,8 +349,15 @@ class MonsterStoreTest {
         assertEquals(setOf("source", "agentKey", "candidates", "platform", "appVersion", "spriteFormat"), claudeSent.keys)
         assertEquals(MonsterSessionKey.agentKey("u1", MonsterSessionKey.agentToken(agent.id)), claudeSent["agentKey"])
         assertEquals(MonsterSessionKey.agentKey("u1", MonsterSessionKey.agentToken(codex.id)), codexSent["agentKey"])
-        // The completed session window is the completion monster's; the Codex label is the language-free key label.
-        assertEquals(listOf(mapOf("provider" to "claude", "windowLabel" to "Current week (all models)")), claudeSent["candidates"])
+        // With no completion monster alive the 100% session window is a candidate too; the Codex label is the
+        // language-free key label.
+        assertEquals(
+            listOf(
+                mapOf("provider" to "claude", "windowLabel" to "Current week (all models)"),
+                mapOf("provider" to "claude", "windowLabel" to "Current session"),
+            ),
+            claudeSent["candidates"],
+        )
         assertEquals(listOf(mapOf("provider" to "codex", "windowLabel" to "Additional limit")), codexSent["candidates"])
         assertFalse(functions.rawBodies.any { it.contains("usedPercent") })
         // Nothing is asked again before the server's next draw time.

@@ -330,11 +330,18 @@ class MonsterStore(
         var drawn = 0
         for ((agent, windows) in env.snapshots()) {
             if (drawn >= config.random.maxAgentsPerUser) break
-            // Candidates: this agent's target windows under 100%, one per label (at most 20).
+            // Candidates: this agent's target windows, one per label (at most 20). A 100% window joins once
+            // its completion monster is defeated.
             val anchors = linkedMapOf<String, String>()
             val candidates = mutableListOf<Pair<String, String>>()
             for (window in windows) {
                 if (!MonsterEligibility.isRandomCandidate(window, config.random.minUsedPercent, instant)) continue
+                if (MonsterEligibility.isCompleted(window, instant) &&
+                    visible(_state.value, agent.id, agent.provider, window, now)
+                        .any { it.source == MonsterEncounter.Source.COMPLETION && it.isAlive }
+                ) {
+                    continue
+                }
                 val keyLabel = MonsterSessionKey.keyLabel(agent.provider, window.label)
                 if (keyLabel in anchors || candidates.size >= MAX_CANDIDATES) continue
                 anchors[keyLabel] = window.label

@@ -105,7 +105,10 @@ object MonsterEligibility {
     fun isCompleted(window: UsageWindow, now: Instant): Boolean =
         isTarget(window, now) && window.usedPercent / 100.0 >= COMPLETION_THRESHOLD
 
-    /** Random spawn candidates. A completed window already has its completion monster. */
+    /**
+     * Random spawn candidates. A window at 100% is one too, so draws go on until the reset even when the
+     * usage ran out early; only while its completion monster is alive does the caller ([MonsterStore]) skip it.
+     */
     fun isRandomCandidate(window: UsageWindow, minUsedPercent: Double, now: Instant): Boolean =
-        isTarget(window, now) && !isCompleted(window, now) && window.usedPercent >= minUsedPercent
+        isTarget(window, now) && window.usedPercent >= minUsedPercent
 }

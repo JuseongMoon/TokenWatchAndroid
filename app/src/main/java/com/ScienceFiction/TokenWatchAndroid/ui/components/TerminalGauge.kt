@@ -34,7 +34,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ScienceFiction.TokenWatchAndroid.ui.theme.Term
 import com.ScienceFiction.TokenWatchAndroid.domain.WindowKind
-import com.ScienceFiction.TokenWatchAndroid.monster.MonsterEncounter
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlin.math.abs
@@ -77,14 +76,15 @@ fun TerminalGauge(
     reduceMotion: Boolean = !ValueAnimator.areAnimatorsEnabled(),
     usedContentDescription: (Int) -> String = { "$it% used" },
     remainingContentDescription: (Int) -> String = { "$it% left" },
-    /** This window's monsters (V2). A completion monster replaces the slime critter's march. */
+    /** This window's monsters (V2). Any monster on the bar replaces the slime critter's march. */
     monsters: GaugeMonsters? = null,
 ) {
     val used = usedFraction.coerceIn(0.0, 1.0)
     val fill = TerminalGaugeMath.fillFraction(used = used, fillsRemaining = fillsRemaining)
     val elapsed = elapsedFraction?.coerceIn(0.0, 1.0)
+    // A random monster can appear on a 100% bar too, so the critter steps aside for any monster.
     val showCritter = gaugeCritterEnabled && used >= GaugeCritterMath.Threshold &&
-        monsters?.encounters.orEmpty().none { it.source == MonsterEncounter.Source.COMPLETION }
+        monsters?.encounters.orEmpty().isEmpty()
     Row(
         modifier = modifier
             .fillMaxWidth()
