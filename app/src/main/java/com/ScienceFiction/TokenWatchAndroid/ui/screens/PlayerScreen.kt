@@ -74,6 +74,8 @@ import com.ScienceFiction.TokenWatchAndroid.localization.profileSetupQuit
 import com.ScienceFiction.TokenWatchAndroid.localization.termsAgree
 import com.ScienceFiction.TokenWatchAndroid.localization.termsLink
 import com.ScienceFiction.TokenWatchAndroid.localization.termsMonsterNote
+import com.ScienceFiction.TokenWatchAndroid.monster.MonsterSpriteSet
+import com.ScienceFiction.TokenWatchAndroid.monster.MonsterStore
 import com.ScienceFiction.TokenWatchAndroid.ui.auth.InAppBrowser
 import com.ScienceFiction.TokenWatchAndroid.ui.components.AccountBrandButtons
 import com.ScienceFiction.TokenWatchAndroid.ui.components.AccountNoticeLine
@@ -104,6 +106,8 @@ fun PlayerScreen(
     entry: PlayerEntry,
     account: AccountStore,
     catalog: AvatarCatalog,
+    monsters: MonsterStore,
+    sprites: MonsterSpriteSet,
     loc: L10n,
     onScreen: (ScreenName) -> Unit,
     onDone: () -> Unit,
@@ -146,7 +150,8 @@ fun PlayerScreen(
                     AccountLoginContent(account, current, loc, onScreen)
                 AccountState.Loading -> StatusLine(loc.playerLoading)
                 AccountState.NeedsProfile -> ProfileSetupContent(account, catalog, loc, onScreen)
-                is AccountState.SignedIn -> AccountContent(account, current.profile, catalog, loc, onScreen)
+                is AccountState.SignedIn ->
+                    AccountContent(account, current.profile, catalog, monsters, sprites, loc, onScreen)
                 AccountState.Deleting -> StatusLine(loc.playerDeleting)
             }
         }
@@ -346,6 +351,8 @@ private fun AccountContent(
     account: AccountStore,
     profile: PlayerProfile,
     catalog: AvatarCatalog,
+    monsters: MonsterStore,
+    sprites: MonsterSpriteSet,
     loc: L10n,
     onScreen: (ScreenName) -> Unit,
 ) {
@@ -381,6 +388,8 @@ private fun AccountContent(
             }
         }
     }
+
+    BestiaryBox(monsters = monsters, sprites = sprites, loc = loc)
 
     val cooldown = remember(profile.nicknameChangedAtMs, isWorking) {
         val ms = account.nicknameCooldownRemainingMs()

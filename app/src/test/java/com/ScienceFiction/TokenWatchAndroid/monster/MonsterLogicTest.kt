@@ -10,6 +10,7 @@ import java.security.MessageDigest
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import java.util.UUID
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -20,8 +21,8 @@ import org.junit.Test
 /**
  * The monster (V2) pure logic, ported from iOS `MonsterLogicTests`. Values both platforms must agree on
  * are pinned with the iOS constants: session keys (300 s buckets, Copilot's UTC midnight, the Codex label
- * constant, the period table), slots and key hashes, the deterministic draw, the gray tone, the KST day and
- * the sprite file's SHA-256.
+ * constant, the period table), agent and random key hashes, the deterministic draw, the gray tone, the KST day,
+ * the bestiary's defeat sum and line-up, and the sprite file's SHA-256.
  */
 class MonsterLogicTest {
     // MARK: Session keys
@@ -66,25 +67,36 @@ class MonsterLogicTest {
         assertEquals(2_592_000L, period(AgentProvider.CURSOR, "Cursor models", seconds = 2_592_000.0))
     }
 
-    @Test fun slotsAndKeys() {
-        assertEquals(1_800_000_000_000, MonsterSessionKey.slotStartMs(1_800_003_599_999, 60))
+    @Test fun keys() {
         assertEquals("claude|5", MonsterSessionKey.completionLedgerKey(AgentProvider.CLAUDE, 5))
-        assertEquals("rand|7", MonsterSessionKey.randomLedgerKey(7))
-        // The server's formula: sha256hex("{uid}|{provider}|{bucket}") and sha256hex("{uid}|rand|{slot}").
+        // The server's formula: sha256hex("{uid}|{provider}|{bucket}").
         assertEquals(
             "55d18a0162ca3f99e368ccdaff5a5437bca0748a731fb4edb955bbbadbc95f92",
             MonsterSessionKey.completionKey("u1", AgentProvider.CLAUDE, 1_800_000_000_000),
         )
+        // Random spawns: sha256hex("{uid}|rand|{agentKey}|{drawAtMs}"), the agent key sha256hex("{uid}|agent|{token}").
         assertEquals(
-            "2d448c530730f9dd58d1c359da42c4d7cacd46cb0305d136809704625c39196a",
-            MonsterSessionKey.randomKey("u1", 1_800_000_000_000),
+            "18c652840398c165e3f2a84a0b078bcd2059017b9259043015e7a06517c204f8",
+            MonsterSessionKey.randomKey("u1", "k", 7),
         )
-        assertTrue(MonsterSessionKey.randomKey("u1", 1) != MonsterSessionKey.randomKey("u2", 1))
+        assertEquals("5e8196b4b409fa2fbfea36f29ff47dcb4c32b3e4aa3383ebfb7b836269a0c57c", MonsterSessionKey.agentKey("u1", "t"))
+        assertTrue(MonsterSessionKey.agentKey("u1", "t") != MonsterSessionKey.agentKey("u2", "t"))
+        // The agent token is the lowercase UUID, as iOS writes it.
+        val id = UUID.fromString("E621E1F8-C36C-495A-93FC-0C247A3E6E5F")
+        assertEquals("e621e1f8-c36c-495a-93fc-0c247a3e6e5f", MonsterSessionKey.agentToken(id))
         // Every provider keys by its wire id, which both apps share.
         assertEquals(
             listOf("claude", "codex", "copilot", "grok", "cursor", "kimi", "openrouter", "deepseek", "poe", "elevenlabs"),
             AgentProvider.entries.map { it.wireId },
         )
+    }
+
+    @Test fun drawIntervalStaysBetweenMinAndMax() {
+        val c = MonsterConfig.BUNDLED_DEFAULT
+        assertEquals(20 * 60_000L, MonsterDraw.drawIntervalMs(c, 0.0))
+        assertEquals(30 * 60_000L, MonsterDraw.drawIntervalMs(c, 0.5))
+        assertTrue(MonsterDraw.drawIntervalMs(c, 0.999_999) < 40 * 60_000L)
+        assertEquals(40 * 60_000L, MonsterDraw.drawIntervalMs(c, 2.0)) // a roll out of range is clamped
     }
 
     @Test fun epochMillisRoundLikeIos() {
@@ -113,12 +125,14 @@ class MonsterLogicTest {
     // MARK: Config
 
     @Test fun configEnvelopeAndDefaults() {
-        val payload = """{"balanceVersion":7,"spawn":{"random":{"chancePerSlot":1.5,"slotMinutes":30}},"dailySpawnCap":10,"future":1}"""
+        val payload = """{"balanceVersion":7,"spawn":{"random":{"chancePerSlot":1.5,"drawMinMinutes":3,"drawMaxMinutes":2,"slotMinutes":30}},"dailySpawnCap":10,"future":1}"""
         val escaped = payload.replace("\"", "\\\"")
         val c = MonsterConfigDecoder.decodeEnvelope("""{"fields":{"payload":{"stringValue":"$escaped"}}}""")!!
         assertEquals(7, c.balanceVersion)
         assertEquals(1.0, c.random.chancePerSlot, 0.0) // clamped to 0…1
-        assertEquals(30, c.random.slotMinutes)
+        assertEquals(5, c.random.drawMinMinutes) // at least 5 minutes
+        assertEquals(5, c.random.drawMaxMinutes) // the maximum is at least the minimum
+        assertEquals(10, c.random.maxAgentsPerUser) // missing fields keep the defaults
         assertEquals(60, c.random.lifetimeMinutes) // missing fields keep the defaults
         assertEquals(10, c.dailySpawnCap)
         assertEquals(MonsterConfig.BUNDLED_DEFAULT.catalog, c.catalog)
@@ -140,7 +154,10 @@ class MonsterLogicTest {
         assertEquals(listOf(1, 3, 5, 8, 12), c.catalog.map { it.hp })
         assertEquals(listOf(10, 50, 100, 190, 350), c.catalog.map { it.score })
         assertEquals(0.08, c.random.chancePerSlot, 0.0)
-        assertEquals(listOf(60, 60, 3), listOf(c.random.slotMinutes, c.random.lifetimeMinutes, c.random.maxAlivePerUser))
+        assertEquals(
+            listOf(20, 40, 60, 3, 10),
+            c.random.let { listOf(it.drawMinMinutes, it.drawMaxMinutes, it.lifetimeMinutes, it.maxAlivePerUser, it.maxAgentsPerUser) },
+        )
         assertEquals(listOf(3, 120, 60), listOf(c.guaranteedSlimeFirstN, c.tapDebounceMs, c.dailySpawnCap))
     }
 
@@ -304,6 +321,14 @@ class MonsterLogicTest {
         }
     }
 
+    @Test fun marchSpeedIsDeterministicWithinFivePercent() {
+        repeat(200) { i ->
+            val s = MonsterDraw.marchSpeed("k$i")
+            assertTrue(s in 0.95..1.05)
+            assertEquals(s, MonsterDraw.marchSpeed("k$i"), 0.0)
+        }
+    }
+
     // MARK: Server responses
 
     @Test fun callResponseDecoding() {
@@ -439,7 +464,7 @@ class MonsterLogicTest {
     @Test fun ledgerRoundTripsAndKeepsTheLatestTwoHundredFinished() {
         fun encounter(i: Int, state: MonsterEncounter.State, pending: Boolean = false) = MonsterEncounter(
             key = "k$i", ownerUid = if (i % 2 == 0) null else "u1", source = MonsterEncounter.Source.RANDOM,
-            provider = "claude", windowLabel = "w", resetBucketMs = null, slotStartMs = i * 60_000L,
+            provider = "claude", windowLabel = "w", resetBucketMs = null, drawAtMs = i * 60_000L,
             monsterId = "slime", maxHp = 1, hp = 0, state = state, spawnedAtMs = i.toLong(), expiresAtMs = i + 10L,
             defeatedAtMs = i.toLong(), pendingDefeat = pending, position = 0.5,
         )
@@ -451,6 +476,7 @@ class MonsterLogicTest {
             guest = MonsterGuestProgress(spawnCount = 4, kills = mapOf("slime" to 3), firstAtMs = 1, lastAtMs = 9),
             mergedUids = listOf("u1"),
             deviceSalt = "salt",
+            randomSchedule = mapOf("e621e1f8-c36c-495a-93fc-0c247a3e6e5f" to 1_800_001_200_000),
         ).pruned()
         assertEquals(202, state.encounters.size)
         assertTrue(alive in state.encounters && pending in state.encounters)
@@ -460,6 +486,57 @@ class MonsterLogicTest {
         val decoded = MonsterLedgerCodec.decode(MonsterLedgerCodec.encode(state))
         assertEquals(state, decoded)
         assertNull(MonsterLedgerCodec.decode("not json"))
+    }
+
+    @Test fun randomScheduleDropsLongGoneAgentsAndIsOptional() {
+        val day = 86_400_000L
+        val now = 1_800_000_000_000L
+        val state = MonsterLedgerState()
+            .withNextDraw(now - 40 * day, "gone", now - 40 * day)
+            .withNextDraw(now - 40 * day + 1, "kept", now - 40 * day)
+            .withNextDraw(now + 1_200_000, "new", now)
+        assertEquals(setOf("kept", "new"), state.randomSchedule.keys)
+        assertEquals(now + 1_200_000, state.nextDraw("new"))
+        assertNull(state.nextDraw("gone"))
+        // An older file has no schedule.
+        assertEquals(emptyMap<String, Long>(), MonsterLedgerCodec.decode("""{"encounters":[],"deviceSalt":"s"}""")!!.randomSchedule)
+        assertFalse(MonsterLedgerCodec.encode(MonsterLedgerState(deviceSalt = "s")).contains("randomSchedule"))
+    }
+
+    // MARK: Bestiary
+
+    @Test fun bestiaryKillsSumAccountAndMergedGuestHistory() {
+        val json = """
+            {"name":"projects/p/databases/(default)/documents/players/u1","fields":{
+              "stats":{"mapValue":{"fields":{"kills":{"mapValue":{"fields":{
+                "slime":{"integerValue":"12"},"goblin":{"integerValue":"2"},"orc":{"integerValue":"0"}}}}}}},
+              "guestHistory":{"mapValue":{"fields":{"kills":{"mapValue":{"fields":{
+                "slime":{"integerValue":"3"},"mimic":{"integerValue":"1"}}}}}}}}}
+        """.trimIndent()
+        assertEquals(mapOf("slime" to 15, "goblin" to 2, "mimic" to 1), MonsterApiClient.decodeKills(json))
+        // An account with no defeats yet: without the masked fields, `fields` itself is missing.
+        assertEquals(
+            emptyMap<String, Int>(),
+            MonsterApiClient.decodeKills("""{"name":"projects/p/databases/(default)/documents/players/u1"}"""),
+        )
+        assertNull(MonsterApiClient.decodeKills("[]"))
+    }
+
+    @Test fun bestiaryListsReleasedAndAlreadyDefeatedSpecies() {
+        val base = MonsterConfig.BUNDLED_DEFAULT
+        val config = base.copy(
+            catalog = base.catalog + listOf(
+                MonsterCatalogEntry("dragon", "event", 20, 900, 0.0, released = false),
+                MonsterCatalogEntry("wyvern", "special", 9, 300, 1.0, minAppVersion = "9.0"),
+            ),
+        )
+        val rows = MonsterBestiary.rows(config, mapOf("slime" to 4, "orc" to 1), "1.4.0")
+        assertEquals(listOf("slime", "goblin", "skeleton", "orc", "mimic"), rows.map { it.id })
+        assertEquals(listOf("slime", "orc"), rows.filter { it.discovered }.map { it.id })
+        assertEquals(0, rows.first { it.id == "goblin" }.kills)
+        // A species not yet released, or one this app cannot draw, still shows once defeated.
+        val caught = MonsterBestiary.rows(config, mapOf("dragon" to 1, "wyvern" to 2), "1.4.0")
+        assertEquals(listOf("dragon", "wyvern"), caught.takeLast(2).map { it.id })
     }
 }
 

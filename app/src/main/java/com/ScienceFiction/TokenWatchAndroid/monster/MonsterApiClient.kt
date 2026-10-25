@@ -19,11 +19,12 @@ import okhttp3.RequestBody.Companion.toRequestBody
  * `{"result": …}`. Errors are told apart by the `error.details.code` enumeration only — `message` is
  * neither shown nor logged. The ID token is fetched right before each request and only placed in its
  * header; a 401 force-refreshes it and retries once. The top 100 (this week and all time) is read
- * directly with a Firestore REST `runQuery` (public read rules). The app account's profile writes (`setProfile`) and in-app deletion
+ * directly with a Firestore REST `runQuery` (public read rules), and the bestiary's defeats with a masked GET
+ * of the player's own document. The app account's profile writes (`setProfile`) and in-app deletion
  * (`deleteAccount`) go through this client too (AccountStore).
  *
- * What is sent: provider, window label, period, reset bucket, slot, platform and app version. Never a
- * usage figure, AI service account information or a device identifier.
+ * What is sent: provider, window label, period, reset bucket, agent key (a per-account hash), platform and
+ * app version. Never a usage figure, AI service account information or a device identifier.
  */
 class MonsterApiClient(
     private val projectId: String,
@@ -53,9 +54,12 @@ class MonsterApiClient(
     sealed class SpawnResult {
         data class Encounter(val encounter: MonsterEncounterDto) : SpawnResult()
 
-        /** Not drawn by chance, or the concurrent cap. */
+        /** The server answered without a monster (completion spawns switched off and the like). */
         data object None : SpawnResult()
     }
+
+    /** A random draw's answer: the monster (null — not due yet, or not drawn) and the server's next draw time. */
+    data class RandomDraw(val encounter: MonsterEncounterDto?, val nextDrawAtMs: Long?)
 
     /** Report reasons (the `reportPlayer` contract). */
     enum class ReportReason(val wireId: String) {
@@ -84,22 +88,32 @@ class MonsterApiClient(
         ),
     )
 
-    suspend fun spawnRandom(slotStartMs: Long, candidates: List<Pair<String, String>>): CallResult<SpawnResult> =
-        spawn(
-            mapOf(
-                "source" to "random",
-                "slotStartMs" to slotStartMs,
-                "candidates" to candidates.map { (provider, label) -> mapOf("provider" to provider, "windowLabel" to label) },
+    /** One agent's draw. The candidates are that agent's target windows under 100% (1…20); the server picks one. */
+    suspend fun spawnRandom(agentKey: String, candidates: List<Pair<String, String>>): CallResult<RandomDraw> =
+        call(
+            "spawnEncounter",
+            spawnBody(
+                mapOf(
+                    "source" to "random",
+                    "agentKey" to agentKey,
+                    "candidates" to candidates.map { (provider, label) -> mapOf("provider" to provider, "windowLabel" to label) },
+                ),
             ),
-        )
+        ).map { result ->
+            RandomDraw(
+                encounter = (result["encounter"] as? Map<*, *>)?.let(MonsterEncounterDto::fromJson),
+                nextDrawAtMs = result["nextDrawAtMs"].asLooseLong(),
+            )
+        }
 
-    private suspend fun spawn(data: Map<String, Any>): CallResult<SpawnResult> {
-        val body = data + mapOf("platform" to PLATFORM, "appVersion" to appVersion, "spriteFormat" to SPRITE_FORMAT)
-        return call("spawnEncounter", body).map { result ->
+    private suspend fun spawn(data: Map<String, Any>): CallResult<SpawnResult> =
+        call("spawnEncounter", spawnBody(data)).map { result ->
             (result["encounter"] as? Map<*, *>)?.let(MonsterEncounterDto::fromJson)
                 ?.let { SpawnResult.Encounter(it) } ?: SpawnResult.None
         }
-    }
+
+    private fun spawnBody(data: Map<String, Any>): Map<String, Any> =
+        data + mapOf("platform" to PLATFORM, "appVersion" to appVersion, "spriteFormat" to SPRITE_FORMAT)
 
     /**
      * Confirms a defeat. A defeat outside the time window comes back expired without `stats` (null): the
@@ -201,6 +215,50 @@ class MonsterApiClient(
         }
         if (response.statusCode !in 200..299) return null
         return decodeLeaderboard(response.bodyText(), scope)
+    }
+
+    // MARK: Bestiary
+
+    /**
+     * The account's defeats per species: `players/{uid}`'s `stats.kills` plus the merged guest history's
+     * `guestHistory.kills`. Only the owner can read that document, so the ID token rides along (a 401 or 403
+     * refreshes it and retries once), and a field mask fetches just the two maps. Null on failure.
+     */
+    suspend fun myKills(uid: String): Map<String, Int>? {
+        val url = HttpUrl.Builder()
+            .scheme("https")
+            .host("firestore.googleapis.com")
+            .addPathSegment("v1")
+            .addPathSegment("projects")
+            .addPathSegment(projectId)
+            .addPathSegment("databases")
+            .addPathSegment("(default)")
+            .addPathSegment("documents")
+            .addPathSegment("players")
+            .addPathSegment(uid)
+            .addQueryParameter("mask.fieldPaths", "stats.kills")
+            .addQueryParameter("mask.fieldPaths", "guestHistory.kills")
+            .build()
+        for (attempt in 0..1) {
+            val idToken = token(attempt > 0) ?: return null
+            val request = Request.Builder()
+                .url(url)
+                .header("Authorization", "Bearer $idToken")
+                .header("Accept", "application/json")
+                .header("Cache-Control", "no-cache")
+                .get()
+                .build()
+            val response = try {
+                transport.execute(request)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                return null
+            }
+            if ((response.statusCode == 401 || response.statusCode == 403) && attempt == 0) continue
+            return if (response.statusCode == 200) decodeKills(response.bodyText()) else null
+        }
+        return null
     }
 
     // MARK: Transport
@@ -361,6 +419,24 @@ class MonsterApiClient(
             }
         }
 
+        /**
+         * The masked document → defeats per species, the two maps summed (zero and below dropped). A document
+         * with no defeats yet comes back without `fields`: an empty map. Pure.
+         */
+        fun decodeKills(body: String): Map<String, Int>? {
+            val doc = runCatching { anyAdapter.fromJson(body) }.getOrNull() as? Map<*, *> ?: return null
+            if (doc["name"] !is String) return null
+            val fields = FirestoreValue.decodeFields(doc["fields"] as? Map<*, *> ?: emptyMap<String, Any?>())
+            val total = linkedMapOf<String, Int>()
+            for (parent in listOf("stats", "guestHistory")) {
+                fields[parent]?.mapValue?.get("kills")?.mapValue?.forEach { (id, value) ->
+                    val n = value.integerValue ?: return@forEach
+                    if (n > 0) total[id] = (total[id] ?: 0) + n.toInt()
+                }
+            }
+            return total
+        }
+
         /** `myRank`'s result → the all-time rank plus this week's. Without a `week` the week is unranked. Pure. */
         fun decodeMyRank(r: Map<String, Any?>): MyRank {
             val week = (r["week"] as? Map<*, *>)?.let { w ->
@@ -390,7 +466,7 @@ data class MonsterEncounterDto(
     val provider: String,
     val windowLabel: String,
     val resetBucketMs: Long?,
-    val slotStartMs: Long?,
+    val drawAtMs: Long?,
     val monsterId: String,
     val maxHp: Int,
     val state: String,
@@ -407,7 +483,7 @@ data class MonsterEncounterDto(
                 provider = json["provider"] as? String ?: return null,
                 windowLabel = json["windowLabel"] as? String ?: return null,
                 resetBucketMs = json["resetBucketMs"].asLooseLong(),
-                slotStartMs = json["slotStartMs"].asLooseLong(),
+                drawAtMs = json["drawAtMs"].asLooseLong(),
                 monsterId = json["monsterId"] as? String ?: return null,
                 maxHp = (json["maxHP"].asLooseInt() ?: return null).coerceAtLeast(1),
                 state = json["state"] as? String ?: return null,

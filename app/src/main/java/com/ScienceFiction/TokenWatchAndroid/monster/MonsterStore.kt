@@ -69,6 +69,9 @@ data class MonsterState(
     val consentRequested: Boolean = false,
     /** HP left on the demo's sample monsters (memory only). */
     val demoHp: Map<String, Int> = emptyMap(),
+    /** Profile bestiary: the current account's defeats per species (server record + merged guest history). Null until read. */
+    val bestiaryKills: Map<String, Int>? = null,
+    val bestiaryFailed: Boolean = false,
 ) {
     /** Defeats this device recorded as a guest. */
     val guestKillCount: Int get() = ledger.guest.kills.values.sum()
@@ -88,8 +91,8 @@ data class MonsterState(
  * - Spawns are requested from foreground refreshes only; a background refresh only expires monsters.
  *   Switching the gauge creatures off stops both spawning and drawing.
  * - Demo mode never calls the server or saves: the sample 100% gauges get memory-only sample monsters.
- * - The server receives the contract's values only (provider, window label, period, reset bucket, slot,
- *   platform, app version) — never a usage figure or AI service account information.
+ * - The server receives the contract's values only (provider, window label, period, reset bucket, agent
+ *   key, platform, app version) — never a usage figure or AI service account information.
  *
  * All state changes go through one lock, so the UI's hits and the refresh hook never interleave halfway;
  * network calls happen outside it, and refresh observations are serialized among themselves.
@@ -137,8 +140,6 @@ class MonsterStore(
     /** Earliest next request per key (ms). A final refusal is not asked again this run (Long.MAX_VALUE). */
     private val retryAfter = mutableMapOf<String, Long>()
 
-    /** Random slot keys settled as "nothing appeared" this run. */
-    private val settledRandomKeys = mutableSetOf<String>()
     private val lastHitMs = mutableMapOf<String, Long>()
 
     @Volatile
@@ -150,6 +151,10 @@ class MonsterStore(
     /** The week the week tab's list was read for. */
     @Volatile
     private var leaderboardWeekId: String? = null
+
+    /** The account the bestiary's defeats belong to. */
+    @Volatile
+    private var bestiaryOwner: String? = null
 
     private fun edit(block: (MonsterState) -> MonsterState) = synchronized(lock) {
         _state.value = block(_state.value)
@@ -199,7 +204,13 @@ class MonsterStore(
         val owner = activeOwner
         val consent = needsConsent
         val demo = env.isDemo()
-        edit { it.copy(owner = owner, needsConsent = consent, isDemo = demo) }
+        // Another account's defeats never show, not even for the moment before the bestiary reads again.
+        val forgetBestiary = bestiaryOwner != null && bestiaryOwner != account.uid
+        if (forgetBestiary) bestiaryOwner = null
+        edit {
+            val base = it.copy(owner = owner, needsConsent = consent, isDemo = demo)
+            if (forgetBestiary) base.copy(bestiaryKills = null, bestiaryFailed = false) else base
+        }
     }
 
     /** Records the consent on the server. On success the guest history is merged once. */
@@ -306,74 +317,96 @@ class MonsterStore(
             }
             addGuestEncounter(
                 key = key, source = MonsterEncounter.Source.COMPLETION, provider = agent.provider.wireId,
-                windowLabel = keyLabel, resetBucketMs = bucket, slotStartMs = null, entry = decision.entry, now = now,
+                windowLabel = keyLabel, resetBucketMs = bucket, drawAtMs = null, entry = decision.entry, now = now,
                 expiresAtMs = MonsterSessionKey.epochMs(resetsAt), anchor = agent.id to window.label,
             )
         }
     }
 
+    /**
+     * Random spawns: each agent (a connected AI account) draws once every 20…40 minutes. The schedule
+     * sits in the ledger per agent, independent of the account (switching accounts never adds draws),
+     * and a signed-in account follows the server's next time. An agent seen for the first time only
+     * gets a schedule.
+     */
     private suspend fun handleRandom(owner: String?, now: Long) {
-        val state = _state.value
-        if (!state.config.random.enabled) return
-        val slot = MonsterSessionKey.slotStartMs(now, state.config.random.slotMinutes)
-        val key = MonsterSessionKey.randomKey(owner ?: GUEST, slot)
-        val settled = synchronized(lock) { key in settledRandomKeys }
-        if (settled || state.ledger.encounters.any { it.key == key } || !canRequest(key, now)) return
-        // Candidates: every agent's target windows, one per provider + label (at most 20).
+        val config = _state.value.config
+        if (!config.random.enabled) return
         val instant = Instant.ofEpochMilli(now)
-        val anchors = linkedMapOf<String, Pair<UUID, String>>()
-        val candidates = mutableListOf<Pair<String, String>>()
+        var drawn = 0
         for ((agent, windows) in env.snapshots()) {
+            if (drawn >= config.random.maxAgentsPerUser) break
+            // Candidates: this agent's target windows under 100%, one per label (at most 20).
+            val anchors = linkedMapOf<String, String>()
+            val candidates = mutableListOf<Pair<String, String>>()
             for (window in windows) {
-                if (!MonsterEligibility.isRandomCandidate(window, state.config.random.minUsedPercent, instant)) continue
+                if (!MonsterEligibility.isRandomCandidate(window, config.random.minUsedPercent, instant)) continue
                 val keyLabel = MonsterSessionKey.keyLabel(agent.provider, window.label)
-                val id = "${agent.provider.wireId}|$keyLabel"
-                if (id in anchors || candidates.size >= MAX_CANDIDATES) continue
-                anchors[id] = agent.id to window.label
+                if (keyLabel in anchors || candidates.size >= MAX_CANDIDATES) continue
+                anchors[keyLabel] = window.label
                 candidates += agent.provider.wireId to keyLabel
             }
+            if (candidates.isEmpty()) continue // no target window: the schedule stays
+            drawn += 1
+            drawRandom(agent, candidates, anchors, owner, now)
         }
-        if (candidates.isEmpty()) return
+    }
+
+    private suspend fun drawRandom(
+        agent: Agent,
+        candidates: List<Pair<String, String>>,
+        anchors: Map<String, String>,
+        owner: String?,
+        now: Long,
+    ) {
+        val state = _state.value
+        val token = MonsterSessionKey.agentToken(agent.id)
+        val retryKey = "rand|$token"
+        val due = state.ledger.nextDraw(token)
+        if ((due != null && due > now) || !canRequest(retryKey, now)) return
         val api = api
         if (owner != null && api != null) {
-            val ledgerKey = MonsterSessionKey.randomLedgerKey(slot)
-            val session = sessionStorage.load()
-            if (session.blocks(ledgerKey, owner)) return
-            val result = inFlight(key) { api.spawnRandom(slot, candidates) }
-            when (val value = (result as? CallResult.Success)?.value) {
-                SpawnResult.None -> synchronized(lock) { settledRandomKeys += key }
-                is SpawnResult.Encounter -> {
-                    sessionStorage.save(session.recording(ledgerKey, owner, now).purged(now))
-                    val dto = value.encounter
-                    apply(result, key, owner, anchors["${dto.provider}|${dto.windowLabel}"], now)
+            val agentKey = MonsterSessionKey.agentKey(owner, token)
+            when (val result = inFlight(retryKey) { api.spawnRandom(agentKey, candidates) }) {
+                is CallResult.Success -> {
+                    // A device clock ahead of the server can see the due time as already past: ask once a minute at most.
+                    val next = result.value.nextDrawAtMs ?: (now + MonsterDraw.drawIntervalMs(state.config, 0.0))
+                    editLedger { it.withNextDraw(maxOf(next, now + 60_000L), token, now) }
+                    result.value.encounter?.let { dto ->
+                        val anchor = anchors[dto.windowLabel]?.let { agent.id to it }
+                        apply(CallResult.Success(SpawnResult.Encounter(dto)), dto.key, owner, anchor, now)
+                    }
                 }
-                null -> apply(result, key, owner, null, now)
+                is CallResult.Failure -> apply(result, retryKey, owner, null, now)
             }
-        } else {
-            val aliveRandom = state.ledger.encounters.count {
-                it.ownerUid == null && it.source == MonsterEncounter.Source.RANDOM && it.isAlive
-            }
-            val salt = state.ledger.deviceSalt
-            val decision = GuestSpawnPolicy.decide(
-                isCompletion = false, key = key, salt = salt, config = state.config, progress = state.ledger.guest,
-                aliveRandom = aliveRandom, nowMs = now, appVersion = env.appVersion,
-            )
-            if (decision !is GuestSpawnPolicy.Outcome.Spawn) {
-                synchronized(lock) { settledRandomKeys += key }
-                return
-            }
-            val pick = minOf(
-                candidates.size - 1,
-                (MonsterDraw.unitRoll("$salt|$key|cand") * candidates.size).toInt(),
-            )
-            val (provider, windowLabel) = candidates[pick]
-            addGuestEncounter(
-                key = key, source = MonsterEncounter.Source.RANDOM, provider = provider, windowLabel = windowLabel,
-                resetBucketMs = null, slotStartMs = slot, entry = decision.entry, now = now,
-                expiresAtMs = now + state.config.random.lifetimeMinutes * 60_000L,
-                anchor = anchors["$provider|$windowLabel"],
-            )
+            return
         }
+        val salt = state.ledger.deviceSalt
+        if (due == null) {
+            val first = MonsterDraw.drawIntervalMs(state.config, MonsterDraw.unitRoll("$salt|$token|first"))
+            editLedger { it.withNextDraw(now + first, token, now) }
+            return
+        }
+        val key = MonsterSessionKey.randomKey(GUEST, token, due)
+        val interval = MonsterDraw.drawIntervalMs(state.config, MonsterDraw.unitRoll("$salt|$key|next"))
+        editLedger { it.withNextDraw(now + interval, token, now) }
+        if (state.ledger.encounters.any { it.key == key }) return
+        val aliveRandom = state.ledger.encounters.count {
+            it.ownerUid == null && it.source == MonsterEncounter.Source.RANDOM && it.isAlive
+        }
+        val decision = GuestSpawnPolicy.decide(
+            isCompletion = false, key = key, salt = salt, config = state.config, progress = state.ledger.guest,
+            aliveRandom = aliveRandom, nowMs = now, appVersion = env.appVersion,
+        )
+        if (decision !is GuestSpawnPolicy.Outcome.Spawn) return
+        val pick = minOf(candidates.size - 1, (MonsterDraw.unitRoll("$salt|$key|cand") * candidates.size).toInt())
+        val (provider, windowLabel) = candidates[pick]
+        addGuestEncounter(
+            key = key, source = MonsterEncounter.Source.RANDOM, provider = provider, windowLabel = windowLabel,
+            resetBucketMs = null, drawAtMs = due, entry = decision.entry, now = now,
+            expiresAtMs = now + state.config.random.lifetimeMinutes * 60_000L,
+            anchor = anchors[windowLabel]?.let { agent.id to it },
+        )
     }
 
     private fun addGuestEncounter(
@@ -382,7 +415,7 @@ class MonsterStore(
         provider: String,
         windowLabel: String,
         resetBucketMs: Long?,
-        slotStartMs: Long?,
+        drawAtMs: Long?,
         entry: MonsterCatalogEntry,
         now: Long,
         expiresAtMs: Long,
@@ -390,7 +423,7 @@ class MonsterStore(
     ) {
         val encounter = MonsterEncounter(
             key = key, ownerUid = null, source = source, provider = provider, windowLabel = windowLabel,
-            resetBucketMs = resetBucketMs, slotStartMs = slotStartMs, monsterId = entry.id, maxHp = entry.hp,
+            resetBucketMs = resetBucketMs, drawAtMs = drawAtMs, monsterId = entry.id, maxHp = entry.hp,
             hp = entry.hp, state = MonsterEncounter.State.ALIVE, spawnedAtMs = now, expiresAtMs = expiresAtMs,
             agentId = anchor?.first, displayLabel = anchor?.second, position = MonsterDraw.position(key),
         )
@@ -422,7 +455,7 @@ class MonsterStore(
                         key = dto.key, ownerUid = owner,
                         source = MonsterEncounter.Source.fromWireId(dto.source) ?: MonsterEncounter.Source.COMPLETION,
                         provider = dto.provider, windowLabel = dto.windowLabel, resetBucketMs = dto.resetBucketMs,
-                        slotStartMs = dto.slotStartMs, monsterId = dto.monsterId, maxHp = dto.maxHp,
+                        drawAtMs = dto.drawAtMs, monsterId = dto.monsterId, maxHp = dto.maxHp,
                         hp = if (state == MonsterEncounter.State.ALIVE) dto.maxHp else 0, state = state,
                         spawnedAtMs = dto.spawnedAtMs, expiresAtMs = dto.expiresAtMs, defeatedAtMs = dto.defeatedAtMs,
                         awardedScore = dto.awardedScore, agentId = anchor?.first, displayLabel = anchor?.second,
@@ -446,7 +479,7 @@ class MonsterStore(
                         edit { it.copy(consentRequested = true) }
                         setRetry(key, now + 600_000L)
                     }
-                    "daily_cap" -> setRetry(key, now + 3_600_000L)
+                    "daily_cap", "agent_limit" -> setRetry(key, now + 3_600_000L)
                     "invalid_reset", "too_frequent", "invalid_argument", "suspended", "profile_required" ->
                         setRetry(key, Long.MAX_VALUE)
                     else -> setRetry(key, now + 300_000L)
@@ -677,6 +710,31 @@ class MonsterStore(
         return true
     }
 
+    // MARK: Bestiary
+
+    /** Reads the account's defeats per species as the profile bestiary opens (one document GET), showing the last values meanwhile. */
+    suspend fun refreshBestiary() {
+        val api = api ?: return
+        if (env.isDemo()) return
+        val uid = account.uid ?: return
+        val switched = bestiaryOwner != uid
+        bestiaryOwner = uid
+        edit { if (switched) it.copy(bestiaryKills = null, bestiaryFailed = false) else it.copy(bestiaryFailed = false) }
+        val kills = api.myKills(uid)
+        if (account.uid != uid || bestiaryOwner != uid) return
+        edit {
+            when {
+                kills != null -> it.copy(bestiaryKills = kills)
+                it.bestiaryKills == null -> it.copy(bestiaryFailed = true)
+                else -> it
+            }
+        }
+    }
+
+    /** The bestiary rows under [state]'s config. Null until the defeats have been read. */
+    fun bestiaryRows(state: MonsterState = _state.value): List<BestiaryRow>? =
+        state.bestiaryKills?.let { MonsterBestiary.rows(state.config, it, env.appVersion) }
+
     // MARK: Account deletion, config, saving
 
     /**
@@ -684,6 +742,8 @@ class MonsterStore(
      * never leaves the device, and keeping it is the point.
      */
     fun forgetAccount(uid: String) {
+        val forgetBestiary = bestiaryOwner == uid
+        if (forgetBestiary) bestiaryOwner = null
         edit { state ->
             state.copy(
                 ledger = state.ledger.copy(
@@ -692,6 +752,8 @@ class MonsterStore(
                 ),
                 stats = null,
                 rank = null,
+                bestiaryKills = if (forgetBestiary) null else state.bestiaryKills,
+                bestiaryFailed = if (forgetBestiary) false else state.bestiaryFailed,
             )
         }
         rankLoadedAtMs = null
@@ -795,7 +857,7 @@ class MonsterStore(
             return listOf(
                 MonsterEncounter(
                     key = key, ownerUid = "demo", source = MonsterEncounter.Source.COMPLETION, provider = "",
-                    windowLabel = window.label, resetBucketMs = null, slotStartMs = null, monsterId = entry.id,
+                    windowLabel = window.label, resetBucketMs = null, drawAtMs = null, monsterId = entry.id,
                     maxHp = entry.hp, hp = hp,
                     state = if (hp > 0) MonsterEncounter.State.ALIVE else MonsterEncounter.State.DEFEATED,
                     spawnedAtMs = 0L, expiresAtMs = Long.MAX_VALUE,

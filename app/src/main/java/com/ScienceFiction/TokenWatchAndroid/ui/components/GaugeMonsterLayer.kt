@@ -39,6 +39,7 @@ import com.ScienceFiction.TokenWatchAndroid.localization.monsterA11yValue
 import com.ScienceFiction.TokenWatchAndroid.localization.monsterAttack
 import com.ScienceFiction.TokenWatchAndroid.localization.monsterName
 import com.ScienceFiction.TokenWatchAndroid.monster.MonsterConfig
+import com.ScienceFiction.TokenWatchAndroid.monster.MonsterDraw
 import com.ScienceFiction.TokenWatchAndroid.monster.MonsterEncounter
 import com.ScienceFiction.TokenWatchAndroid.monster.MonsterSpriteData
 import com.ScienceFiction.TokenWatchAndroid.monster.MonsterSpriteDecoder
@@ -50,8 +51,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlin.math.ceil
+import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.roundToLong
 
 /** What the gauges need for monsters. Null (the default) in previews and tests: gauges draw none. */
 class MonsterUi(val store: MonsterStore, val sprites: MonsterSpriteSet)
@@ -134,8 +137,8 @@ internal fun MonsterHpHearts(hp: Int, maxHp: Int, modifier: Modifier = Modifier)
 }
 
 /**
- * The monsters on a gauge bar. A completion monster marches across like the slime critter; a random one
- * hops in its own spot. A hit drops a sword from above; the last hit holds the sword, plays the monster's
+ * The monsters on a gauge bar. They march across like the slime critter: a completion monster in from the
+ * bar's left edge, a random one from the spot it appeared at. A hit drops a sword from above; the last hit holds the sword, plays the monster's
  * death animation, then a gray ghost with a halo walks at half speed — across the bar for a completion
  * monster, off the right edge for a random one. Taps are taken by the whole row, not by this layer.
  *
@@ -284,10 +287,19 @@ object GaugeMonsterMotion {
         val hop = cell * GaugeCritterMath.HopCells
         val completion = encounter.source == MonsterEncounter.Source.COMPLETION
         val restX = (if (completion) COMPLETION_REST else encounter.position) * max(0.0, barWidth - width)
+        // A random monster's pace differs a little by key, so two of the same kind do not walk as one.
+        val period = if (completion) tickMs.toDouble() else tickMs / MonsterDraw.marchSpeed(encounter.key)
+        fun tickAt(ms: Long) = floor(ms / period).toLong()
+        // A completion monster marches like the slime critter; a random one sets out from its spot when it appeared.
+        fun marchAt(ms: Long) = if (completion) {
+            marchX(tickAt(ms), hop, width, barWidth)
+        } else {
+            marchX(tickAt(ms), tickAt(encounter.spawnedAtMs), restX, hop, width, barWidth)
+        }
 
         if (encounter.isAlive) {
-            val tick = nowMs / tickMs
-            val x = if (completion && !reduceMotion) marchX(tick, hop, width, barWidth) else restX
+            val tick = tickAt(nowMs)
+            val x = if (reduceMotion) restX else marchAt(nowMs)
             val sword = lastHitAtMs != null && nowMs - lastHitAtMs in 0 until SWORD_MS
             return Pose(Look.LIVING, if (reduceMotion) 0 else (tick % 2L).toInt(), x, sword, halo = false)
         }
@@ -296,7 +308,7 @@ object GaugeMonsterMotion {
 
         val deathAt = encounter.defeatedAtMs ?: 0L
         // The spot of the defeat: marching depends on time alone, so recompute it at the defeat time.
-        val deathX = if (completion) marchX(deathAt / tickMs, hop, width, barWidth) else restX
+        val deathX = marchAt(deathAt)
         val t = nowMs - deathAt
         if (t < SWORD_MS) return Pose(Look.LIVING, 0, deathX, sword = true, halo = false)
         val deathDuration = deathFrames * DEATH_FRAME_MS
@@ -304,8 +316,7 @@ object GaugeMonsterMotion {
             val frame = min(deathFrames - 1, ((t - SWORD_MS) / DEATH_FRAME_MS).toInt())
             return Pose(Look.DEATH, frame, deathX, sword = false, halo = false)
         }
-        val ghostTickMs = (tickMs / GHOST_SPEED_FACTOR).toLong()
-        val tick = (t - SWORD_MS - deathDuration) / ghostTickMs
+        val tick = floor((t - SWORD_MS - deathDuration) / (period / GHOST_SPEED_FACTOR)).toLong()
         val x = if (completion) {
             marchX(tick, hop, width, barWidth)
         } else {
@@ -320,6 +331,27 @@ object GaugeMonsterMotion {
         if (hop <= 0.0 || barWidth <= 0.0) return -spriteWidth
         val hopsPerCross = ceil((barWidth + spriteWidth) / hop).toLong().coerceAtLeast(1L)
         val hopIndex = (tick + 1L) / 2L % hopsPerCross
+        return hopIndex * hop - spriteWidth
+    }
+
+    /**
+     * A march that sets out at [startTick] from [startX] (snapped to the hop grid) in the same rhythm (a
+     * step on odd ticks) and comes back in from the left past the right edge. Ticks before [startTick]
+     * (clock skew) hold the start; counting from the start tick keeps it free of the clock's origin.
+     */
+    internal fun marchX(
+        tick: Long,
+        startTick: Long,
+        startX: Double,
+        hop: Double,
+        spriteWidth: Double,
+        barWidth: Double,
+    ): Double {
+        if (hop <= 0.0 || barWidth <= 0.0) return -spriteWidth
+        val hopsPerCross = ceil((barWidth + spriteWidth) / hop).toLong().coerceAtLeast(1L)
+        val startHop = ((startX + spriteWidth) / hop).roundToLong()
+        val hops = (max(tick, startTick) + 1L) / 2L - (startTick + 1L) / 2L
+        val hopIndex = ((startHop + hops) % hopsPerCross + hopsPerCross) % hopsPerCross
         return hopIndex * hop - spriteWidth
     }
 }

@@ -1,5 +1,6 @@
 package com.ScienceFiction.TokenWatchAndroid.ui.components
 
+import com.ScienceFiction.TokenWatchAndroid.monster.MonsterDraw
 import com.ScienceFiction.TokenWatchAndroid.monster.MonsterEncounter
 import com.ScienceFiction.TokenWatchAndroid.ui.components.GaugeMonsterMotion.Look
 import org.junit.Assert.assertEquals
@@ -7,6 +8,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlin.math.floor
 
 /** The gauge monster's pose over time: march, sword, death animation, ghost. */
 class GaugeMonsterMotionTest {
@@ -20,14 +22,27 @@ class GaugeMonsterMotionTest {
         state: MonsterEncounter.State = MonsterEncounter.State.ALIVE,
         defeatedAtMs: Long? = null,
         position: Double = 0.5,
+        spawnedAtMs: Long = 0,
     ) = MonsterEncounter(
         key = "k", ownerUid = null, source = source, provider = "claude", windowLabel = "w", resetBucketMs = null,
-        slotStartMs = null, monsterId = "goblin", maxHp = 3, hp = if (state == MonsterEncounter.State.ALIVE) 3 else 0,
-        state = state, spawnedAtMs = 0, expiresAtMs = Long.MAX_VALUE, defeatedAtMs = defeatedAtMs, position = position,
+        drawAtMs = null, monsterId = "goblin", maxHp = 3, hp = if (state == MonsterEncounter.State.ALIVE) 3 else 0,
+        state = state, spawnedAtMs = spawnedAtMs, expiresAtMs = Long.MAX_VALUE, defeatedAtMs = defeatedAtMs, position = position,
     )
 
     private fun pose(e: MonsterEncounter, now: Long, lastHit: Long? = null, reduceMotion: Boolean = false) =
         GaugeMonsterMotion.pose(e, lastHit, now, bar, cell, columns, deathFrames = 4, tickMs = tick, reduceMotion = reduceMotion)
+
+    // A random monster with key "k" walks at its own pace.
+    private val randomPeriod = tick / MonsterDraw.marchSpeed("k")
+
+    private fun randomMarchX(at: Long, spawnedAt: Long, position: Double) = GaugeMonsterMotion.marchX(
+        floor(at / randomPeriod).toLong(), floor(spawnedAt / randomPeriod).toLong(),
+        position * (bar - cell * columns), cell * 4, cell * columns, bar,
+    )
+
+    // hop 10, body 20, bar 100 → 12 steps a lap. The start 38 snaps to the hop grid at x = 40.
+    private fun midX(tick: Long, start: Long, startX: Double = 38.0) =
+        GaugeMonsterMotion.marchX(tick, start, startX, hop = 10.0, spriteWidth = 20.0, barWidth = 100.0)
 
     @Test fun theMarchIsTheSlimeCritters() {
         for (t in 0 until 200) {
@@ -42,17 +57,74 @@ class GaugeMonsterMotionTest {
         assertTrue(x in -cell * columns..bar)
     }
 
-    @Test fun aLivingCompletionMonsterMarchesAndARandomOneStays() {
+    @Test fun aMidSpawnStartsAtItsSpot() {
+        assertEquals(40.0, midX(1000, start = 1000), 0.0)
+        assertEquals(40.0, midX(1001, start = 1001), 0.0)
+    }
+
+    @Test fun aMidSpawnKeepsTheJumpRhythm() {
+        // Even start tick: a step on the next odd tick, none on the even one.
+        assertEquals(50.0, midX(1001, start = 1000), 0.0)
+        assertEquals(50.0, midX(1002, start = 1000), 0.0)
+        assertEquals(60.0, midX(1003, start = 1000), 0.0)
+        // Odd start tick: the next even tick is a landing, the odd one after it a step.
+        assertEquals(40.0, midX(1002, start = 1001), 0.0)
+        assertEquals(50.0, midX(1003, start = 1001), 0.0)
+    }
+
+    @Test fun aMidSpawnWrapsToTheLeftEdge() {
+        assertEquals(90.0, midX(1010, start = 1000), 0.0) // the last step: the bar's right end
+        assertEquals(-20.0, midX(1011, start = 1000), 0.0) // back in from the left
+        assertEquals(-10.0, midX(1013, start = 1000), 0.0)
+    }
+
+    @Test fun aMidSpawnHoldsBeforeItsStartTick() {
+        // A device clock behind the server's spawn time keeps it at the start.
+        assertEquals(40.0, midX(990, start = 1000), 0.0)
+    }
+
+    @Test fun aMidSpawnStaysInsideTheBar() {
+        for (t in 1000L..1300L) {
+            val x = GaugeMonsterMotion.marchX(t, 1000, 180.0, hop = 7.0, spriteWidth = 15.4, barWidth = 250.0)
+            assertTrue(x >= -15.4 && x < 250.0)
+        }
+        assertEquals(-20.0, GaugeMonsterMotion.marchX(5, 0, 30.0, hop = 0.0, spriteWidth = 20.0, barWidth = 100.0), 0.0)
+        // A wall-clock tick outgrows an Int and still lands on the bar.
+        val x = GaugeMonsterMotion.marchX(1_800_000_000_000L / tick, 1_799_999_000_000L / tick, 70.5, cell * 4, cell * columns, bar)
+        assertTrue(x in -cell * columns..bar)
+    }
+
+    @Test fun aLivingMonsterMarchesAndARandomOneSetsOutFromItsSpot() {
         val now = 1_800_000_000_000L
         val march = pose(encounter(), now)!!
         assertEquals(Look.LIVING, march.look)
         assertEquals(GaugeMonsterMotion.marchX(now / tick, cell * 4, cell * columns, bar), march.x, 0.0)
-        val random = pose(encounter(source = MonsterEncounter.Source.RANDOM, position = 0.25), now)!!
-        assertEquals(0.25 * (bar - cell * columns), random.x, 1e-9)
-        // Motion reduced: a completion monster rests in place, on its landing frame.
+        // At its spawn a random monster stands on its spot (0.25 × 282 = 70.5, snapped to the 8-wide grid).
+        val random = encounter(source = MonsterEncounter.Source.RANDOM, position = 0.25, spawnedAtMs = now)
+        assertEquals(70.0, pose(random, now)!!.x, 1e-9)
+        // Later it has walked on at its own pace.
+        val later = now + 60_000
+        assertEquals(randomMarchX(later, spawnedAt = now, position = 0.25), pose(random, later)!!.x, 0.0)
+        assertEquals((floor(later / randomPeriod).toLong() % 2L).toInt(), pose(random, later)!!.frame)
+        // Motion reduced: both rest in place, on their landing frame.
         val still = pose(encounter(), now, reduceMotion = true)!!
         assertEquals(GaugeMonsterMotion.COMPLETION_REST * (bar - cell * columns), still.x, 1e-9)
         assertEquals(0, still.frame)
+        val stillRandom = pose(random, later, reduceMotion = true)!!
+        assertEquals(0.25 * (bar - cell * columns), stillRandom.x, 1e-9)
+        assertEquals(0, stillRandom.frame)
+    }
+
+    @Test fun marchSpeedSpreadsRandomMonstersApart() {
+        val now = 1_800_000_000_000L
+        val spawned = now - 600_000
+        fun x(key: String) = GaugeMonsterMotion.pose(
+            encounter(source = MonsterEncounter.Source.RANDOM, spawnedAtMs = spawned).copy(key = key),
+            null, now, bar, cell, columns, deathFrames = 4, tickMs = tick, reduceMotion = false,
+        )!!.x
+        // Same kind, same spot, same spawn: only the key's pace sets them apart.
+        val spots = (0 until 8).map { x("k$it") }.toSet()
+        assertTrue(spots.size > 1)
     }
 
     @Test fun aHitShowsTheSwordBriefly() {
@@ -83,12 +155,28 @@ class GaugeMonsterMotionTest {
         assertEquals(GaugeMonsterMotion.marchX(1, cell * 4, cell * columns, bar), pose(e, at + 900 + 570)!!.x, 0.0)
     }
 
+    @Test fun aRandomMonsterDiesWhereItMarchedTo() {
+        val spawned = 1_800_000_000_000L
+        val at = spawned + 45_000
+        val e = encounter(
+            source = MonsterEncounter.Source.RANDOM, state = MonsterEncounter.State.DEFEATED,
+            defeatedAtMs = at, position = 0.25, spawnedAtMs = spawned,
+        )
+        val deathX = randomMarchX(at, spawnedAt = spawned, position = 0.25)
+        assertEquals(deathX, pose(e, at + 100)!!.x, 0.0)
+        assertEquals(deathX, pose(e, at + 899)!!.x, 0.0)
+        assertEquals(deathX, pose(e, at + 900)!!.x, 0.0)
+    }
+
     @Test fun aRandomGhostWalksOffTheRightEdgeForGood() {
         val at = 1_800_000_000_000L
-        val e = encounter(source = MonsterEncounter.Source.RANDOM, state = MonsterEncounter.State.DEFEATED, defeatedAtMs = at, position = 0.9)
-        val restX = 0.9 * (bar - cell * columns)
-        assertEquals(restX, pose(e, at + 900)!!.x, 1e-9)
-        assertTrue(pose(e, at + 900 + 570 * 2)!!.x > restX)
+        val e = encounter(
+            source = MonsterEncounter.Source.RANDOM, state = MonsterEncounter.State.DEFEATED,
+            defeatedAtMs = at, position = 0.9, spawnedAtMs = at,
+        )
+        val deathX = randomMarchX(at, spawnedAt = at, position = 0.9)
+        assertEquals(deathX, pose(e, at + 900)!!.x, 0.0)
+        assertTrue(pose(e, at + 900 + 570 * 2)!!.x > deathX)
         assertNull(pose(e, at + 900 + 570L * 40))
         assertNull(pose(e, at + 180_000))
     }

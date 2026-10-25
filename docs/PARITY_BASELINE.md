@@ -8,10 +8,10 @@ The Android sources mirror the portable iOS patches through commit `bfdb4ed` on 
 1.3.0 (16) content: the review prompt, login failure diagnostics, the two analytics additions,
 the split "hide unused graphs" setting, and the credit-gauge reset confirmation described below.
 On the `feature/account` branch it also mirrors the optional app account and the monster hunt
-through iOS commit `c18446d` on `feature/account` (`a8fc3a9`, `2d268f8`, `dfae3ea`, `26b74fc`,
+through iOS commit `70c5f73` on `feature/account` (`a8fc3a9`, `2d268f8`, `dfae3ea`, `26b74fc`,
 `0ab185e`, `816d6aa`, `8e5ab75`, `bef30eb`, `6bc67ae`, `b5aa200`, `e2e2152`, `5a452e8`,
-`35c4764`, `e5309c2`, `c18446d`), described under "Optional app account" and "Monster hunt and
-adventurer ranks" below.
+`35c4764`, `e5309c2`, `c18446d`, `d481230`, `9f86767`, `b4ba166`, `70c5f73`), described under "Optional app
+account" and "Monster hunt and adventurer ranks" below.
 Uncommitted iOS working-tree changes are deliberately not part of this baseline.
 
 Firebase Analytics runs against the Android app's own Firebase registration and
@@ -163,18 +163,23 @@ Firebase Analytics runs against the Android app's own Firebase registration and
 
 - Monsters appear on subscription gauges that have a future reset: a completion monster when a
   gauge reaches 100% (one per provider and reset, however many windows share that reset), and now
-  and then a random monster on a gauge in use (one draw per account per time slot). Credit gauges
-  and balances never carry one. Tapping anywhere on the gauge row hits the monster, ahead of the
-  card's detail tap; special monsters show their HP as hearts after the first hit, and TalkBack
-  offers an "attack" action. A defeat holds the sword briefly, plays the monster's own death
-  animation, then the monster walks on in gray with a halo at half speed. The "gauge monsters"
-  setting switches both spawning and drawing off.
+  and then a random monster on a gauge in use: each connected AI account draws once every 20 to 40
+  minutes, picked at random, among its gauges under 100%, and one seen for the first time only gets
+  its first draw time. The schedule stays on the device per AI account whichever app account is
+  signed in. Credit gauges and balances never carry one. Monsters march across the bar like the slime critter and come back
+  in from the left past the right edge: a completion monster sets out from the left edge, a random
+  one from the spot it appeared at, at a pace that differs slightly by monster. Tapping anywhere on
+  the gauge row hits the monster, ahead of the card's detail tap; special monsters show their HP as
+  hearts after the first hit, and TalkBack offers an "attack" action. A defeat holds the sword
+  briefly, plays the monster's own death animation, then the monster walks on in gray with a halo at
+  half speed. The "gauge monsters" setting switches both spawning and drawing off.
 - Signed-in players who agree to the monster terms get server-judged spawns and defeats that count
   in the adventurer ranks. Everyone else hunts as a guest with deterministic device draws that
   stay unranked and are merged once, as history, after agreeing (up to 500 defeats, the most-hunted
   species first). Spawns are requested only from
-  foreground refreshes. The server receives the provider, window name, reset bucket, period, slot,
-  platform and app version — never usage percentages or AI service account details. Session keys
+  foreground refreshes. The server receives the provider, window name, reset bucket, period, an agent
+  key (a hash of the app account and the device's random agent ID, different per account), platform
+  and app version — never usage percentages or AI service account details. Session keys
   (300-second reset buckets, Copilot's UTC-midnight date, the language-free Codex label, the period
   table), the draw and the gray tone match iOS bit for bit and are pinned by the same test
   constants. The monster sprites ship as the same JSON bytes as iOS, verified by SHA-256.
@@ -185,6 +190,12 @@ Firebase Analytics runs against the Android app's own Firebase registration and
   minutes, and the week tab reads again as soon as the week turns. Before agreeing the sign opens
   the consent screen instead and carries a dot. Demo mode dims the sign and shows memory-only sample monsters on the sample 100% gauges; they
   play the same defeat animation as real ones.
+- The account screen carries a bestiary under the profile: every released species this app can draw, plus
+  any species already defeated, in catalog order on a three-column grid, with the account's defeats per
+  species (its own record plus the merged guest history, read from the player's document with a field mask
+  each time the screen opens) and a found/total summary. A species never defeated is a dim silhouette with a
+  question mark, its name hidden; a species not yet released stays out until defeated. Switching accounts
+  hides the previous account's defeats at once, before the next read.
 - A device session ledger remembers which account received each session on this device, so
   switching accounts does not collect the same usage twice.
 - Analytics adds `monster_spawn` (monster ID, source), `monster_kill` (monster ID, HP, score,

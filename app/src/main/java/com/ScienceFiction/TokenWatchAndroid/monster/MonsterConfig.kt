@@ -23,13 +23,18 @@ data class MonsterConfig(
     val tapDebounceMs: Int,
     val dailySpawnCap: Int,
 ) {
+    /** Random spawns: each agent draws once every [drawMinMinutes]…[drawMaxMinutes]. */
     data class RandomSpawn(
         val enabled: Boolean,
+        /** The chance per draw (the name is from the slot days). */
         val chancePerSlot: Double,
-        val slotMinutes: Int,
+        val drawMinMinutes: Int,
+        val drawMaxMinutes: Int,
         val lifetimeMinutes: Int,
         val minUsedPercent: Double,
         val maxAlivePerUser: Int,
+        /** How many agents draw (the server counts the agents seen in the last 7 days). */
+        val maxAgentsPerUser: Int,
     )
 
     fun entry(id: String): MonsterCatalogEntry? = catalog.firstOrNull { it.id == id }
@@ -50,10 +55,12 @@ data class MonsterConfig(
             random = RandomSpawn(
                 enabled = true,
                 chancePerSlot = 0.08,
-                slotMinutes = 60,
+                drawMinMinutes = 20,
+                drawMaxMinutes = 40,
                 lifetimeMinutes = 60,
                 minUsedPercent = 0.0,
                 maxAlivePerUser = 3,
+                maxAgentsPerUser = 10,
             ),
             guaranteedSlimeFirstN = 3,
             tapDebounceMs = 120,
@@ -104,13 +111,17 @@ object MonsterConfigDecoder {
         (root["spawn"] as? Map<*, *>)?.let { spawn ->
             ((spawn["completion"] as? Map<*, *>)?.get("enabled") as? Boolean)?.let { completionEnabled = it }
             (spawn["random"] as? Map<*, *>)?.let { r ->
+                // The interval is 5 minutes to a day and the maximum is at least the minimum (the server's range).
+                val drawMin = (r["drawMinMinutes"].asInt() ?: base.random.drawMinMinutes).coerceIn(5, 1440)
                 random = MonsterConfig.RandomSpawn(
                     enabled = r["enabled"] as? Boolean ?: base.random.enabled,
                     chancePerSlot = (r["chancePerSlot"].asDouble() ?: base.random.chancePerSlot).coerceIn(0.0, 1.0),
-                    slotMinutes = (r["slotMinutes"].asInt() ?: base.random.slotMinutes).coerceAtLeast(1),
+                    drawMinMinutes = drawMin,
+                    drawMaxMinutes = (r["drawMaxMinutes"].asInt() ?: base.random.drawMaxMinutes).coerceIn(drawMin, 1440),
                     lifetimeMinutes = (r["lifetimeMinutes"].asInt() ?: base.random.lifetimeMinutes).coerceAtLeast(1),
                     minUsedPercent = r["minUsedPercent"].asDouble() ?: base.random.minUsedPercent,
                     maxAlivePerUser = (r["maxAlivePerUser"].asInt() ?: base.random.maxAlivePerUser).coerceAtLeast(0),
+                    maxAgentsPerUser = (r["maxAgentsPerUser"].asInt() ?: base.random.maxAgentsPerUser).coerceAtLeast(0),
                 )
             }
         }

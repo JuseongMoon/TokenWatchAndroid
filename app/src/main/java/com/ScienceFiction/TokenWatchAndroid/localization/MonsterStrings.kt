@@ -27,6 +27,20 @@ fun L10n.monsterA11yValue(name: String, hp: Int, maxHp: Int): String =
     choose("$name, 남은 체력 $hp/$maxHp", "$name, $hp of $maxHp HP left")
 fun L10n.monsterA11yDefeated(name: String): String = choose("$name 처치됨", "$name defeated")
 
+// MARK: Profile bestiary
+
+fun L10n.bestiarySummary(found: Int, total: Int, kills: Int): String =
+    choose("발견 $found/$total · 총 처치 $kills", "Found $found/$total · $kills defeated")
+val L10n.bestiaryHint: String
+    get() = choose(
+        "몬스터를 처음 잡으면 모습과 이름이 드러나요. 이 계정의 처치 기록이에요.",
+        "Defeat a monster once to reveal it. These are this account's defeats.",
+    )
+val L10n.bestiaryLoading: String get() = choose("처치 기록을 불러오는 중…", "Loading your defeats…")
+val L10n.bestiaryFailed: String get() = choose("처치 기록을 불러오지 못했어요.", "Couldn't load your defeats.")
+val L10n.bestiaryUnknown: String get() = choose("아직 잡지 않은 몬스터", "Not defeated yet")
+fun L10n.bestiaryA11y(name: String, kills: Int): String = choose("$name, ${kills}마리 처치", "$name, $kills defeated")
+
 // MARK: Guild sign (top bar)
 
 val L10n.guildBoardTitle: String get() = choose("모험가 순위", "Adventurer Ranks")
@@ -106,12 +120,14 @@ val L10n.consentSent: List<String>
             "AI 서비스 종류(예: Claude)와 사용량 창 이름(예: 주간)",
             "그 창의 리셋 시각과 주기",
             "몬스터 출현·처치 기록, 앱 버전과 플랫폼",
+            "연결한 AI 계정마다 앱이 만든 무작위 식별값(계정 정보는 아님)",
         )
     } else {
         listOf(
             "Which AI service (e.g. Claude) and the usage window name (e.g. weekly)",
             "When that window resets and how long it is",
             "Monsters spawned and defeated, the app version and platform",
+            "A random ID the app makes for each connected AI account (not the account itself)",
         )
     }
 val L10n.consentNotSent: String

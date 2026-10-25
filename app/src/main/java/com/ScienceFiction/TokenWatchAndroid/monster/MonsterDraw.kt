@@ -3,12 +3,13 @@ package com.ScienceFiction.TokenWatchAndroid.monster
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import kotlin.math.floor
 
 /**
  * Guest spawn draws (signed out, or before consenting) and the species and position draws both paths
  * share, mirroring iOS `MonsterDraw`. Pure. Signed-in players get their spawns, species and defeats
  * from the server, so this only decides guest monsters and drawing. Draws are deterministic in the
- * key: refreshing again never redraws the same slot or session.
+ * key: refreshing again never redraws the same draw or session.
  */
 object MonsterDraw {
     private val seoul: ZoneId = ZoneId.of("Asia/Seoul")
@@ -44,6 +45,16 @@ object MonsterDraw {
 
     /** A random spawn's place inside the gauge (0.1…0.9). */
     fun position(key: String): Double = 0.1 + unitRoll("$key|pos") * 0.8
+
+    /** A random spawn's march speed factor (0.95…1.05), so two of the same kind do not walk overlapped. */
+    fun marchSpeed(key: String): Double = 0.95 + unitRoll("$key|speed") * 0.1
+
+    /** The wait until an agent's next random draw (ms): [roll] in [0, 1) picks between the minimum and maximum. */
+    fun drawIntervalMs(config: MonsterConfig, roll: Double): Long {
+        val low = config.random.drawMinMinutes.toDouble()
+        val high = maxOf(config.random.drawMinMinutes, config.random.drawMaxMinutes).toDouble()
+        return floor((low + roll.coerceIn(0.0, 1.0) * (high - low)) * 60_000).toLong()
+    }
 
     /** The KST date (the daily cap boundary — the server's). */
     fun kstDay(nowMs: Long): String = Instant.ofEpochMilli(nowMs).atZone(seoul).toLocalDate().toString()

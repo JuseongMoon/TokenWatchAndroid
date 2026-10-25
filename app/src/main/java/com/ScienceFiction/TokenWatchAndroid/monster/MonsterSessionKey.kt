@@ -10,9 +10,10 @@ import java.security.MessageDigest
 import java.time.Instant
 import java.time.ZoneId
 import java.time.ZoneOffset
+import java.util.UUID
 
 /**
- * What a monster spawn request is made of (reset bucket, period, window label, slot), computed bit for
+ * What a monster spawn request is made of (reset bucket, period, window label, agent key), computed bit for
  * bit like iOS `MonsterSessionKey`. The server document key uses the same formula (SHA-256 hex), so the
  * local match reuses it. Pure — unit tested against the iOS constants.
  *
@@ -63,24 +64,23 @@ object MonsterSessionKey {
         }
     }
 
-    /** Random spawn slot start (epoch ms), floored to the slot length. */
-    fun slotStartMs(nowMs: Long, slotMinutes: Int): Long {
-        val slot = slotMinutes.coerceAtLeast(1) * 60_000L
-        return nowMs / slot * slot
-    }
-
     // MARK: Keys
 
     /** Device session ledger key, independent of the account. */
     fun completionLedgerKey(provider: AgentProvider, resetBucketMs: Long): String = "${provider.wireId}|$resetBucketMs"
 
-    fun randomLedgerKey(slotStartMs: Long): String = "rand|$slotStartMs"
-
     /** The same hash as the server encounter document key. Guests use `guest` for the uid (local only). */
     fun completionKey(uid: String, provider: AgentProvider, resetBucketMs: Long): String =
         sha256Hex("$uid|${provider.wireId}|$resetBucketMs")
 
-    fun randomKey(uid: String, slotStartMs: Long): String = sha256Hex("$uid|rand|$slotStartMs")
+    /** The random spawn key: the agent key and the draw's due time. Guests use `guest` and the agent token. */
+    fun randomKey(uid: String, agentKey: String, drawAtMs: Long): String = sha256Hex("$uid|rand|$agentKey|$drawAtMs")
+
+    /** An agent as the device ledger writes it (the lowercase UUID — iOS lowercases to match). */
+    fun agentToken(id: UUID): String = id.toString()
+
+    /** The agent key sent to the server: different per account, so accounts never link, and no AI account data. */
+    fun agentKey(uid: String, agentToken: String): String = sha256Hex("$uid|agent|$agentToken")
 
     fun sha256Hex(text: String): String =
         MessageDigest.getInstance("SHA-256").digest(text.toByteArray(Charsets.UTF_8))

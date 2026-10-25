@@ -52,25 +52,32 @@ class MonsterApiClientTest {
         assertFalse(request.bodyText().contains("id-token-secret"))
     }
 
-    @Test fun aRandomSpawnSendsTheSlotAndCandidates() = runBlocking {
-        val transport = ScriptedTransport(response(200, """{"result":{"encounter":null}}"""))
-        client(transport).spawnRandom(1_800_000_000_000, listOf("codex" to "Additional limit"))
+    @Test fun aRandomSpawnSendsTheAgentKeyAndCandidates() = runBlocking {
+        val transport = ScriptedTransport(response(200, """{"result":{"encounter":null,"nextDrawAtMs":1800001500000}}"""))
+        val result = client(transport).spawnRandom("agent-key", listOf("codex" to "Additional limit"))
         val data = transport.requests.single().json()["data"] as Map<*, *>
-        assertEquals(setOf("source", "slotStartMs", "candidates", "platform", "appVersion", "spriteFormat"), data.keys)
+        assertEquals(setOf("source", "agentKey", "candidates", "platform", "appVersion", "spriteFormat"), data.keys)
+        assertEquals("agent-key", data["agentKey"])
         assertEquals(listOf(mapOf("provider" to "codex", "windowLabel" to "Additional limit")), data["candidates"])
+        assertEquals(
+            MonsterApiClient.CallResult.Success(MonsterApiClient.RandomDraw(encounter = null, nextDrawAtMs = 1_800_001_500_000)),
+            result,
+        )
     }
 
     @Test fun anEncounterAnswerIsDecoded() = runBlocking {
         val transport = ScriptedTransport(
             response(
                 200,
-                """{"result":{"encounter":{"key":"k","source":"random","provider":"kimi","windowLabel":"Current week","slotStartMs":"1800000000000","monsterId":"orc","maxHP":8,"state":"alive","spawnedAtMs":1,"expiresAtMs":2}}}""",
+                """{"result":{"encounter":{"key":"k","source":"random","provider":"kimi","windowLabel":"Current week","drawAtMs":"1800000000000","monsterId":"orc","maxHP":8,"state":"alive","spawnedAtMs":1,"expiresAtMs":2},"nextDrawAtMs":"1800001800000"}}""",
             ),
         )
-        val result = client(transport).spawnRandom(1_800_000_000_000, listOf("kimi" to "Current week"))
-        val dto = ((result as MonsterApiClient.CallResult.Success).value as MonsterApiClient.SpawnResult.Encounter).encounter
+        val result = client(transport).spawnRandom("agent-key", listOf("kimi" to "Current week"))
+        val draw = (result as MonsterApiClient.CallResult.Success).value
+        val dto = draw.encounter!!
         assertEquals("orc" to 8, dto.monsterId to dto.maxHp)
-        assertEquals(1_800_000_000_000, dto.slotStartMs)
+        assertEquals(1_800_000_000_000, dto.drawAtMs)
+        assertEquals(1_800_001_800_000, draw.nextDrawAtMs)
         assertNull(dto.resetBucketMs)
     }
 
@@ -199,6 +206,28 @@ class MonsterApiClientTest {
         client(week).leaderboardTop(LeaderboardScope.WEEK, "2026-10-19")
         val where = (week.requests.single().json()["structuredQuery"] as Map<*, *>)["where"] as Map<*, *>
         assertEquals("2026-10-19", ((where["fieldFilter"] as Map<*, *>)["value"] as Map<*, *>)["stringValue"])
+    }
+
+    @Test fun theBestiaryReadsOnlyTheTwoKillMapsOfTheOwnDocument() = runBlocking {
+        val transport = ScriptedTransport(
+            response(403),
+            response(200, """{"name":"projects/tokenwatch-app/databases/(default)/documents/players/u1"}"""),
+        )
+        assertEquals(emptyMap<String, Int>(), client(transport).myKills("u1"))
+        // A 403 (a claim the cached token predates) refreshes the token once.
+        assertEquals(listOf(false, true), tokens)
+        val request = transport.requests[1]
+        assertEquals("GET", request.method)
+        assertEquals(
+            "https://firestore.googleapis.com/v1/projects/tokenwatch-app/databases/(default)/documents/players/u1" +
+                "?mask.fieldPaths=stats.kills&mask.fieldPaths=guestHistory.kills",
+            request.url.toString(),
+        )
+        assertEquals("Bearer id-token-secret", request.header("Authorization"))
+        // A failed read, signed out or offline is null (the box keeps the last values or offers a retry).
+        assertNull(client(ScriptedTransport(response(500))).myKills("u1"))
+        assertNull(client(ScriptedTransport(), token = null).myKills("u1"))
+        assertNull(client(ScriptedTransport().apply { failNext = true }).myKills("u1"))
     }
 
     @Test fun theConfigDocumentIsReadWithoutAuthentication() = runBlocking {

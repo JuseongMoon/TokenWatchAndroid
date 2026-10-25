@@ -9,7 +9,7 @@ import java.io.IOException
 import kotlinx.coroutines.CancellationException
 
 /**
- * The device session ledger: session and slot keys this device already received a monster for, and the
+ * The device session ledger: completion session keys this device already received a monster for, and the
  * account that received it — independent of which account is signed in now. Signed in as another
  * account, the same key is not requested again, so switching accounts cannot collect the same usage
  * twice. It holds uids and session keys only (no token), stays on the device and is never sent anywhere.
@@ -116,16 +116,19 @@ object SessionLedgerJson {
  *
  * ```text
  * version u8 (1) · uid count u8 · [uid length u8 · UTF-8]… · record count u16 ·
- * [kind u8 (provider index, 255 = random slot) · key time u32 (minutes) · recorded at u32 (minutes) · uid index u8]…
+ * [kind u8 (provider index) · key time u32 (minutes) · recorded at u32 (minutes) · uid index u8]…
  * ```
  *
- * Bucket and slot times are whole minutes (multiples of 300 s and of the slot length), so they round
- * trip exactly; the recording time is floored to the minute, which only shifts the 40-day purge by
- * under a minute. Sixty spawns a day for 40 days is 24 KB, well inside [MAX_CHUNKS] entries.
+ * Bucket times are whole minutes (multiples of 300 s), so they round trip exactly; the recording time
+ * is floored to the minute, which only shifts the 40-day purge by under a minute. Sixty spawns a day
+ * for 40 days is 24 KB, well inside [MAX_CHUNKS] entries. Kind 255 held random spawn slots and is
+ * skipped on reading.
  */
 object SessionLedgerCodec {
     private const val VERSION = 1
-    private const val RANDOM_KIND = 255
+
+    /** Random spawns kept slot records here until they moved to per-agent draws; old ones are dropped. */
+    private const val RETIRED_RANDOM_KIND = 255
     private const val MINUTE_MS = 60_000L
 
     /** Block Store entry size. */
@@ -195,10 +198,8 @@ object SessionLedgerCodec {
                         val keyMs = (input.readInt().toLong() and 0xFFFF_FFFFL) * MINUTE_MS
                         val atMs = (input.readInt().toLong() and 0xFFFF_FFFFL) * MINUTE_MS
                         val uid = uids.getOrNull(input.readUnsignedByte()) ?: return@repeat
-                        val key = when (kind) {
-                            RANDOM_KIND -> MonsterSessionKey.randomLedgerKey(keyMs)
-                            else -> providerOrder.getOrNull(kind)?.let { "$it|$keyMs" } ?: return@repeat
-                        }
+                        if (kind == RETIRED_RANDOM_KIND) return@repeat
+                        val key = providerOrder.getOrNull(kind)?.let { "$it|$keyMs" } ?: return@repeat
                         put(key, DeviceSessionLedgerState.Entry(uid, atMs))
                     }
                 }
@@ -213,12 +214,12 @@ object SessionLedgerCodec {
     fun chunks(bytes: ByteArray): List<ByteArray> =
         (bytes.indices step CHUNK_BYTES).map { start -> bytes.copyOfRange(start, minOf(bytes.size, start + CHUNK_BYTES)) }
 
-    /** `provider|bucketMs` or `rand|slotMs` → (kind, time). Null for a key this format cannot hold. */
+    /** `provider|bucketMs` → (kind, time). Null for a key this format cannot hold. */
     private fun parseKey(key: String): Pair<Int, Long>? {
         val head = key.substringBefore('|', missingDelimiterValue = "")
         val ms = key.substringAfter('|', missingDelimiterValue = "").toLongOrNull() ?: return null
         if (ms < 0 || ms % MINUTE_MS != 0L || ms / MINUTE_MS > 0xFFFF_FFFFL) return null
-        val kind = if (head == "rand") RANDOM_KIND else providerOrder.indexOf(head).takeIf { it >= 0 } ?: return null
+        val kind = providerOrder.indexOf(head).takeIf { it >= 0 } ?: return null
         return kind to ms
     }
 }

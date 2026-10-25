@@ -232,8 +232,13 @@ class LocalizationTest {
             listOf("부적절한 닉네임", "부적절한 아바타", "부정행위 의심", "기타"),
             com.ScienceFiction.TokenWatchAndroid.monster.MonsterApiClient.ReportReason.entries.map(ko::reportReason),
         )
-        assertEquals(3, ko.consentSent.size)
+        assertEquals(4, ko.consentSent.size)
         assertEquals("그 창의 리셋 시각과 주기", ko.consentSent[1])
+        // The random draw sends a per-account hash of each AI account's on-device ID, so the list names it.
+        assertEquals("연결한 AI 계정마다 앱이 만든 무작위 식별값(계정 정보는 아님)", ko.consentSent[3])
+        assertEquals("A random ID the app makes for each connected AI account (not the account itself)", en.consentSent[3])
+        assertEquals("발견 2/5 · 총 처치 17" to "Found 2/5 · 17 defeated", ko.bestiarySummary(2, 5, 17) to en.bestiarySummary(2, 5, 17))
+        assertEquals("슬라임, 4마리 처치" to "Slime, 4 defeated", ko.bestiaryA11y("슬라임", 4) to en.bestiaryA11y("Slime", 4))
         // The public part names the defeat counts too: the leaderboard document carries them.
         assertEquals(
             "사용률 수치, AI 서비스 계정·이메일·토큰은 보내지 않아요. 닉네임 #번호, 아바타, 점수와 처치 수는 모험가 순위에서 다른 사람에게 보여요.",

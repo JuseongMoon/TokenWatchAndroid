@@ -648,6 +648,8 @@ private fun TokenWatchAppContent(
                 entry = PlayerEntry.fromWireId(route.removePrefix(ROUTE_PLAYER_PREFIX)) ?: PlayerEntry.LOGIN,
                 account = account,
                 catalog = container.avatarCatalog,
+                monsters = monsters,
+                sprites = container.monsterSprites,
                 loc = loc,
                 // The three inner screens log themselves as they appear (see PlayerScreen).
                 onScreen = { analytics.log(AnalyticsEvent.ScreenView(it)) },

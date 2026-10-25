@@ -28,23 +28,23 @@ class DeviceSessionLedgerTest {
 
     @Test fun recordsOlderThanFortyDaysArePurged() {
         val ledger = DeviceSessionLedgerState()
-            .recording("rand|60000", "a", now - 40 * day)
-            .recording("rand|120000", "a", now - 40 * day + 1)
+            .recording("claude|60000", "a", now - 40 * day)
+            .recording("claude|120000", "a", now - 40 * day + 1)
             .purged(now)
-        assertEquals(setOf("rand|120000"), ledger.entries.keys)
+        assertEquals(setOf("claude|120000"), ledger.entries.keys)
     }
 
     @Test fun mergingKeepsTheFirstReceiver() {
-        val blockStore = DeviceSessionLedgerState(mapOf("rand|60000" to DeviceSessionLedgerState.Entry("a", now)))
+        val blockStore = DeviceSessionLedgerState(mapOf("codex|60000" to DeviceSessionLedgerState.Entry("a", now)))
         val copy = DeviceSessionLedgerState(
             mapOf(
-                "rand|60000" to DeviceSessionLedgerState.Entry("b", now - 1),
+                "codex|60000" to DeviceSessionLedgerState.Entry("b", now - 1),
                 "kimi|300000" to DeviceSessionLedgerState.Entry("c", now),
             ),
         )
         val merged = blockStore.merged(copy)
-        assertEquals("b", merged.entries.getValue("rand|60000").uid)
-        assertEquals(setOf("rand|60000", "kimi|300000"), merged.entries.keys)
+        assertEquals("b", merged.entries.getValue("codex|60000").uid)
+        assertEquals(setOf("codex|60000", "kimi|300000"), merged.entries.keys)
     }
 
     @Test fun compactCodecRoundTrips() {
@@ -52,7 +52,7 @@ class DeviceSessionLedgerTest {
             mapOf(
                 "claude|1800000000000" to DeviceSessionLedgerState.Entry("uid-a", now),
                 "elevenlabs|1800000300000" to DeviceSessionLedgerState.Entry("uid-b", now - 5 * 60_000),
-                "rand|1800003600000" to DeviceSessionLedgerState.Entry("uid-a", now - 60_000),
+                "kimi|1800003600000" to DeviceSessionLedgerState.Entry("uid-a", now - 60_000),
             ),
         )
         val bytes = SessionLedgerCodec.encode(ledger)
@@ -63,9 +63,35 @@ class DeviceSessionLedgerTest {
         assertEquals(DeviceSessionLedgerState(), SessionLedgerCodec.decode(byteArrayOf(9, 9, 9)))
     }
 
+    @Test fun oldRandomSlotRecordsAreSkipped() {
+        // Random spawns no longer record here (they draw per agent); kind 255 in an older form is dropped.
+        val minutes = 30_000_000 // 1_800_000_000_000 ms
+        val buffer = java.io.ByteArrayOutputStream()
+        java.io.DataOutputStream(buffer).use { out ->
+            out.writeByte(1)
+            out.writeByte(1)
+            out.writeByte(1)
+            out.write("a".toByteArray())
+            out.writeShort(2)
+            for (kind in listOf(255, 0)) {
+                out.writeByte(kind)
+                out.writeInt(minutes)
+                out.writeInt(minutes)
+                out.writeByte(0)
+            }
+        }
+        val decoded = SessionLedgerCodec.decode(buffer.toByteArray())
+        assertEquals(setOf("claude|1800000000000"), decoded.entries.keys)
+        // A key the format cannot hold stays out of Block Store.
+        assertEquals(
+            DeviceSessionLedgerState(),
+            SessionLedgerCodec.decode(SessionLedgerCodec.encode(DeviceSessionLedgerState().recording("rand|60000", "a", now))),
+        )
+    }
+
     @Test fun recordingTimeRoundsDownToTheMinute() {
-        val ledger = DeviceSessionLedgerState().recording("rand|60000", "a", 125_000)
-        assertEquals(120_000L, SessionLedgerCodec.decode(SessionLedgerCodec.encode(ledger)).entries.getValue("rand|60000").atMs)
+        val ledger = DeviceSessionLedgerState().recording("claude|60000", "a", 125_000)
+        assertEquals(120_000L, SessionLedgerCodec.decode(SessionLedgerCodec.encode(ledger)).entries.getValue("claude|60000").atMs)
     }
 
     @Test fun everyProviderHasAKindByte() {
@@ -75,7 +101,7 @@ class DeviceSessionLedgerTest {
     @Test fun theWorstCaseFitsBlockStoreAndSplitsIntoFourKilobyteEntries() {
         // Sixty spawns a day for forty days, under a few accounts.
         val entries = (0 until 2_400).associate { i ->
-            val key = if (i % 2 == 0) "rand|${i * 3_600_000L}" else "claude|${i * 300_000L}"
+            val key = if (i % 2 == 0) "codex|${i * 3_600_000L}" else "claude|${i * 300_000L}"
             key to DeviceSessionLedgerState.Entry("uid-${i % 3}", now - i * 60_000L)
         }
         val bytes = SessionLedgerCodec.encode(DeviceSessionLedgerState(entries))
@@ -88,12 +114,12 @@ class DeviceSessionLedgerTest {
 
     @Test fun anOversizedLedgerDropsTheOldestRecords() {
         val entries = (0 until 6_000).associate { i ->
-            "rand|${i * 60_000L}" to DeviceSessionLedgerState.Entry("u", now - i * 60_000L)
+            "claude|${i * 60_000L}" to DeviceSessionLedgerState.Entry("u", now - i * 60_000L)
         }
         val decoded = SessionLedgerCodec.decode(SessionLedgerCodec.encode(DeviceSessionLedgerState(entries)))
         assertTrue(decoded.entries.size < 6_000)
-        assertTrue("rand|0" in decoded.entries) // the newest stays
-        assertFalse("rand|${5_999 * 60_000L}" in decoded.entries)
+        assertTrue("claude|0" in decoded.entries) // the newest stays
+        assertFalse("claude|${5_999 * 60_000L}" in decoded.entries)
     }
 
     @Test fun jsonCopyRoundTrips() {
@@ -110,18 +136,18 @@ class DeviceSessionLedgerTest {
     @Test fun aFailingBlockStoreFallsBackToTheCopy() = runBlocking {
         val copy = DeviceSessionLedgerMemory()
         val combined = CombinedSessionLedger(primary = Failing(), fallback = copy)
-        val ledger = DeviceSessionLedgerState().recording("rand|60000", "a", now)
+        val ledger = DeviceSessionLedgerState().recording("claude|60000", "a", now)
         combined.save(ledger)
         assertEquals(ledger, copy.state)
         assertEquals(ledger, combined.load())
     }
 
     @Test fun bothCopiesAreWrittenAndReadMerged() = runBlocking {
-        val blockStore = DeviceSessionLedgerMemory(DeviceSessionLedgerState().recording("rand|60000", "a", now))
-        val copy = DeviceSessionLedgerMemory(DeviceSessionLedgerState().recording("rand|120000", "b", now))
+        val blockStore = DeviceSessionLedgerMemory(DeviceSessionLedgerState().recording("claude|60000", "a", now))
+        val copy = DeviceSessionLedgerMemory(DeviceSessionLedgerState().recording("claude|120000", "b", now))
         val combined = CombinedSessionLedger(blockStore, copy)
-        assertEquals(setOf("rand|60000", "rand|120000"), combined.load().entries.keys)
-        val next = combined.load().recording("rand|180000", "a", now)
+        assertEquals(setOf("claude|60000", "claude|120000"), combined.load().entries.keys)
+        val next = combined.load().recording("claude|180000", "a", now)
         combined.save(next)
         assertEquals(next, blockStore.state)
         assertEquals(next, copy.state)

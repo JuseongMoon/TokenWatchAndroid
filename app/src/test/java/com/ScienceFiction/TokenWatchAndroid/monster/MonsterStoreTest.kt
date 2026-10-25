@@ -44,7 +44,10 @@ private class MemoryPreferences(var state: MonsterPreferenceState = MonsterPrefe
     }
 }
 
-/** A callable fake server: queued responses per function name, every request's `data` recorded. */
+/**
+ * A callable fake server: queued responses per function name (a document GET answers under the last path
+ * segment), every request's `data` recorded.
+ */
 private class FakeFunctions : NetworkTransport {
     val responses = mutableMapOf<String, ArrayDeque<NetworkResponse>>()
     var failTransport = false
@@ -58,7 +61,7 @@ private class FakeFunctions : NetworkTransport {
     override suspend fun execute(request: Request): NetworkResponse {
         if (failTransport) throw IOException("offline")
         val name = request.url.pathSegments.last()
-        val body = Buffer().also { request.body!!.writeTo(it) }.readUtf8()
+        val body = request.body?.let { Buffer().also { buffer -> it.writeTo(buffer) }.readUtf8() } ?: "{}"
         rawBodies += body
         val json = Moshi.Builder().build().adapter(Any::class.java).fromJson(body) as Map<*, *>
         calls += name to (json["data"] as? Map<*, *>).orEmpty()
@@ -194,7 +197,7 @@ class MonsterStoreTest {
         // An HP 3 monster put in directly, to look at the tap interval.
         val goblin = MonsterEncounter(
             key = "g", ownerUid = null, source = MonsterEncounter.Source.COMPLETION, provider = "claude",
-            windowLabel = "w", resetBucketMs = 0, slotStartMs = null, monsterId = "goblin", maxHp = 3, hp = 3,
+            windowLabel = "w", resetBucketMs = 0, drawAtMs = null, monsterId = "goblin", maxHp = 3, hp = 3,
             state = MonsterEncounter.State.ALIVE, spawnedAtMs = clock, expiresAtMs = clock + 1_000_000, position = 0.5,
         )
         ledger.state = MonsterLedgerState(encounters = listOf(goblin))
@@ -210,24 +213,79 @@ class MonsterStoreTest {
         assertEquals(clock, s.state.value.lastHitAtMs["g"])
     }
 
-    @Test fun guestRandomSpawnLandsOnACandidateWindow() = runBlocking {
-        preferences.state = MonsterPreferenceState(
-            configPayload = """{"spawn":{"random":{"chancePerSlot":1}}}""",
-            configFetchedAtMs = clock, // fresh: no config request
-        )
+    // MARK: Random spawns (one draw per agent every 20…40 minutes)
+
+    /** Starts from a cached server config ([payload]), fresh so it is not fetched again. */
+    private fun cachedConfig(payload: String) {
+        preferences.state = MonsterPreferenceState(configPayload = payload, configFetchedAtMs = clock)
+    }
+
+    private val alwaysRandom = """{"spawn":{"random":{"chancePerSlot":1}}}"""
+
+    @Test fun guestRandomWaitsTwentyToFortyMinutesThenDraws() = runBlocking {
+        cachedConfig(alwaysRandom)
         val half = window(used = 40.0)
         snapshots = listOf(agent to listOf(half))
         val s = store()
+        val start = clock
+        s.observe(agent, listOf(half))
+        assertTrue(s.state.value.ledger.encounters.isEmpty()) // a first sighting only sets the schedule
+        val token = MonsterSessionKey.agentToken(agent.id)
+        val due = s.state.value.ledger.nextDraw(token)!!
+        assertTrue(due in start + 20 * 60_000L..start + 40 * 60_000L)
+        clock = due - 1
+        s.observe(agent, listOf(half))
+        assertTrue(s.state.value.ledger.encounters.isEmpty())
+        clock = due
         s.observe(agent, listOf(half))
         val e = s.state.value.ledger.encounters.single()
         assertEquals(MonsterEncounter.Source.RANDOM, e.source)
+        assertEquals(due, e.drawAtMs)
+        assertEquals(MonsterSessionKey.randomKey("guest", token, due), e.key)
         assertEquals(agent.id to half.label, e.agentId to e.displayLabel)
         assertEquals(clock + 60 * 60_000L, e.expiresAtMs)
         assertTrue(e.position in 0.1..0.9)
         assertEquals(listOf(e), s.encounters(agent.id, AgentProvider.CLAUDE, half))
-        // The same slot never draws twice.
+        val next = s.state.value.ledger.nextDraw(token)!!
+        assertTrue(next in due + 20 * 60_000L..due + 40 * 60_000L)
+        assertTrue(functions.calls.isEmpty())
+        // The same draw never spawns twice.
         s.observe(agent, listOf(half))
         assertEquals(1, s.state.value.ledger.encounters.size)
+    }
+
+    @Test fun eachAgentDrawsOnItsOwn() = runBlocking {
+        cachedConfig(alwaysRandom)
+        val second = Agent(AgentProvider.CLAUDE)
+        val third = Agent(AgentProvider.CODEX)
+        val half = window(used = 40.0)
+        snapshots = listOf(agent to listOf(half), second to listOf(half), third to listOf(half))
+        val s = store()
+        s.observe(agent, listOf(half))
+        assertEquals(3, s.state.value.ledger.randomSchedule.size)
+        clock += 40 * 60_000L
+        s.observe(agent, listOf(half))
+        assertEquals(setOf(agent.id, second.id, third.id), s.state.value.ledger.encounters.mapNotNull { it.agentId }.toSet())
+    }
+
+    @Test fun onlyMaxAgentsPerUserAgentsDraw() = runBlocking {
+        cachedConfig("""{"spawn":{"random":{"chancePerSlot":1,"maxAgentsPerUser":2}}}""")
+        val half = window(used = 40.0)
+        val full = window()
+        // An agent with nothing to draw on does not use up the allowance.
+        snapshots = listOf(agent to listOf(full)) + List(3) { Agent(AgentProvider.CODEX) to listOf(half) }
+        val s = store()
+        s.observe(agent, emptyList())
+        val drawing = snapshots.drop(1).take(2).map { MonsterSessionKey.agentToken(it.first.id) }.toSet()
+        assertEquals(drawing, s.state.value.ledger.randomSchedule.keys)
+    }
+
+    @Test fun agentWithoutCandidateWindowIsSkipped() = runBlocking {
+        cachedConfig(alwaysRandom)
+        snapshots = listOf(agent to listOf(window())) // a 100% window is the completion monster's
+        val s = store()
+        s.observe(agent, emptyList())
+        assertNull(s.state.value.ledger.nextDraw(MonsterSessionKey.agentToken(agent.id)))
     }
 
     // MARK: Account
@@ -256,30 +314,90 @@ class MonsterStoreTest {
         assertEquals("u1", session.state.entries["claude|1800086400000"]?.uid)
     }
 
-    @Test fun randomSpawnSendsOnlyCandidateWindows() = runBlocking {
+    @Test fun randomSpawnSendsEachAgentsCandidateWindows() = runBlocking {
         val codex = Agent(AgentProvider.CODEX)
         snapshots = listOf(
             agent to listOf(window(used = 40.0), window(label = "Current session", used = 100.0)),
             codex to listOf(window(label = "추가 한도", used = 3.0)),
         )
         val s = store(terms = 2)
-        functions.respond("spawnEncounter", 200, """{"result":{"encounter":null}}""")
+        repeat(2) { functions.respond("spawnEncounter", 200, """{"result":{"encounter":null,"nextDrawAtMs":${clock + 1_500_000}}}""") }
         s.observe(agent, emptyList())
-        val sent = functions.data("spawnEncounter")
-        assertEquals(setOf("source", "slotStartMs", "candidates", "platform", "appVersion", "spriteFormat"), sent.keys)
-        assertEquals(1_800_000_000_000L, (sent["slotStartMs"] as Number).toLong())
+        assertEquals(2, functions.count("spawnEncounter"))
+        val (claudeSent, codexSent) = functions.calls.filter { it.first == "spawnEncounter" }.map { it.second }
+        // No usage figure, no account information.
+        assertEquals(setOf("source", "agentKey", "candidates", "platform", "appVersion", "spriteFormat"), claudeSent.keys)
+        assertEquals(MonsterSessionKey.agentKey("u1", MonsterSessionKey.agentToken(agent.id)), claudeSent["agentKey"])
+        assertEquals(MonsterSessionKey.agentKey("u1", MonsterSessionKey.agentToken(codex.id)), codexSent["agentKey"])
         // The completed session window is the completion monster's; the Codex label is the language-free key label.
-        assertEquals(
-            listOf(
-                mapOf("provider" to "claude", "windowLabel" to "Current week (all models)"),
-                mapOf("provider" to "codex", "windowLabel" to "Additional limit"),
-            ),
-            sent["candidates"],
-        )
-        assertFalse(functions.rawBodies.single().contains("usedPercent"))
-        // "Nothing appeared" settles the slot for this run.
+        assertEquals(listOf(mapOf("provider" to "claude", "windowLabel" to "Current week (all models)")), claudeSent["candidates"])
+        assertEquals(listOf(mapOf("provider" to "codex", "windowLabel" to "Additional limit")), codexSent["candidates"])
+        assertFalse(functions.rawBodies.any { it.contains("usedPercent") })
+        // Nothing is asked again before the server's next draw time.
         s.observe(agent, emptyList())
+        assertEquals(2, functions.count("spawnEncounter"))
+    }
+
+    @Test fun accountRandomFollowsTheServerSchedule() = runBlocking {
+        val w = window(used = 40.0)
+        snapshots = listOf(agent to listOf(w))
+        val s = store(terms = 2)
+        val token = MonsterSessionKey.agentToken(agent.id)
+        val first = clock + 25 * 60_000L
+        val key = MonsterSessionKey.randomKey("u1", MonsterSessionKey.agentKey("u1", token), first)
+        functions.respond("spawnEncounter", 200, """{"result":{"encounter":null,"nextDrawAtMs":$first}}""")
+        functions.respond(
+            "spawnEncounter",
+            200,
+            """{"result":{"encounter":{"key":"$key","source":"random","provider":"claude","windowLabel":"Current week (all models)","drawAtMs":$first,"monsterId":"slime","maxHP":1,"state":"alive","spawnedAtMs":$first,"expiresAtMs":${first + 3_600_000}},"nextDrawAtMs":${first + 30 * 60_000L}}}""",
+        )
+        s.observe(agent, listOf(w)) // the first request only registers the agent
         assertEquals(1, functions.count("spawnEncounter"))
+        assertEquals(first, s.state.value.ledger.nextDraw(token))
+        clock = first - 1
+        s.observe(agent, listOf(w))
+        assertEquals(1, functions.count("spawnEncounter")) // not asked before it is due
+        clock = first
+        s.observe(agent, listOf(w))
+        assertEquals(2, functions.count("spawnEncounter"))
+        val shown = s.encounters(agent.id, AgentProvider.CLAUDE, w).single()
+        assertEquals(Triple(key, "u1", first), Triple(shown.key, shown.ownerUid, shown.drawAtMs))
+        assertEquals(first + 30 * 60_000L, s.state.value.ledger.nextDraw(token))
+    }
+
+    @Test fun aServerTimeAlreadyPastWaitsAMinute() = runBlocking {
+        val w = window(used = 40.0)
+        snapshots = listOf(agent to listOf(w))
+        val s = store(terms = 2)
+        // A device clock ahead of the server's.
+        functions.respond("spawnEncounter", 200, """{"result":{"encounter":null,"nextDrawAtMs":${clock - 5_000}}}""")
+        s.observe(agent, listOf(w))
+        assertEquals(clock + 60_000L, s.state.value.ledger.nextDraw(MonsterSessionKey.agentToken(agent.id)))
+    }
+
+    @Test fun deviceScheduleHoldsAfterSwitchingAccounts() = runBlocking {
+        // Another account just drew on this device: the new account waits for the same schedule.
+        val w = window(used = 40.0)
+        snapshots = listOf(agent to listOf(w))
+        ledger.state = MonsterLedgerState().withNextDraw(clock + 10 * 60_000L, MonsterSessionKey.agentToken(agent.id), clock)
+        val s = store(terms = 2)
+        s.observe(agent, listOf(w))
+        assertEquals(0, functions.count("spawnEncounter"))
+    }
+
+    @Test fun agentLimitWaitsAnHour() = runBlocking {
+        val w = window(used = 40.0)
+        snapshots = listOf(agent to listOf(w))
+        val s = store(terms = 2)
+        functions.respond("spawnEncounter", 400, """{"error":{"status":"RESOURCE_EXHAUSTED","details":{"code":"agent_limit"}}}""")
+        s.observe(agent, listOf(w))
+        clock += 3_599_999
+        s.observe(agent, listOf(w))
+        assertEquals(1, functions.count("spawnEncounter"))
+        assertNull(s.state.value.ledger.nextDraw(MonsterSessionKey.agentToken(agent.id)))
+        clock += 1
+        s.observe(agent, listOf(w))
+        assertEquals(2, functions.count("spawnEncounter"))
     }
 
     @Test fun sessionLedgerBlocksAnotherAccount() = runBlocking {
@@ -467,13 +585,54 @@ class MonsterStoreTest {
         assertEquals(1, s.state.value.visibleLeaderboard(LeaderboardScope.ALL_TIME).size)
     }
 
+    // MARK: Bestiary
+
+    private fun killsDocument(uid: String, slime: Int) =
+        """{"name":"projects/p/databases/(default)/documents/players/$uid","fields":{"stats":{"mapValue":{"fields":{""" +
+            """"kills":{"mapValue":{"fields":{"slime":{"integerValue":"$slime"}}}}}}}}}"""
+
+    @Test fun theBestiaryKeepsTheLastDefeatsAndNeverShowsAnotherAccounts() = runBlocking {
+        val s = store(terms = 2)
+        functions.respond("u1", 200, killsDocument("u1", 4))
+        s.refreshBestiary()
+        assertEquals(mapOf("slime" to 4), s.state.value.bestiaryKills)
+        assertEquals(listOf("slime", "goblin", "skeleton", "orc", "mimic"), s.bestiaryRows()!!.map { it.id })
+        // A failed re-read keeps what is on screen.
+        s.refreshBestiary()
+        assertEquals(mapOf("slime" to 4), s.state.value.bestiaryKills)
+        assertFalse(s.state.value.bestiaryFailed)
+        // Another account: the old defeats go at once, and its first failure offers a retry.
+        account.uid = "u2"
+        s.syncAccount()
+        assertNull(s.bestiaryRows())
+        s.refreshBestiary()
+        assertTrue(s.state.value.bestiaryFailed)
+        functions.respond("u2", 200, killsDocument("u2", 1))
+        s.refreshBestiary()
+        assertEquals(mapOf("slime" to 1), s.state.value.bestiaryKills)
+        assertFalse(s.state.value.bestiaryFailed)
+        // Deleting the account forgets them too.
+        s.forgetAccount("u2")
+        assertNull(s.state.value.bestiaryKills)
+    }
+
+    @Test fun theBestiaryAsksNothingInDemoOrSignedOut() = runBlocking {
+        val s = store()
+        s.refreshBestiary()
+        demo = true
+        account.uid = "u1"
+        s.refreshBestiary()
+        assertTrue(functions.calls.isEmpty())
+        assertNull(s.bestiaryRows())
+    }
+
     // MARK: Drawing (pure)
 
     @Test fun aRandomGhostLeavesTheListAfterThreeMinutes() {
         val w = window(used = 40.0)
         val ghost = MonsterEncounter(
             key = "r", ownerUid = null, source = MonsterEncounter.Source.RANDOM, provider = "claude",
-            windowLabel = w.label, resetBucketMs = null, slotStartMs = 0, monsterId = "slime", maxHp = 1, hp = 0,
+            windowLabel = w.label, resetBucketMs = null, drawAtMs = 0, monsterId = "slime", maxHp = 1, hp = 0,
             state = MonsterEncounter.State.DEFEATED, spawnedAtMs = clock, expiresAtMs = clock + 3_600_000,
             defeatedAtMs = clock, position = 0.5,
         )

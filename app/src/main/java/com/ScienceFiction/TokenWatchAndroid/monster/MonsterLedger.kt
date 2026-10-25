@@ -10,6 +10,9 @@ import java.util.UUID
  * Only living monsters, defeats not yet confirmed by the server and the latest 200 finished ones are
  * kept; guest defeats are also tallied per monster in [MonsterGuestProgress]. The ledger lives in its own
  * DataStore file rather than the shared settings file, which is rewritten whole on every change.
+ *
+ * It also holds each agent's next random draw, independent of the account, so switching accounts never
+ * adds draws. Agents are created anew on a reinstall, so this needs no Block Store copy.
  */
 data class MonsterEncounter(
     val key: String,
@@ -20,7 +23,8 @@ data class MonsterEncounter(
     /** The key label (Codex's additional limit uses the constant). */
     val windowLabel: String,
     val resetBucketMs: Long?,
-    val slotStartMs: Long?,
+    /** A random spawn's draw due time. */
+    val drawAtMs: Long?,
     val monsterId: String,
     val maxHp: Int,
     /** HP left (device-local: hits are never sent to the server). */
@@ -81,7 +85,16 @@ data class MonsterLedgerState(
     val mergedUids: List<String> = emptyList(),
     /** Random per install — the guest draw seed. Never sent to the server. */
     val deviceSalt: String = UUID.randomUUID().toString(),
+    /** The device's random draw schedule: agent ([MonsterSessionKey.agentToken]) → next draw request (ms). */
+    val randomSchedule: Map<String, Long> = emptyMap(),
 ) {
+    fun nextDraw(agent: String): Long? = randomSchedule[agent]
+
+    /** Sets an agent's next draw and drops schedules over 40 days past (removed agents). */
+    fun withNextDraw(atMs: Long, agent: String, nowMs: Long): MonsterLedgerState = copy(
+        randomSchedule = randomSchedule.filterValues { nowMs - it < DeviceSessionLedgerState.RETENTION_MS } + (agent to atMs),
+    )
+
     /** Retention: everything alive or unconfirmed, plus the latest 200 finished. */
     fun pruned(): MonsterLedgerState {
         val active = encounters.filter { it.isAlive || it.pendingDefeat }
@@ -137,7 +150,7 @@ object MonsterLedgerCodec {
             },
             "mergedUIDs" to state.mergedUids,
             "deviceSalt" to state.deviceSalt,
-        ),
+        ) + if (state.randomSchedule.isEmpty()) emptyMap() else mapOf("randomSchedule" to state.randomSchedule),
     )
 
     fun decode(json: String): MonsterLedgerState? {
@@ -160,6 +173,12 @@ object MonsterLedgerCodec {
             ),
             mergedUids = (root["mergedUIDs"] as? List<*>).orEmpty().filterIsInstance<String>(),
             deviceSalt = (root["deviceSalt"] as? String)?.takeIf(String::isNotEmpty) ?: UUID.randomUUID().toString(),
+            // Missing in older files.
+            randomSchedule = (root["randomSchedule"] as? Map<*, *>).orEmpty().entries.mapNotNull { (k, v) ->
+                val agent = k as? String ?: return@mapNotNull null
+                val atMs = v.asLong() ?: return@mapNotNull null
+                agent to atMs
+            }.toMap(),
         )
     }
 
@@ -170,7 +189,7 @@ object MonsterLedgerCodec {
         put("provider", e.provider)
         put("windowLabel", e.windowLabel)
         e.resetBucketMs?.let { put("resetBucketMs", it) }
-        e.slotStartMs?.let { put("slotStartMs", it) }
+        e.drawAtMs?.let { put("drawAtMs", it) }
         put("monsterID", e.monsterId)
         put("maxHP", e.maxHp)
         put("hp", e.hp)
@@ -194,7 +213,7 @@ object MonsterLedgerCodec {
             provider = m["provider"] as? String ?: return null,
             windowLabel = m["windowLabel"] as? String ?: return null,
             resetBucketMs = m["resetBucketMs"].asLong(),
-            slotStartMs = m["slotStartMs"].asLong(),
+            drawAtMs = m["drawAtMs"].asLong(),
             monsterId = m["monsterID"] as? String ?: return null,
             maxHp = m["maxHP"].asInt() ?: return null,
             hp = m["hp"].asInt() ?: return null,
