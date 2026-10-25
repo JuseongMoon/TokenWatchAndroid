@@ -18,7 +18,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
  * `POST https://{region}-{project}.cloudfunctions.net/{name}` with body `{"data": …}`, answering
  * `{"result": …}`. Errors are told apart by the `error.details.code` enumeration only — `message` is
  * neither shown nor logged. The ID token is fetched right before each request and only placed in its
- * header; a 401 force-refreshes it and retries once. The top 100 (this week and all time) is read
+ * header; a 401 force-refreshes it and retries once. The top 10 (this week and all time) is read
  * directly with a Firestore REST `runQuery` (public read rules), and the bestiary's defeats with a masked GET
  * of the player's own document. The app account's profile writes (`setProfile`) and in-app deletion
  * (`deleteAccount`) go through this client too (AccountStore).
@@ -60,14 +60,6 @@ class MonsterApiClient(
 
     /** A random draw's answer: the monster (null — not due yet, or not drawn) and the server's next draw time. */
     data class RandomDraw(val encounter: MonsterEncounterDto?, val nextDrawAtMs: Long?)
-
-    /** Report reasons (the `reportPlayer` contract). */
-    enum class ReportReason(val wireId: String) {
-        NICKNAME("nickname"),
-        AVATAR("avatar"),
-        CHEATING("cheating"),
-        OTHER("other"),
-    }
 
     // MARK: Spawns and defeats
 
@@ -144,9 +136,6 @@ class MonsterApiClient(
         return call("mergeGuestHistory", data).map { it["merged"] as? Boolean ?: false }
     }
 
-    suspend fun report(targetUid: String, reason: ReportReason): CallResult<Unit> =
-        call("reportPlayer", mapOf("targetUid" to targetUid, "reason" to reason.wireId)).map { }
-
     // MARK: App account
 
     /** A profile write. Nickname rules, banned words, the tag draw and the 30-day interval are the server's. */
@@ -185,10 +174,10 @@ class MonsterApiClient(
     // MARK: Leaderboard
 
     /**
-     * The top 100 (score descending, ties to whoever got there first). Readable signed out too. The week
+     * The top 10 (score descending, ties to whoever got there first). Readable signed out too. The week
      * tab ranks only the documents of [weekId] (that week's Monday, KST) by their weekly score.
      */
-    suspend fun leaderboardTop(scope: LeaderboardScope, weekId: String, limit: Int = 100): List<LeaderboardEntry>? {
+    suspend fun leaderboardTop(scope: LeaderboardScope, weekId: String, limit: Int = LEADERBOARD_SIZE): List<LeaderboardEntry>? {
         val url = HttpUrl.Builder()
             .scheme("https")
             .host("firestore.googleapis.com")
@@ -293,6 +282,9 @@ class MonsterApiClient(
         const val PLATFORM = "android"
         const val SPRITE_FORMAT = 1
 
+        /** How many adventurers the ranks show. */
+        const val LEADERBOARD_SIZE = 10
+
         /** The guest history the server accepts (the total over every species); it refuses more. */
         const val GUEST_HISTORY_CAP = 500
 
@@ -389,7 +381,7 @@ class MonsterApiClient(
                         mapOf("field" to mapOf("fieldPath" to reachedAt), "direction" to "ASCENDING"),
                     ),
                 )
-                put("limit", limit.coerceIn(1, 100))
+                put("limit", limit.coerceIn(1, LEADERBOARD_SIZE))
             }
             return mapOf("structuredQuery" to structured)
         }

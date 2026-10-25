@@ -39,9 +39,6 @@ private class MemoryPreferences(var state: MonsterPreferenceState = MonsterPrefe
     override suspend fun saveConfigFetchedAt(fetchedAtMs: Long) {
         state = state.copy(configFetchedAtMs = fetchedAtMs)
     }
-    override suspend fun saveBlocked(uids: Set<String>) {
-        state = state.copy(blockedUids = uids)
-    }
 }
 
 /**
@@ -555,13 +552,6 @@ class MonsterStoreTest {
         assertEquals(ledger.state?.deviceSalt, restored.state.value.ledger.deviceSalt)
     }
 
-    @Test fun blockingHidesFromTheLeaderboardAndPersists() = runBlocking {
-        val s = store()
-        s.block("bad")
-        assertEquals(setOf("bad"), preferences.state.blockedUids)
-        assertEquals(setOf("bad"), store().state.value.blockedUids)
-    }
-
     @Test fun eachTabCachesItsListAndTheWeekTabRereadsWhenTheWeekTurns() = runBlocking {
         clock = 1_792_940_399_000 // Sun 2026-10-25 23:59:59 KST
         val s = store()
@@ -571,8 +561,8 @@ class MonsterStoreTest {
         functions.respond("documents:runQuery", 200, "[]")
         s.refreshGuild(LeaderboardScope.WEEK)
         s.refreshGuild(LeaderboardScope.ALL_TIME)
-        assertEquals(3, s.state.value.visibleLeaderboard(LeaderboardScope.WEEK).single().score)
-        assertEquals(9, s.state.value.visibleLeaderboard(LeaderboardScope.ALL_TIME).single().score)
+        assertEquals(3, s.state.value.leaderboard(LeaderboardScope.WEEK).single().score)
+        assertEquals(9, s.state.value.leaderboard(LeaderboardScope.ALL_TIME).single().score)
         // Within five minutes both tabs are cached…
         s.refreshGuild(LeaderboardScope.WEEK)
         s.refreshGuild(LeaderboardScope.ALL_TIME)
@@ -581,8 +571,8 @@ class MonsterStoreTest {
         clock += 1_000
         s.refreshGuild(LeaderboardScope.WEEK)
         assertEquals(3, functions.count("documents:runQuery"))
-        assertTrue(s.state.value.visibleLeaderboard(LeaderboardScope.WEEK).isEmpty())
-        assertEquals(1, s.state.value.visibleLeaderboard(LeaderboardScope.ALL_TIME).size)
+        assertTrue(s.state.value.leaderboard(LeaderboardScope.WEEK).isEmpty())
+        assertEquals(1, s.state.value.leaderboard(LeaderboardScope.ALL_TIME).size)
     }
 
     // MARK: Bestiary

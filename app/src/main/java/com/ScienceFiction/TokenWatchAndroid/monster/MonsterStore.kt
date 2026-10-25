@@ -31,18 +31,16 @@ interface MonsterAccount {
     fun markTermsAccepted(version: Int)
 }
 
-/** The config cache and the local block list: small values kept beside the ledger. */
+/** The config cache: small values kept beside the ledger. */
 interface MonsterPreferences {
     suspend fun loadPreferences(): MonsterPreferenceState
     suspend fun saveConfig(payload: String)
     suspend fun saveConfigFetchedAt(fetchedAtMs: Long)
-    suspend fun saveBlocked(uids: Set<String>)
 }
 
 data class MonsterPreferenceState(
     val configPayload: String? = null,
     val configFetchedAtMs: Long? = null,
-    val blockedUids: Set<String> = emptySet(),
 )
 
 /** Everything the screens draw from. One immutable value, so a screen never sees half an update. */
@@ -57,12 +55,10 @@ data class MonsterState(
     /** The account's stats as the server last returned them. */
     val stats: MonsterStats? = null,
     val rank: MyRank? = null,
-    /** The top 100 per tab. The week list is for the week it was read in. */
+    /** The top 10 per tab. The week list is for the week it was read in. */
     val leaderboards: Map<LeaderboardScope, List<LeaderboardEntry>> = emptyMap(),
     val leaderboardLoadedAtMs: Map<LeaderboardScope, Long> = emptyMap(),
     val leaderboardFailed: Set<LeaderboardScope> = emptySet(),
-    /** Hidden from the leaderboard on this device only. */
-    val blockedUids: Set<String> = emptySet(),
     /** Last hit per encounter key (the sword effect). */
     val lastHitAtMs: Map<String, Long> = emptyMap(),
     /** The server asked for consent (`consent_required`). */
@@ -76,9 +72,8 @@ data class MonsterState(
     /** Defeats this device recorded as a guest. */
     val guestKillCount: Int get() = ledger.guest.kills.values.sum()
 
-    /** A tab's leaderboard without the people blocked on this device. */
-    fun visibleLeaderboard(scope: LeaderboardScope): List<LeaderboardEntry> =
-        leaderboards[scope].orEmpty().filter { it.uid !in blockedUids }
+    /** A tab's leaderboard (the top 10 as read). */
+    fun leaderboard(scope: LeaderboardScope): List<LeaderboardEntry> = leaderboards[scope].orEmpty()
 }
 
 /**
@@ -173,7 +168,6 @@ class MonsterStore(
             it.copy(
                 ledger = ledger,
                 config = prefs.configPayload?.let(MonsterConfigDecoder::decodePayload) ?: MonsterConfig.BUNDLED_DEFAULT,
-                blockedUids = prefs.blockedUids,
             )
         }
         syncAccount()
@@ -657,7 +651,7 @@ class MonsterStore(
     // MARK: Guild
 
     /**
-     * Reads a tab's top 100 and the player's rank, unless they were read within five minutes ([force] reads
+     * Reads a tab's top 10 and the player's rank, unless they were read within five minutes ([force] reads
      * now). The week tab reads again at once when the week has turned (Monday 00:00 KST).
      */
     suspend fun refreshGuild(scope: LeaderboardScope, force: Boolean = false) {
@@ -690,24 +684,6 @@ class MonsterStore(
             edit { it.copy(rank = result.value, stats = result.value.stats) }
             rankLoadedAtMs = now
         }
-    }
-
-    fun block(uid: String) = updateBlocked { it + uid }
-
-    fun unblock(uid: String) = updateBlocked { it - uid }
-
-    private fun updateBlocked(transform: (Set<String>) -> Set<String>) {
-        var blocked = emptySet<String>()
-        edit { state -> state.copy(blockedUids = transform(state.blockedUids)).also { blocked = it.blockedUids } }
-        scope.launch { attempt { preferences.saveBlocked(blocked) } }
-    }
-
-    suspend fun report(uid: String, reason: MonsterApiClient.ReportReason): Boolean {
-        val api = api ?: return false
-        if (activeOwner == null && account.uid == null) return false
-        if (api.report(uid, reason) !is CallResult.Success) return false
-        log(AnalyticsEvent.GuildReport(reason))
-        return true
     }
 
     // MARK: Bestiary

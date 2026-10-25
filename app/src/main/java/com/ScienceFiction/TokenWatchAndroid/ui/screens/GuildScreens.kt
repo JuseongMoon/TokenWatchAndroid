@@ -44,15 +44,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.ScienceFiction.TokenWatchAndroid.account.AccountState
 import com.ScienceFiction.TokenWatchAndroid.account.AccountStore
 import com.ScienceFiction.TokenWatchAndroid.account.displayAvatarId
 import com.ScienceFiction.TokenWatchAndroid.domain.account.AvatarCatalog
 import com.ScienceFiction.TokenWatchAndroid.localization.L10n
-import com.ScienceFiction.TokenWatchAndroid.localization.blockMessage
 import com.ScienceFiction.TokenWatchAndroid.localization.consentAgree
 import com.ScienceFiction.TokenWatchAndroid.localization.consentFailed
 import com.ScienceFiction.TokenWatchAndroid.localization.consentIntro
@@ -63,7 +60,6 @@ import com.ScienceFiction.TokenWatchAndroid.localization.consentTitle
 import com.ScienceFiction.TokenWatchAndroid.localization.guildBoardConsent
 import com.ScienceFiction.TokenWatchAndroid.localization.guildBoardGuestKills
 import com.ScienceFiction.TokenWatchAndroid.localization.guildBoardTitle
-import com.ScienceFiction.TokenWatchAndroid.localization.leaderboardBlockedNote
 import com.ScienceFiction.TokenWatchAndroid.localization.leaderboardEmpty
 import com.ScienceFiction.TokenWatchAndroid.localization.leaderboardFailed
 import com.ScienceFiction.TokenWatchAndroid.localization.leaderboardGuestHint
@@ -73,12 +69,6 @@ import com.ScienceFiction.TokenWatchAndroid.localization.leaderboardMine
 import com.ScienceFiction.TokenWatchAndroid.localization.leaderboardNotListed
 import com.ScienceFiction.TokenWatchAndroid.localization.leaderboardTab
 import com.ScienceFiction.TokenWatchAndroid.localization.privacyLink
-import com.ScienceFiction.TokenWatchAndroid.localization.reportFailed
-import com.ScienceFiction.TokenWatchAndroid.localization.reportIntro
-import com.ScienceFiction.TokenWatchAndroid.localization.reportNeedsAccount
-import com.ScienceFiction.TokenWatchAndroid.localization.reportReason
-import com.ScienceFiction.TokenWatchAndroid.localization.reportSent
-import com.ScienceFiction.TokenWatchAndroid.localization.reportTitle
 import com.ScienceFiction.TokenWatchAndroid.localization.termsLink
 import com.ScienceFiction.TokenWatchAndroid.monster.LeaderboardEntry
 import com.ScienceFiction.TokenWatchAndroid.monster.LeaderboardScope
@@ -99,11 +89,11 @@ import kotlinx.coroutines.launch
 
 /*
  * Adventurer ranks (V2) screens, mirroring iOS `GuildViews`: the guild sign in the main header (left of
- * the announcements button), the ranks (this week / all time tabs, top 100, the player's rank, report and
- * block) and the monster hunt consent. Users see the name "adventurer ranks"; the code keeps `Guild…`.
+ * the announcements button), the ranks (this week / all time tabs, top 10, the player's rank) and the
+ * monster hunt consent. Users see the name "adventurer ranks"; the code keeps `Guild…`.
  * - Sign: opens the ranks, or the consent screen before consenting (a cyan dot then).
- * - Ranks: public (readable signed out). The week tab starts over at Monday 00:00 KST. Reporting needs an
- *   account; blocking hides on this device.
+ * - Ranks: public (readable signed out). The week tab starts over at Monday 00:00 KST. Outside the top 10
+ *   the player's rank shows only in the ME box.
  * - Consent: what goes to the server (never usage figures or account information), what is public, and
  *   the terms version 2 agreement.
  */
@@ -229,8 +219,6 @@ fun LeaderboardScreen(
     val isOperator by account.isOperator.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     var refreshing by remember { mutableStateOf(false) }
-    var menuTarget by remember { mutableStateOf<LeaderboardEntry?>(null) }
-    var notice by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
     var tab by rememberSaveable { mutableStateOf(LeaderboardScope.WEEK) }
     LaunchedEffect(tab) { monsters.refreshGuild(tab) }
 
@@ -331,9 +319,8 @@ fun LeaderboardScreen(
                         }
                     }
                 }
-                notice?.let { (text, ok) -> AccountNoticeLine(text = text, color = if (ok) Term.Green else Term.Red) }
-                TerminalBox(title = "TOP 100") {
-                    val list = state.visibleLeaderboard(tab)
+                TerminalBox(title = "TOP ${MonsterApiClient.LEADERBOARD_SIZE}") {
+                    val list = state.leaderboard(tab)
                     if (list.isEmpty()) {
                         Text(
                             text = when {
@@ -352,41 +339,13 @@ fun LeaderboardScreen(
                                     rank = index + 1,
                                     isMe = entry.uid == account.uid,
                                     catalog = catalog,
-                                    loc = loc,
-                                    onMenu = { menuTarget = entry },
                                 )
                             }
                         }
                     }
                 }
-                if (state.blockedUids.isNotEmpty()) {
-                    Text(text = loc.leaderboardBlockedNote, color = Term.Dim, style = terminalTextStyle(10.sp))
-                }
             }
         }
-    }
-
-    menuTarget?.let { entry ->
-        ReportBlockDialog(
-            entry = entry,
-            loc = loc,
-            onBlock = {
-                monsters.block(entry.uid)
-                menuTarget = null
-            },
-            onReport = { reason ->
-                menuTarget = null
-                if (account.uid == null) {
-                    notice = loc.reportNeedsAccount to false
-                } else {
-                    scope.launch {
-                        val ok = monsters.report(entry.uid, reason)
-                        notice = (if (ok) loc.reportSent else loc.reportFailed) to ok
-                    }
-                }
-            },
-            onDismiss = { menuTarget = null },
-        )
     }
 }
 
@@ -396,8 +355,6 @@ private fun LeaderboardRow(
     rank: Int,
     isMe: Boolean,
     catalog: AvatarCatalog,
-    loc: L10n,
-    onMenu: () -> Unit,
 ) {
     Row(
         modifier = Modifier
@@ -407,7 +364,7 @@ private fun LeaderboardRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            text = String.format(Locale.US, "%3d", rank),
+            text = String.format(Locale.US, "%2d", rank),
             color = if (rank <= 3) Term.Yellow else Term.Dim,
             style = terminalTextStyle(12.sp, FontWeight.SemiBold),
         )
@@ -423,59 +380,6 @@ private fun LeaderboardRow(
             modifier = Modifier.weight(1f),
         )
         Text(text = "${entry.score}", color = Term.Green, style = terminalTextStyle(12.sp))
-        if (!isMe) {
-            TerminalTextButton(
-                text = "[⋯]",
-                color = Term.Dim,
-                size = 12.sp,
-                weight = FontWeight.Normal,
-                accessibilityLabel = loc.reportTitle("${entry.nickname} #${entry.tag}"),
-                onClick = onMenu,
-            )
-        }
-    }
-}
-
-/** Report or block one adventurer (a terminal dialog). */
-@Composable
-private fun ReportBlockDialog(
-    entry: LeaderboardEntry,
-    loc: L10n,
-    onBlock: () -> Unit,
-    onReport: (MonsterApiClient.ReportReason) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    var choosingReason by rememberSaveable(entry.uid) { mutableStateOf(false) }
-    val scrimInteraction = remember { MutableInteractionSource() }
-    val cardInteraction = remember { MutableInteractionSource() }
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.72f))
-                .clickable(interactionSource = scrimInteraction, indication = null, onClick = onDismiss)
-                .padding(24.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            TerminalBox(
-                title = "${entry.nickname} #${entry.tag}",
-                borderColor = Term.Cyan,
-                // Taps inside the card must not fall through to the scrim.
-                modifier = Modifier.clickable(interactionSource = cardInteraction, indication = null, onClick = {}),
-            ) {
-                if (!choosingReason) {
-                    TerminalButton(title = "[ report ]", color = Term.Yellow, onClick = { choosingReason = true })
-                    TerminalButton(title = "[ block ]", color = Term.Red, onClick = onBlock)
-                    Text(text = loc.blockMessage, color = Term.Dim, style = terminalTextStyle(10.sp))
-                } else {
-                    Text(text = loc.reportIntro, color = Term.Dim, style = terminalTextStyle(11.sp))
-                    MonsterApiClient.ReportReason.entries.forEach { reason ->
-                        TerminalButton(title = loc.reportReason(reason), color = Term.Yellow, onClick = { onReport(reason) })
-                    }
-                }
-                TerminalButton(title = "[ cancel ]", color = Term.Dim, onClick = onDismiss)
-            }
-        }
     }
 }
 

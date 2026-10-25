@@ -161,22 +161,17 @@ class MonsterApiClientTest {
         )
     }
 
-    @Test fun rankStatsAndReports() = runBlocking {
+    @Test fun rankAndStats() = runBlocking {
         val transport = ScriptedTransport(
             response(200, """{"result":{"listed":true,"rank":3,"totalScore":420,"commonKills":7,"specialKills":2}}"""),
-            response(200, """{"result":{}}"""),
         )
-        val c = client(transport)
         assertEquals(
             MonsterApiClient.CallResult.Success(MyRank(listed = true, rank = 3, stats = MonsterStats(420, 7, 2))),
-            c.myRank(),
+            client(transport).myRank(),
         )
-        assertEquals(MonsterApiClient.CallResult.Success(Unit), c.report("uid9", MonsterApiClient.ReportReason.CHEATING))
-        assertEquals(mapOf("targetUid" to "uid9", "reason" to "cheating"), transport.requests[1].json()["data"])
-        assertEquals(listOf("nickname", "avatar", "cheating", "other"), MonsterApiClient.ReportReason.entries.map { it.wireId })
     }
 
-    @Test fun theLeaderboardIsARunQueryForTheTopHundred() = runBlocking {
+    @Test fun theLeaderboardIsARunQueryForTheTopTen() = runBlocking {
         val transport = ScriptedTransport(response(200, "[]"))
         assertEquals(emptyList<LeaderboardEntry>(), client(transport).leaderboardTop(LeaderboardScope.ALL_TIME, "2026-10-19"))
         val request = transport.requests.single()
@@ -194,7 +189,7 @@ class MonsterApiClientTest {
             ),
             query["orderBy"],
         )
-        assertEquals(100.0, query["limit"])
+        assertEquals(10.0, query["limit"])
         // Readable signed out: no token, no header.
         val signedOut = ScriptedTransport(response(200, "[]"))
         client(signedOut, token = null).leaderboardTop(LeaderboardScope.ALL_TIME, "2026-10-19")

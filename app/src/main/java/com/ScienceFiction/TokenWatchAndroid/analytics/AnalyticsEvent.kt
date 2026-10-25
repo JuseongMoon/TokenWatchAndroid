@@ -5,7 +5,6 @@ import com.ScienceFiction.TokenWatchAndroid.domain.Announcement
 import com.ScienceFiction.TokenWatchAndroid.domain.account.AccountMethod
 import com.ScienceFiction.TokenWatchAndroid.domain.AgentProvider
 import com.ScienceFiction.TokenWatchAndroid.domain.AuthKind
-import com.ScienceFiction.TokenWatchAndroid.monster.MonsterApiClient
 import com.ScienceFiction.TokenWatchAndroid.monster.MonsterEncounter
 import com.ScienceFiction.TokenWatchAndroid.network.core.UsageException
 import java.io.IOException
@@ -289,11 +288,6 @@ sealed class AnalyticsEvent(
             "score" to score.toString(),
             "source" to source.wireId,
         ),
-    )
-
-    class GuildReport(reason: MonsterApiClient.ReportReason) : AnalyticsEvent(
-        "guild_report",
-        mapOf("reason" to reason.wireId),
     )
 }
 

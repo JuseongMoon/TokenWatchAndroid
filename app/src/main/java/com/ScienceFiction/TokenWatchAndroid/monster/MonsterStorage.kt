@@ -8,7 +8,6 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
-import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.ScienceFiction.TokenWatchAndroid.data.safeData
 import com.ScienceFiction.TokenWatchAndroid.data.safeGet
@@ -30,8 +29,8 @@ private val Context.monsterDataStore: DataStore<Preferences> by preferencesDataS
 )
 
 /**
- * Everything the monster store keeps on disk except Block Store: the ledger, the config cache, the local
- * block list and the DataStore copy of the device session ledger ([sessionLedgerCopy]).
+ * Everything the monster store keeps on disk except Block Store: the ledger, the config cache and the
+ * DataStore copy of the device session ledger ([sessionLedgerCopy]).
  */
 class MonsterDataStore(private val dataStore: DataStore<Preferences>) :
     MonsterLedgerStorage, MonsterPreferences {
@@ -50,7 +49,6 @@ class MonsterDataStore(private val dataStore: DataStore<Preferences>) :
         return MonsterPreferenceState(
             configPayload = preferences.safeGet(CONFIG),
             configFetchedAtMs = preferences.safeGet(CONFIG_FETCHED_AT),
-            blockedUids = preferences.safeGet(BLOCKED).orEmpty(),
         )
     }
 
@@ -60,10 +58,6 @@ class MonsterDataStore(private val dataStore: DataStore<Preferences>) :
 
     override suspend fun saveConfigFetchedAt(fetchedAtMs: Long) {
         dataStore.edit { it[CONFIG_FETCHED_AT] = fetchedAtMs }
-    }
-
-    override suspend fun saveBlocked(uids: Set<String>) {
-        dataStore.edit { it[BLOCKED] = uids }
     }
 
     /** The session ledger copy kept for when Block Store is unavailable. */
@@ -81,7 +75,6 @@ class MonsterDataStore(private val dataStore: DataStore<Preferences>) :
         val LEDGER = stringPreferencesKey("tokenwatch.monster.encounters.v1")
         val CONFIG = stringPreferencesKey("tokenwatch.monster.config.v1")
         val CONFIG_FETCHED_AT = longPreferencesKey("tokenwatch.monster.configFetchedAt")
-        val BLOCKED = stringSetPreferencesKey("tokenwatch.guild.blocked.v1")
         val SESSION_LEDGER = stringPreferencesKey("tokenwatch.monster.sessionLedger.v1")
     }
 }

@@ -1,10 +1,9 @@
 package com.ScienceFiction.TokenWatchAndroid.localization
 
 import com.ScienceFiction.TokenWatchAndroid.monster.LeaderboardScope
-import com.ScienceFiction.TokenWatchAndroid.monster.MonsterApiClient
 
 /*
- * Monster hunt and adventurer ranks (V2) copy. Terminal chrome (`RANKS`, `[ start ]`, `[ report ]` …) stays
+ * Monster hunt and adventurer ranks (V2) copy. Terminal chrome (`RANKS`, `[ start ]`, `[ retry ]` …) stays
  * English and untranslated; only natural-language sentences live here. The text is the iOS original verbatim
  * (`L10n+Monster.swift`), so both platforms read the same.
  */
@@ -79,32 +78,6 @@ val L10n.leaderboardGuestHint: String
 fun L10n.leaderboardMine(common: Int, special: Int): String =
     choose("슬라임 $common · 특수 $special", "slimes $common · special $special")
 val L10n.leaderboardNotListed: String get() = choose("아직 순위에 없어요", "not ranked yet")
-val L10n.leaderboardBlockedNote: String
-    get() = choose("차단한 모험가는 이 기기에서 보이지 않아요.", "Blocked adventurers are hidden on this device.")
-
-// MARK: Report and block
-
-fun L10n.reportTitle(nametag: String): String = choose("$nametag 신고", "Report $nametag")
-val L10n.reportIntro: String
-    get() = choose(
-        "신고 사유를 고르세요. 여러 사람이 신고하면 순위에서 숨겨지고 운영자가 검토해요.",
-        "Pick a reason. When several people report someone, they're hidden from the ranks until an operator reviews it.",
-    )
-fun L10n.reportReason(reason: MonsterApiClient.ReportReason): String = when (reason) {
-    MonsterApiClient.ReportReason.NICKNAME -> choose("부적절한 닉네임", "Inappropriate nickname")
-    MonsterApiClient.ReportReason.AVATAR -> choose("부적절한 아바타", "Inappropriate avatar")
-    MonsterApiClient.ReportReason.CHEATING -> choose("부정행위 의심", "Suspected cheating")
-    MonsterApiClient.ReportReason.OTHER -> choose("기타", "Other")
-}
-val L10n.reportSent: String get() = choose("신고했어요. 검토할게요.", "Report sent. We'll take a look.")
-val L10n.reportFailed: String get() = choose("신고를 보내지 못했어요. 다시 시도해 주세요.", "Couldn't send the report. Try again.")
-val L10n.reportNeedsAccount: String get() = choose("신고는 로그인한 계정만 할 수 있어요.", "Sign in to report.")
-fun L10n.blockTitle(nametag: String): String = choose("$nametag 차단", "Block $nametag")
-val L10n.blockMessage: String
-    get() = choose(
-        "이 기기의 순위 목록에서 이 모험가를 숨겨요. 언제든 다시 보이게 할 수 있어요.",
-        "Hide this adventurer from the ranks on this device. You can undo it anytime.",
-    )
 
 // MARK: Consent (terms version 2)
 

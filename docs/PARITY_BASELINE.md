@@ -185,8 +185,8 @@ Firebase Analytics runs against the Android app's own Firebase registration and
   constants. The monster sprites ship as the same JSON bytes as iOS, verified by SHA-256.
 - A sign in the main header, left of the announcements button, opens the adventurer ranks: a
   "this week" tab (starting over every Monday at 00:00 KST, the default) and an "all time" tab, each
-  with the top 100 by score (ties go to whoever got there first) and the player's own rank in it,
-  plus reporting with four reasons and an on-device block. Each tab caches its list for five
+  with the top 10 by score (ties go to whoever got there first) and the player's own rank in it;
+  outside the top 10 the player's rank shows only in their own box. Each tab caches its list for five
   minutes, and the week tab reads again as soon as the week turns. Before agreeing the sign opens
   the consent screen instead and carries a dot. Demo mode dims the sign and shows memory-only sample monsters on the sample 100% gauges; they
   play the same defeat animation as real ones.
@@ -198,9 +198,8 @@ Firebase Analytics runs against the Android app's own Firebase registration and
   hides the previous account's defeats at once, before the next read.
 - A device session ledger remembers which account received each session on this device, so
   switching accounts does not collect the same usage twice.
-- Analytics adds `monster_spawn` (monster ID, source), `monster_kill` (monster ID, HP, score,
-  source) and `guild_report` (reason), plus `leaderboard` and `monster_consent` screen events; all
-  are dropped in demo mode.
+- Analytics adds `monster_spawn` (monster ID, source) and `monster_kill` (monster ID, HP, score,
+  source), plus `leaderboard` and `monster_consent` screen events; all are dropped in demo mode.
 
 ## Android identity
 

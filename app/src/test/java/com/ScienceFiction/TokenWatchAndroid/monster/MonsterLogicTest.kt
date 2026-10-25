@@ -377,7 +377,7 @@ class MonsterLogicTest {
             listOf(LeaderboardEntry("uid1", "David", "0000", "cat", 60, 9, 1, 1)),
             MonsterApiClient.decodeLeaderboard(json, LeaderboardScope.WEEK),
         )
-        val query = MonsterApiClient.leaderboardQuery(LeaderboardScope.WEEK, "2026-10-19", 100)["structuredQuery"] as Map<*, *>
+        val query = MonsterApiClient.leaderboardQuery(LeaderboardScope.WEEK, "2026-10-19", 10)["structuredQuery"] as Map<*, *>
         assertEquals(
             mapOf(
                 "fieldFilter" to mapOf(
@@ -397,7 +397,7 @@ class MonsterLogicTest {
         )
         val allTime = MonsterApiClient.leaderboardQuery(LeaderboardScope.ALL_TIME, "2026-10-19", 500)["structuredQuery"] as Map<*, *>
         assertNull(allTime["where"])
-        assertEquals(100, allTime["limit"])
+        assertEquals(10, allTime["limit"])
     }
 
     @Test fun myRankDecodesWeek() {

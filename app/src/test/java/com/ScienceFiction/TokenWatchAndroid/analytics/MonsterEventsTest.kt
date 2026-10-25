@@ -1,6 +1,5 @@
 package com.ScienceFiction.TokenWatchAndroid.analytics
 
-import com.ScienceFiction.TokenWatchAndroid.monster.MonsterApiClient
 import com.ScienceFiction.TokenWatchAndroid.monster.MonsterEncounter
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -10,11 +9,9 @@ class MonsterEventsTest {
     @Test fun namesAndParametersMatchTheContract() {
         val spawn = AnalyticsEvent.MonsterSpawn("goblin", MonsterEncounter.Source.RANDOM)
         val kill = AnalyticsEvent.MonsterKill("mimic", hp = 12, score = 350, source = MonsterEncounter.Source.COMPLETION)
-        val report = AnalyticsEvent.GuildReport(MonsterApiClient.ReportReason.NICKNAME)
-        assertEquals(listOf("monster_spawn", "monster_kill", "guild_report"), listOf(spawn, kill, report).map { it.eventName })
+        assertEquals(listOf("monster_spawn", "monster_kill"), listOf(spawn, kill).map { it.eventName })
         assertEquals(mapOf("monster_id" to "goblin", "source" to "random"), spawn.parameters)
         assertEquals(mapOf("monster_id" to "mimic", "hp" to "12", "score" to "350", "source" to "completion"), kill.parameters)
-        assertEquals(mapOf("reason" to "nickname"), report.parameters)
         assertEquals(listOf("completion", "random", "event"), MonsterEncounter.Source.entries.map { it.wireId })
     }
 
@@ -25,7 +22,6 @@ class MonsterEventsTest {
         listOf(
             long,
             AnalyticsEvent.MonsterKill("slime", 1, 10, MonsterEncounter.Source.RANDOM),
-            AnalyticsEvent.GuildReport(MonsterApiClient.ReportReason.OTHER),
         ).forEach { assertTrue(it.isProviderScoped) }
     }
 

@@ -227,11 +227,6 @@ class LocalizationTest {
         assertEquals("pumpkin", en.monsterName("pumpkin"))
         assertEquals("공격" to "Attack", ko.monsterAttack to en.monsterAttack)
         assertEquals("슬라임 7 · 특수 2", ko.leaderboardMine(7, 2))
-        assertEquals("Report David #0000", en.reportTitle("David #0000"))
-        assertEquals(
-            listOf("부적절한 닉네임", "부적절한 아바타", "부정행위 의심", "기타"),
-            com.ScienceFiction.TokenWatchAndroid.monster.MonsterApiClient.ReportReason.entries.map(ko::reportReason),
-        )
         assertEquals(4, ko.consentSent.size)
         assertEquals("그 창의 리셋 시각과 주기", ko.consentSent[1])
         // The random draw sends a per-account hash of each AI account's on-device ID, so the list names it.
