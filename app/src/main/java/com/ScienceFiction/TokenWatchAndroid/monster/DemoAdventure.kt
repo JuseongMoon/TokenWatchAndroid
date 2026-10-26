@@ -44,21 +44,24 @@ object DemoAdventure {
 
     private class Person(val ko: String, val en: String, val tag: String, val avatar: String, val week: Int, val total: Int)
 
-    /** A tab's top 10. Of the 11 sample adventurers (the player included), one per tab falls outside it. */
+    /**
+     * A tab's top 10. Of the 11 sample adventurers (the player included), one per tab falls outside it. The
+     * others go by GitHub-style user names: Korean developers' on the Korean screen, others' on the English one.
+     */
     fun leaderboard(scope: LeaderboardScope, korean: Boolean): List<LeaderboardEntry> {
         val me = profile(korean)
         val people = listOf(
-            Person("야간당직", "nightshift", "3141", "rogue", 486, 905),
-            Person("커피세잔", "triple_shot", "7720", "knight", 412, 1240),
-            Person("버그잡이", "bugcatcher", "0815", "hacker", 365, 1105),
+            Person("minseok94", "jmorrison", "3141", "rogue", 486, 905),
+            Person("hyeon-woo", "alexk-dev", "7720", "knight", 412, 1240),
+            Person("dkim0311", "0xmira", "0815", "hacker", 365, 1105),
             Person(me.nickname, me.nickname, me.tag, me.avatarId, mine(LeaderboardScope.WEEK).score, mine(LeaderboardScope.ALL_TIME).score),
-            Person("슬라임킬러", "slimeslayer", "5562", "warrior", 251, 980),
-            Person("리셋대기", "resetwatch", "2048", "cleric", 207, 840),
-            Person("pixel_bear", "pixel_bear", "9013", "cat", 168, 610),
-            Person("금요배포", "deploy_fri", "4404", "robot", 132, 532),
-            Person("모닝커밋", "morning_git", "1206", "bard", 96, 455),
-            Person("고양이개발", "catdev", "6378", "archer", 71, 390),
-            Person("한도초과", "over_quota", "8291", "dragon", 40, 352),
+            Person("ParkJiho", "tkellerman", "5562", "warrior", 251, 980),
+            Person("rkdwlsdn", "sam-ng", "2048", "cleric", 207, 840),
+            Person("seojun-lee", "priya_codes", "9013", "cat", 168, 610),
+            Person("chanhee7", "lucasferr", "4404", "robot", 132, 532),
+            Person("kongnamul", "nightowl42", "1206", "bard", 96, 455),
+            Person("devsoyeon", "dvorak-dan", "6378", "archer", 71, 390),
+            Person("yuna0827", "hkimura", "8291", "dragon", 40, 352),
         )
         return people.mapIndexed { index, p ->
             val isMe = p.tag == me.tag
