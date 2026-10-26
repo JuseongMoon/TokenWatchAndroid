@@ -38,6 +38,7 @@ val L10n.bestiaryHint: String
 val L10n.bestiaryLoading: String get() = choose("처치 기록을 불러오는 중…", "Loading your defeats…")
 val L10n.bestiaryFailed: String get() = choose("처치 기록을 불러오지 못했어요.", "Couldn't load your defeats.")
 val L10n.bestiaryUnknown: String get() = choose("아직 잡지 않은 몬스터", "Not defeated yet")
+val L10n.bestiaryComingSoon: String get() = choose("준비 중인 몬스터", "Monster coming soon")
 fun L10n.bestiaryA11y(name: String, kills: Int): String = choose("$name, ${kills}마리 처치", "$name, $kills defeated")
 
 // MARK: Guild sign (top bar)

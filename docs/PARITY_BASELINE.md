@@ -8,10 +8,11 @@ The Android sources mirror the portable iOS patches through commit `bfdb4ed` on 
 1.3.0 (16) content: the review prompt, login failure diagnostics, the two analytics additions,
 the split "hide unused graphs" setting, and the credit-gauge reset confirmation described below.
 On the `feature/account` branch it also mirrors the optional app account and the monster hunt
-through iOS commit `798d946` on `feature/account` (`a8fc3a9`, `2d268f8`, `dfae3ea`, `26b74fc`,
+through iOS commit `834613b` on `feature/account` (`a8fc3a9`, `2d268f8`, `dfae3ea`, `26b74fc`,
 `0ab185e`, `816d6aa`, `8e5ab75`, `bef30eb`, `6bc67ae`, `b5aa200`, `e2e2152`, `5a452e8`,
-`35c4764`, `e5309c2`, `c18446d`, `d481230`, `9f86767`, `b4ba166`, `70c5f73`, `798d946`), described under
-"Optional app account" and "Monster hunt and adventurer ranks" below.
+`35c4764`, `e5309c2`, `c18446d`, `d481230`, `9f86767`, `b4ba166`, `70c5f73`, `798d946`, `d536b55`,
+`29edee1`, `834613b`), described under "Optional app account" and "Monster hunt and adventurer ranks"
+below.
 Uncommitted iOS working-tree changes are deliberately not part of this baseline.
 
 Firebase Analytics runs against the Android app's own Firebase registration and
@@ -123,9 +124,10 @@ Firebase Analytics runs against the Android app's own Firebase registration and
 ## Optional app account
 
 - A TokenWatch account of its own, separate from the AI service accounts: Sign in with Apple or
-  Google through Firebase Auth. It is optional; every usage feature works signed out, and demo
-  mode disables it. Settings gains a PLAYER box that opens the sign-in, profile setup or account
-  screen depending on the account state.
+  Google through Firebase Auth. It is optional; every usage feature works signed out. Settings gains
+  a PLAYER box that opens the sign-in, profile setup or account screen depending on the account state.
+  Demo mode leaves the real account out of sight: the PLAYER box and the account screen show a sample
+  adventurer instead, with its editing controls switched off.
 - First sign-in leads to profile setup: a nickname (2–12 characters of Korean, English, digits,
   `_` and `-`, screened against the shared banned-word list on save, never while typing; the
   server's wider list decides), one of sixteen pixel-art avatars, and agreement to the terms and
@@ -164,8 +166,10 @@ Firebase Analytics runs against the Android app's own Firebase registration and
 - Monsters appear on subscription gauges that have a future reset: a completion monster when a
   gauge reaches 100% (one per provider and reset, however many windows share that reset), and now
   and then a random monster on a gauge in use: each connected AI account draws once every 20 to 40
-  minutes, picked at random, among its gauges; a gauge at 100% joins once its completion monster is
-  defeated, so the draws go on until the reset even when the usage ran out early. One seen for the
+  minutes, picked at random, among its gauges without a living monster, so a gauge at 100% joins once
+  its completion monster is defeated and the draws go on until the reset even when the usage ran out
+  early. A gauge still showing a ghost from the last hour is picked only when no gauge is free, and the
+  new monster then clears that ghost away: a bar shows one monster or ghost at a time. One seen for the
   first time only gets its first draw time. The schedule stays on the device per AI account whichever
   app account is signed in. Credit gauges and balances never carry one. Monsters march across the bar
   like the slime critter and come back in from the left past the right edge: a completion monster sets
@@ -174,7 +178,9 @@ Firebase Analytics runs against the Android app's own Firebase registration and
   the gauge row hits the monster, ahead of the card's detail tap; special monsters show their HP as
   hearts after the first hit, and TalkBack offers an "attack" action. A defeat holds the sword
   briefly, plays the monster's own death animation, then the monster walks on in gray with a halo at
-  half speed. The "gauge monsters" setting switches both spawning and drawing off.
+  half speed: a completion monster's ghost until the reset, a random one's from where it fell, coming
+  back in from the left, for an hour after the kill. The "gauge monsters" setting switches both
+  spawning and drawing off.
 - Signed-in players who agree to the monster terms get server-judged spawns and defeats that count
   in the adventurer ranks. Everyone else hunts as a guest with deterministic device draws that
   stay unranked and are merged once, as history, after agreeing (up to 500 defeats, the most-hunted
@@ -190,14 +196,18 @@ Firebase Analytics runs against the Android app's own Firebase registration and
   with the top 10 by score (ties go to whoever got there first) and the player's own rank in it;
   outside the top 10 the player's rank shows only in their own box. Each tab caches its list for five
   minutes, and the week tab reads again as soon as the week turns. Before agreeing the sign opens
-  the consent screen instead and carries a dot. Demo mode dims the sign and shows memory-only sample monsters on the sample 100% gauges; they
-  play the same defeat animation as real ones.
+  the consent screen instead and carries a dot. In demo mode the sign opens sample ranks, where the
+  sample adventurer stands fourth this week and sixth all time, and its bestiary has caught the first
+  two species only; all of it comes from constants, with no server call and nothing stored. Memory-only
+  sample monsters appear on the sample 100% gauges and play the same defeat animation as real ones.
 - The account screen carries a bestiary under the profile: every released species this app can draw, plus
-  any species already defeated, in catalog order on a three-column grid, with the account's defeats per
+  any species already defeated, in catalog order on a four-column grid as wide as the avatar grid, with the account's defeats per
   species (its own record plus the merged guest history, read from the player's document with a field mask
   each time the screen opens) and a found/total summary. A species never defeated is a dim silhouette with a
-  question mark, its name hidden; a species not yet released stays out until defeated. Switching accounts
-  hides the previous account's defeats at once, before the next read.
+  question mark, its name hidden; a species not yet released stays out until defeated. Gray squares with a
+  question mark hold the places of monsters still to come, so the grid shows at least eight cells; the
+  summary counts real species only. Switching accounts hides the previous account's defeats at once,
+  before the next read.
 - A device session ledger remembers which account received each session on this device, so
   switching accounts does not collect the same usage twice.
 - Analytics adds `monster_spawn` (monster ID, source) and `monster_kill` (monster ID, HP, score,

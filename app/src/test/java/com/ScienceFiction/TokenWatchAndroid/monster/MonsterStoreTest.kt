@@ -18,6 +18,8 @@ import okhttp3.Request
 import okio.Buffer
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -298,6 +300,71 @@ class MonsterStoreTest {
         s.observe(agent, listOf(w))
         val random = s.state.value.ledger.encounters.first { it.source == MonsterEncounter.Source.RANDOM }
         assertEquals(agent.id to w.label, random.agentId to random.displayLabel)
+    }
+
+    /** Sets the schedule with a first look when there is none, then looks again at the due time: the random monster drawn. */
+    private suspend fun drawOnce(s: MonsterStore, windows: List<UsageWindow>): MonsterEncounter {
+        val token = MonsterSessionKey.agentToken(agent.id)
+        if (s.state.value.ledger.nextDraw(token) == null) s.observe(agent, windows)
+        val before = s.state.value.ledger.encounters.map { it.key }.toSet()
+        clock = s.state.value.ledger.nextDraw(token)!!
+        s.observe(agent, windows)
+        return s.state.value.ledger.encounters.first { it.key !in before && it.source == MonsterEncounter.Source.RANDOM }
+    }
+
+    @Test fun randomGhostStaysAnHourAfterTheKill() = runBlocking {
+        cachedConfig(alwaysRandom)
+        val w = window(label = "Current session", used = 40.0)
+        snapshots = listOf(agent to listOf(w))
+        val s = store()
+        val e = drawOnce(s, listOf(w))
+        clock += 30 * 60_000L
+        assertEquals(MonsterStore.HitResult.Defeated, s.hit(e.key))
+        val killedAt = clock
+        clock = killedAt + 50 * 60_000L // past the time it had to live (spawn + 60 minutes)
+        assertEquals(listOf(e.key), s.encounters(agent.id, AgentProvider.CLAUDE, w).map { it.key })
+        clock = killedAt + 60 * 60_000L
+        assertTrue(s.encounters(agent.id, AgentProvider.CLAUDE, w).isEmpty())
+    }
+
+    @Test fun nextMonsterAvoidsBarsWithAMonsterOrAGhost() = runBlocking {
+        cachedConfig(alwaysRandom)
+        val session = window(label = "Current session", used = 40.0)
+        val week = window(used = 40.0)
+        val windows = listOf(session, week)
+        snapshots = listOf(agent to windows)
+        val s = store()
+        val first = drawOnce(s, windows)
+        val second = drawOnce(s, windows) // within 40 minutes, so the first is still alive
+        assertNotEquals(first.displayLabel, second.displayLabel) // a bar with a monster is avoided
+        assertEquals(MonsterStore.HitResult.Defeated, s.hit(first.key))
+        assertEquals(MonsterStore.HitResult.Defeated, s.hit(second.key))
+        val third = drawOnce(s, windows) // both bars hold a ghost from the last hour: it takes one of them
+        val thirdBar = windows.first { it.label == third.displayLabel }
+        val otherBar = windows.first { it.label != third.displayLabel }
+        assertEquals(listOf(third.key), s.encounters(agent.id, AgentProvider.CLAUDE, thirdBar).map { it.key })
+        assertEquals(1, s.encounters(agent.id, AgentProvider.CLAUDE, otherBar).size) // the other ghost stays
+    }
+
+    @Test fun singleBarGhostMakesWayForTheNextMonster() = runBlocking {
+        cachedConfig(alwaysRandom)
+        val w = window(label = "Current session", used = 40.0)
+        snapshots = listOf(agent to listOf(w))
+        val s = store()
+        val token = MonsterSessionKey.agentToken(agent.id)
+        val first = drawOnce(s, listOf(w))
+        // A due time that comes while it is alive draws nothing and leaves the schedule as it is.
+        val due = s.state.value.ledger.nextDraw(token)!!
+        clock = due
+        s.observe(agent, listOf(w))
+        assertEquals(1, s.state.value.ledger.encounters.size)
+        assertEquals(due, s.state.value.ledger.nextDraw(token))
+        assertEquals(MonsterStore.HitResult.Defeated, s.hit(first.key))
+        val next = drawOnce(s, listOf(w)) // with one bar only, it appears on the ghost's bar
+        val shown = s.encounters(agent.id, AgentProvider.CLAUDE, w)
+        assertEquals(listOf(next.key), shown.map { it.key })
+        assertTrue(shown.single().isAlive) // the ghost made way
+        assertNotNull(s.state.value.ledger.encounters.first { it.key == first.key }.dismissedAtMs)
     }
 
     @Test fun agentWithoutCandidateWindowIsSkipped() = runBlocking {
@@ -639,26 +706,36 @@ class MonsterStoreTest {
     @Test fun theBestiaryAsksNothingInDemoOrSignedOut() = runBlocking {
         val s = store()
         s.refreshBestiary()
+        assertNull(s.bestiaryRows())
         demo = true
         account.uid = "u1"
+        s.syncAccount()
         s.refreshBestiary()
         assertTrue(functions.calls.isEmpty())
-        assertNull(s.bestiaryRows())
+        // Demo mode shows the sample adventurer's defeats instead, whoever is signed in.
+        val rows = s.bestiaryRows()!!
+        assertEquals(DemoAdventure.KILLS.keys, rows.filter { it.discovered }.map { it.id }.toSet())
+        assertEquals(48, rows.first { it.id == "slime" }.kills)
     }
 
     // MARK: Drawing (pure)
 
-    @Test fun aRandomGhostLeavesTheListAfterThreeMinutes() {
+    @Test fun aRandomGhostStaysListedAnHourAfterTheKill() {
         val w = window(used = 40.0)
+        val killedAt = clock + 1_800_000 // half an hour after it appeared
         val ghost = MonsterEncounter(
             key = "r", ownerUid = null, source = MonsterEncounter.Source.RANDOM, provider = "claude",
             windowLabel = w.label, resetBucketMs = null, drawAtMs = 0, monsterId = "slime", maxHp = 1, hp = 0,
             state = MonsterEncounter.State.DEFEATED, spawnedAtMs = clock, expiresAtMs = clock + 3_600_000,
-            defeatedAtMs = clock, position = 0.5,
+            defeatedAtMs = killedAt, position = 0.5,
         )
         val state = MonsterState(ledger = MonsterLedgerState(encounters = listOf(ghost)))
-        assertEquals(1, MonsterStore.visible(state, agent.id, AgentProvider.CLAUDE, w, clock + 180_000).size)
-        assertEquals(0, MonsterStore.visible(state, agent.id, AgentProvider.CLAUDE, w, clock + 180_001).size)
+        // Past the time it had to live, an hour from the kill.
+        assertEquals(1, MonsterStore.visible(state, agent.id, AgentProvider.CLAUDE, w, killedAt + 3_599_999).size)
+        assertEquals(0, MonsterStore.visible(state, agent.id, AgentProvider.CLAUDE, w, killedAt + 3_600_000).size)
+        // A ghost a new monster cleared away no longer shows.
+        val cleared = MonsterState(ledger = MonsterLedgerState(encounters = listOf(ghost.copy(dismissedAtMs = killedAt))))
+        assertEquals(0, MonsterStore.visible(cleared, agent.id, AgentProvider.CLAUDE, w, killedAt).size)
         // Another owner's monster never shows.
         assertEquals(0, MonsterStore.visible(state.copy(owner = "u1"), agent.id, AgentProvider.CLAUDE, w, clock).size)
     }

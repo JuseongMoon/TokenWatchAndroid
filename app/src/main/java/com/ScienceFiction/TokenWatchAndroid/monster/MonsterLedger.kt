@@ -36,6 +36,8 @@ data class MonsterEncounter(
     val awardedScore: Int? = null,
     /** Defeated but not yet confirmed by the server (offline and the like) — sent again later. */
     val pendingDefeat: Boolean = false,
+    /** When a new monster on the same bar cleared this ghost away. The record stays (it stops a completion spawning twice); only the screen drops it. */
+    val dismissedAtMs: Long? = null,
     /** The window it is drawn on (this device's agent and display label). A monster received on another device is found by provider and label instead. */
     val agentId: UUID? = null,
     val displayLabel: String? = null,
@@ -199,6 +201,7 @@ object MonsterLedgerCodec {
         e.defeatedAtMs?.let { put("defeatedAtMs", it) }
         e.awardedScore?.let { put("awardedScore", it) }
         put("pendingDefeat", e.pendingDefeat)
+        e.dismissedAtMs?.let { put("dismissedAtMs", it) }
         e.agentId?.let { put("agentID", it.toString()) }
         e.displayLabel?.let { put("displayLabel", it) }
         put("position", e.position)
@@ -223,6 +226,7 @@ object MonsterLedgerCodec {
             defeatedAtMs = m["defeatedAtMs"].asLong(),
             awardedScore = m["awardedScore"].asInt(),
             pendingDefeat = m["pendingDefeat"] as? Boolean ?: false,
+            dismissedAtMs = m["dismissedAtMs"].asLong(),
             agentId = (m["agentID"] as? String)?.let { runCatching { UUID.fromString(it) }.getOrNull() },
             displayLabel = m["displayLabel"] as? String,
             position = m["position"].asDouble() ?: 0.5,

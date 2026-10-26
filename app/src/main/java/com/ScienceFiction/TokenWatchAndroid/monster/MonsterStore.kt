@@ -330,23 +330,26 @@ class MonsterStore(
         var drawn = 0
         for ((agent, windows) in env.snapshots()) {
             if (drawn >= config.random.maxAgentsPerUser) break
-            // Candidates: this agent's target windows, one per label (at most 20). A 100% window joins once
-            // its completion monster is defeated.
+            // Candidates: this agent's target windows, one per label (at most 20). A bar with a living monster is
+            // left out, and a bar with a ghost from the last hour is used only when no bar is free (the new
+            // monster then clears that ghost away).
             val anchors = linkedMapOf<String, String>()
-            val candidates = mutableListOf<Pair<String, String>>()
+            val free = mutableListOf<Pair<String, String>>()
+            val haunted = mutableListOf<Pair<String, String>>()
             for (window in windows) {
                 if (!MonsterEligibility.isRandomCandidate(window, config.random.minUsedPercent, instant)) continue
-                if (MonsterEligibility.isCompleted(window, instant) &&
-                    visible(_state.value, agent.id, agent.provider, window, now)
-                        .any { it.source == MonsterEncounter.Source.COMPLETION && it.isAlive }
-                ) {
-                    continue
-                }
                 val keyLabel = MonsterSessionKey.keyLabel(agent.provider, window.label)
-                if (keyLabel in anchors || candidates.size >= MAX_CANDIDATES) continue
+                if (keyLabel in anchors || anchors.size >= MAX_CANDIDATES) continue
+                val shown = visible(_state.value, agent.id, agent.provider, window, now)
+                if (shown.any { it.isAlive }) continue
                 anchors[keyLabel] = window.label
-                candidates += agent.provider.wireId to keyLabel
+                val ghost = shown.any { e ->
+                    val defeatedAt = e.defeatedAtMs
+                    e.state == MonsterEncounter.State.DEFEATED && defeatedAt != null && now - defeatedAt < GHOST_HOLD_MS
+                }
+                (if (ghost) haunted else free) += agent.provider.wireId to keyLabel
             }
+            val candidates = free.ifEmpty { haunted }
             if (candidates.isEmpty()) continue // no target window: the schedule stays
             drawn += 1
             drawRandom(agent, candidates, anchors, owner, now)
@@ -431,9 +434,21 @@ class MonsterStore(
         editLedger {
             if (it.encounters.any { e -> e.key == key }) return@editLedger it
             it.copy(encounters = it.encounters + encounter, guest = GuestSpawnPolicy.recordSpawn(it.guest, now))
+                .dismissingGhosts(under = encounter, now = now)
         }
         log(AnalyticsEvent.MonsterSpawn(entry.id, source))
     }
+
+    /** Clears the ghosts off the bar a new monster sits on: a bar shows one monster or ghost at a time. */
+    private fun MonsterLedgerState.dismissingGhosts(under: MonsterEncounter, now: Long): MonsterLedgerState = copy(
+        encounters = encounters.map { e ->
+            val sameBar = e.key != under.key && e.ownerUid == under.ownerUid &&
+                e.state == MonsterEncounter.State.DEFEATED && e.dismissedAtMs == null &&
+                e.provider == under.provider && e.windowLabel == under.windowLabel &&
+                (e.agentId == null || under.agentId == null || e.agentId == under.agentId)
+            if (sameBar) e.copy(dismissedAtMs = now) else e
+        },
+    )
 
     /** Applies the server's spawn answer. */
     private fun apply(
@@ -466,7 +481,8 @@ class MonsterStore(
                     editLedger {
                         if (it.encounters.any { e -> e.key == dto.key }) return@editLedger it
                         added = true
-                        it.copy(encounters = it.encounters + encounter)
+                        val next = it.copy(encounters = it.encounters + encounter)
+                        if (state != MonsterEncounter.State.ALIVE) next else next.dismissingGhosts(encounter, now)
                     }
                     if (added && state == MonsterEncounter.State.ALIVE) {
                         log(AnalyticsEvent.MonsterSpawn(dto.monsterId, encounter.source))
@@ -714,9 +730,14 @@ class MonsterStore(
         }
     }
 
-    /** The bestiary rows under [state]'s config. Null until the defeats have been read. */
-    fun bestiaryRows(state: MonsterState = _state.value): List<BestiaryRow>? =
-        state.bestiaryKills?.let { MonsterBestiary.rows(state.config, it, env.appVersion) }
+    /**
+     * The bestiary rows under [state]'s config: the sample adventurer's in demo mode, else null until the defeats
+     * have been read.
+     */
+    fun bestiaryRows(state: MonsterState = _state.value): List<BestiaryRow>? {
+        val kills = if (state.isDemo) DemoAdventure.KILLS else state.bestiaryKills
+        return kills?.let { MonsterBestiary.rows(state.config, it, env.appVersion) }
+    }
 
     // MARK: Account deletion, config, saving
 
@@ -782,8 +803,11 @@ class MonsterStore(
         /** Leaderboard and rank cache. */
         const val GUILD_CACHE_MS = 300_000L
 
-        /** How long a defeated random monster's ghost stays listed (crossing the bar takes far less). */
-        const val RANDOM_GHOST_MS = 180_000L
+        /**
+         * How long a defeated monster's haloed ghost stays: an hour. A random monster's ghost then leaves; a
+         * completion monster's stays until the reset but, after the hour, gives its bar up to a new random monster.
+         */
+        const val GHOST_HOLD_MS = 3_600_000L
 
         /** Random spawn candidates sent at most. */
         const val MAX_CANDIDATES = 20
@@ -807,14 +831,15 @@ class MonsterStore(
             if (state.isDemo) return demoEncounters(state, agentId, window, nowMs)
             val keyLabel = MonsterSessionKey.keyLabel(provider, window.label)
             return state.ledger.encounters.filter { e ->
-                if (e.ownerUid != state.owner || e.state == MonsterEncounter.State.EXPIRED || e.expiresAtMs <= nowMs) {
+                if (e.ownerUid != state.owner || e.state == MonsterEncounter.State.EXPIRED || e.dismissedAtMs != null) {
                     return@filter false
                 }
-                // A random monster's ghost walks off the right edge; old ones leave the list as well.
-                val defeatedAt = e.defeatedAtMs
-                if (e.source == MonsterEncounter.Source.RANDOM && e.state == MonsterEncounter.State.DEFEATED &&
-                    defeatedAt != null && nowMs - defeatedAt > RANDOM_GHOST_MS
-                ) {
+                // A random monster's ghost stays an hour after the kill, however long it had left to live; anything
+                // else until it expires (a completion monster: the reset).
+                if (e.source == MonsterEncounter.Source.RANDOM && e.state == MonsterEncounter.State.DEFEATED) {
+                    val defeatedAt = e.defeatedAtMs ?: return@filter false
+                    if (nowMs - defeatedAt >= GHOST_HOLD_MS) return@filter false
+                } else if (e.expiresAtMs <= nowMs) {
                     return@filter false
                 }
                 val anchored = e.agentId

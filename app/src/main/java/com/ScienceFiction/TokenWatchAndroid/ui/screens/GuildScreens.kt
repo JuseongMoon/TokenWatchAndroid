@@ -50,6 +50,7 @@ import com.ScienceFiction.TokenWatchAndroid.account.AccountStore
 import com.ScienceFiction.TokenWatchAndroid.account.displayAvatarId
 import com.ScienceFiction.TokenWatchAndroid.domain.account.AvatarCatalog
 import com.ScienceFiction.TokenWatchAndroid.localization.L10n
+import com.ScienceFiction.TokenWatchAndroid.localization.Lang
 import com.ScienceFiction.TokenWatchAndroid.localization.consentAgree
 import com.ScienceFiction.TokenWatchAndroid.localization.consentFailed
 import com.ScienceFiction.TokenWatchAndroid.localization.consentIntro
@@ -70,6 +71,7 @@ import com.ScienceFiction.TokenWatchAndroid.localization.leaderboardNotListed
 import com.ScienceFiction.TokenWatchAndroid.localization.leaderboardTab
 import com.ScienceFiction.TokenWatchAndroid.localization.privacyLink
 import com.ScienceFiction.TokenWatchAndroid.localization.termsLink
+import com.ScienceFiction.TokenWatchAndroid.monster.DemoAdventure
 import com.ScienceFiction.TokenWatchAndroid.monster.LeaderboardEntry
 import com.ScienceFiction.TokenWatchAndroid.monster.LeaderboardScope
 import com.ScienceFiction.TokenWatchAndroid.monster.MonsterApiClient
@@ -133,7 +135,7 @@ private val SignCell = (4f / 3f).dp
 
 /**
  * The guild sign in the main header. Opens the ranks, or the consent screen before consenting — marked
- * with a cyan dot. Dimmed and disabled in demo mode.
+ * with a cyan dot. In demo mode it opens the sample ranks ([DemoAdventure]).
  */
 @Composable
 internal fun GuildSignButton(
@@ -151,7 +153,6 @@ internal fun GuildSignButton(
             .clickable(
                 interactionSource = interactionSource,
                 indication = null,
-                enabled = !isDemo,
                 role = Role.Button,
                 // TalkBack reads it as "double-tap to …", the iOS hint's place.
                 onClickLabel = if (showDot) loc.guildBoardConsent else null,
@@ -161,12 +162,7 @@ internal fun GuildSignButton(
             .padding(horizontal = 2.dp, vertical = 6.dp),
     ) {
         Box {
-            PixelSpriteView(
-                sprite = GuildSign,
-                frameIndex = 0,
-                cell = SignCell,
-                flatColor = if (isDemo) Term.Dim else null,
-            )
+            PixelSpriteView(sprite = GuildSign, frameIndex = 0, cell = SignCell)
             if (showDot) {
                 Box(
                     modifier = Modifier
@@ -202,6 +198,10 @@ internal fun mineLine(rank: MyRank?, stats: MonsterStats?, scope: LeaderboardSco
     }
 }
 
+/** The sample adventurer's line for [scope] (demo mode), always ranked. */
+internal fun demoMineLine(scope: LeaderboardScope): MineLine =
+    DemoAdventure.mine(scope).let { MineLine(true, it.rank, it.score, it.commonKills, it.specialKills) }
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LeaderboardScreen(
@@ -220,6 +220,7 @@ fun LeaderboardScreen(
     val scope = rememberCoroutineScope()
     var refreshing by remember { mutableStateOf(false) }
     var tab by rememberSaveable { mutableStateOf(LeaderboardScope.WEEK) }
+    val korean = loc.lang == Lang.KO
     LaunchedEffect(tab) { monsters.refreshGuild(tab) }
 
     Column(
@@ -268,17 +269,25 @@ fun LeaderboardScreen(
                 }
                 Text(text = loc.leaderboardIntro(tab), color = Term.Dim, style = terminalTextStyle(11.sp))
                 TerminalBox(title = "ME") {
-                    val profile = (accountState as? AccountState.SignedIn)?.profile
+                    val signedIn = (accountState as? AccountState.SignedIn)?.profile
+                    // The consented account, or the sample adventurer in demo mode: its profile and the avatar drawn.
+                    val me = when {
+                        state.isDemo -> DemoAdventure.profile(korean).let { it to it.avatarId }
+                        state.owner != null && signedIn != null ->
+                            signedIn to displayAvatarId(signedIn, isOperator, catalog)
+                        else -> null
+                    }
                     when {
-                        state.owner != null && profile != null -> Row(
+                        me != null -> Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .semantics(mergeDescendants = true) {},
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            AvatarView(preset = catalog.resolve(displayAvatarId(profile, isOperator, catalog)), cell = 2.dp)
-                            val mine = mineLine(state.rank, state.stats, tab)
+                            val (profile, avatarId) = me
+                            AvatarView(preset = catalog.resolve(avatarId), cell = 2.dp)
+                            val mine = if (state.isDemo) demoMineLine(tab) else mineLine(state.rank, state.stats, tab)
                             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                                 NametagText(profile = profile, size = 13.sp)
                                 Text(
@@ -320,7 +329,8 @@ fun LeaderboardScreen(
                     }
                 }
                 TerminalBox(title = "TOP ${MonsterApiClient.LEADERBOARD_SIZE}") {
-                    val list = state.leaderboard(tab)
+                    val list = if (state.isDemo) DemoAdventure.leaderboard(tab, korean) else state.leaderboard(tab)
+                    val myUid = if (state.isDemo) DemoAdventure.UID else account.uid
                     if (list.isEmpty()) {
                         Text(
                             text = when {
@@ -337,7 +347,7 @@ fun LeaderboardScreen(
                                 LeaderboardRow(
                                     entry = entry,
                                     rank = index + 1,
-                                    isMe = entry.uid == account.uid,
+                                    isMe = entry.uid == myUid,
                                     catalog = catalog,
                                 )
                             }

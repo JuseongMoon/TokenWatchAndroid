@@ -168,17 +168,22 @@ class GaugeMonsterMotionTest {
         assertEquals(deathX, pose(e, at + 900)!!.x, 0.0)
     }
 
-    @Test fun aRandomGhostWalksOffTheRightEdgeForGood() {
+    @Test fun aRandomGhostComesBackInFromTheLeft() {
         val at = 1_800_000_000_000L
         val e = encounter(
             source = MonsterEncounter.Source.RANDOM, state = MonsterEncounter.State.DEFEATED,
             defeatedAtMs = at, position = 0.9, spawnedAtMs = at,
         )
+        // Body 18, hop 8, bar 300 → 40 steps a lap; the defeat at 0.9 of the bar snaps to x = 254 (step 34).
         val deathX = randomMarchX(at, spawnedAt = at, position = 0.9)
-        assertEquals(deathX, pose(e, at + 900)!!.x, 0.0)
-        assertTrue(pose(e, at + 900 + 570 * 2)!!.x > deathX)
-        assertNull(pose(e, at + 900 + 570L * 40))
-        assertNull(pose(e, at + 180_000))
+        assertEquals(254.0, deathX, 0.0)
+        val ghostPeriod = randomPeriod / GaugeMonsterMotion.GHOST_SPEED_FACTOR
+        fun ghostAt(tick: Int) = pose(e, at + 900 + (ghostPeriod * tick).toLong() + 1)!!
+        assertEquals(deathX, ghostAt(0).x, 0.0)
+        assertEquals(deathX + 8, ghostAt(1).x, 0.0)
+        // Past the right edge it comes back in from the left instead of leaving (the store drops it after an hour).
+        assertEquals(-cell * columns, ghostAt(12).x, 0.0)
+        assertEquals(GaugeMonsterMotion.marchX(41, 0L, deathX, cell * 4, cell * columns, bar), ghostAt(41).x, 0.0)
     }
 
     @Test fun reducedMotionShowsAStillGhostAndNothingForExpired() {

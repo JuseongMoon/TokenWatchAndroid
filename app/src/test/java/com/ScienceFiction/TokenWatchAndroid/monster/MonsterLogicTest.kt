@@ -4,6 +4,8 @@ import com.ScienceFiction.TokenWatchAndroid.domain.AgentProvider
 import com.ScienceFiction.TokenWatchAndroid.domain.UsageStyle
 import com.ScienceFiction.TokenWatchAndroid.domain.UsageWindow
 import com.ScienceFiction.TokenWatchAndroid.domain.WindowKind
+import com.ScienceFiction.TokenWatchAndroid.domain.account.AvatarCatalog
+import com.ScienceFiction.TokenWatchAndroid.domain.account.NicknamePolicy
 import com.ScienceFiction.TokenWatchAndroid.ui.components.PixelSprite
 import java.io.File
 import java.security.MessageDigest
@@ -22,7 +24,7 @@ import org.junit.Test
  * The monster (V2) pure logic, ported from iOS `MonsterLogicTests`. Values both platforms must agree on
  * are pinned with the iOS constants: session keys (300 s buckets, Copilot's UTC midnight, the Codex label
  * constant, the period table), agent and random key hashes, the deterministic draw, the gray tone, the KST day,
- * the bestiary's defeat sum and line-up, and the sprite file's SHA-256.
+ * the bestiary's defeat sum and line-up, the demo's sample adventurer, and the sprite file's SHA-256.
  */
 class MonsterLogicTest {
     // MARK: Session keys
@@ -469,7 +471,10 @@ class MonsterLogicTest {
             monsterId = "slime", maxHp = 1, hp = 0, state = state, spawnedAtMs = i.toLong(), expiresAtMs = i + 10L,
             defeatedAtMs = i.toLong(), pendingDefeat = pending, position = 0.5,
         )
-        val finished = (0 until 250).map { encounter(it, MonsterEncounter.State.DEFEATED) }
+        // The newest finished one is a ghost a later monster cleared away: that time is kept too.
+        val finished = (0 until 250).map { i ->
+            encounter(i, MonsterEncounter.State.DEFEATED).let { if (i == 249) it.copy(dismissedAtMs = 300) else it }
+        }
         val alive = encounter(900, MonsterEncounter.State.ALIVE).copy(hp = 1, defeatedAtMs = null)
         val pending = encounter(901, MonsterEncounter.State.DEFEATED, pending = true)
         val state = MonsterLedgerState(
@@ -538,6 +543,38 @@ class MonsterLogicTest {
         // A species not yet released, or one this app cannot draw, still shows once defeated.
         val caught = MonsterBestiary.rows(config, mapOf("dragon" to 1, "wyvern" to 2), "1.4.0")
         assertEquals(listOf("dragon", "wyvern"), caught.takeLast(2).map { it.id })
+    }
+
+    // MARK: Demo sample adventurer
+
+    @Test fun demoAdventureIsSelfConsistent() {
+        val avatars = AvatarCatalog.fromFiles(listOf(File("src/main/assets/avatars-v1.json").readBytes())).ids
+        for (korean in listOf(true, false)) {
+            val me = DemoAdventure.profile(korean)
+            assertNull(NicknamePolicy.validate(me.nickname))
+            assertTrue(NicknamePolicy.isValidTag(me.tag) && me.avatarId in avatars)
+            for (scope in LeaderboardScope.entries) {
+                val rows = DemoAdventure.leaderboard(scope, korean)
+                assertEquals(MonsterApiClient.LEADERBOARD_SIZE, rows.size)
+                assertEquals(rows.map { it.score }.sortedDescending(), rows.map { it.score })
+                assertEquals(rows.size, rows.map { it.uid }.toSet().size)
+                val line = DemoAdventure.mine(scope)
+                val mine = rows.indexOfFirst { it.uid == DemoAdventure.UID }
+                assertEquals(line.rank to line.score, mine + 1 to rows[mine].score)
+                assertEquals(me.nickname to me.avatarId, rows[mine].nickname to rows[mine].avatarId)
+                // The sample names keep the nickname rules and the preset avatars too.
+                rows.forEach { row ->
+                    assertNull(row.nickname, NicknamePolicy.validate(row.nickname))
+                    assertTrue(row.avatarId, row.avatarId in avatars)
+                }
+            }
+        }
+        // The bestiary defeats add up to the all-time score; the species after the goblin are still silhouettes.
+        val config = MonsterConfig.BUNDLED_DEFAULT
+        val points = DemoAdventure.KILLS.entries.sumOf { (id, kills) -> (config.entry(id)?.score ?: 0) * kills }
+        assertEquals(DemoAdventure.mine(LeaderboardScope.ALL_TIME).score, points)
+        val rows = MonsterBestiary.rows(config, DemoAdventure.KILLS, "2.0.0")
+        assertEquals(listOf("skeleton", "orc", "mimic"), rows.filter { !it.discovered }.map { it.id })
     }
 }
 

@@ -74,6 +74,7 @@ import com.ScienceFiction.TokenWatchAndroid.localization.profileSetupQuit
 import com.ScienceFiction.TokenWatchAndroid.localization.termsAgree
 import com.ScienceFiction.TokenWatchAndroid.localization.termsLink
 import com.ScienceFiction.TokenWatchAndroid.localization.termsMonsterNote
+import com.ScienceFiction.TokenWatchAndroid.monster.DemoAdventure
 import com.ScienceFiction.TokenWatchAndroid.monster.MonsterSpriteSet
 import com.ScienceFiction.TokenWatchAndroid.monster.MonsterStore
 import com.ScienceFiction.TokenWatchAndroid.ui.auth.InAppBrowser
@@ -99,7 +100,8 @@ internal object AccountLinks {
  * The app account screen. It shows one of three screens by state — sign-in (`account_login`), profile
  * setup (`profile_setup`) and account (`account`) — and logs each as it appears, the same unit as iOS.
  * Entered to sign in or finish signing up, it closes once a profile exists; entered to manage, it closes
- * after a sign-out or a deletion.
+ * after a sign-out or a deletion. Demo mode shows the sample adventurer's ([DemoAdventure]) account screen
+ * whatever the real account state, with editing switched off.
  */
 @Composable
 fun PlayerScreen(
@@ -113,10 +115,12 @@ fun PlayerScreen(
     onDone: () -> Unit,
 ) {
     val state by account.state.collectAsStateWithLifecycle()
+    val demo = monsters.state.collectAsStateWithLifecycle().value.isDemo
 
     BackHandler(onBack = onDone)
-    LaunchedEffect(state, entry) {
+    LaunchedEffect(state, entry, demo) {
         when {
+            demo -> Unit
             state is AccountState.SignedIn && entry != PlayerEntry.MANAGE -> onDone()
             state == AccountState.SignedOut && entry != PlayerEntry.LOGIN -> onDone()
             state == AccountState.Unavailable -> onDone()
@@ -144,15 +148,20 @@ fun PlayerScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            when (val current = state) {
-                AccountState.Unavailable -> Unit
-                AccountState.SignedOut, is AccountState.SigningIn, AccountState.LoadFailed ->
-                    AccountLoginContent(account, current, loc, onScreen)
-                AccountState.Loading -> StatusLine(loc.playerLoading)
-                AccountState.NeedsProfile -> ProfileSetupContent(account, catalog, loc, onScreen)
-                is AccountState.SignedIn ->
-                    AccountContent(account, current.profile, catalog, monsters, sprites, loc, onScreen)
-                AccountState.Deleting -> StatusLine(loc.playerDeleting)
+            if (demo) {
+                val profile = DemoAdventure.profile(loc.lang == Lang.KO)
+                AccountContent(account, profile, catalog, monsters, sprites, loc, onScreen, demo = true)
+            } else {
+                when (val current = state) {
+                    AccountState.Unavailable -> Unit
+                    AccountState.SignedOut, is AccountState.SigningIn, AccountState.LoadFailed ->
+                        AccountLoginContent(account, current, loc, onScreen)
+                    AccountState.Loading -> StatusLine(loc.playerLoading)
+                    AccountState.NeedsProfile -> ProfileSetupContent(account, catalog, loc, onScreen)
+                    is AccountState.SignedIn ->
+                        AccountContent(account, current.profile, catalog, monsters, sprites, loc, onScreen)
+                    AccountState.Deleting -> StatusLine(loc.playerDeleting)
+                }
             }
         }
     }
@@ -355,10 +364,13 @@ private fun AccountContent(
     sprites: MonsterSpriteSet,
     loc: L10n,
     onScreen: (ScreenName) -> Unit,
+    /** The demo's sample adventurer: none of the real account's values (methods, operator, notice, cooldown), no editing. */
+    demo: Boolean = false,
 ) {
     val scope = rememberCoroutineScope()
     val notice by account.notice.collectAsStateWithLifecycle()
-    val methods by account.methods.collectAsStateWithLifecycle()
+    val accountMethods by account.methods.collectAsStateWithLifecycle()
+    val methods = if (demo) DemoAdventure.METHODS else accountMethods
     val isWorking by account.isWorking.collectAsStateWithLifecycle()
     val isOperator by account.isOperator.collectAsStateWithLifecycle()
     val korean = loc.lang == Lang.KO
@@ -369,7 +381,7 @@ private fun AccountContent(
     var confirmDelete by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(Unit) { onScreen(ScreenName.ACCOUNT) }
 
-    val avatar = catalog.resolve(displayAvatarId(profile, isOperator, catalog))
+    val avatar = catalog.resolve(if (demo) profile.avatarId else displayAvatarId(profile, isOperator, catalog))
     TerminalBox(title = "PROFILE") {
         Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -383,7 +395,7 @@ private fun AccountContent(
                     )
                 }
             }
-            notice?.let {
+            notice?.takeUnless { demo }?.let {
                 AccountNoticeLine(text = loc.accountNotice(it), color = if (it.isPositive) Term.Green else Term.Red)
             }
         }
@@ -391,8 +403,8 @@ private fun AccountContent(
 
     BestiaryBox(monsters = monsters, sprites = sprites, loc = loc)
 
-    val cooldown = remember(profile.nicknameChangedAtMs, isWorking) {
-        val ms = account.nicknameCooldownRemainingMs()
+    val cooldown = remember(profile.nicknameChangedAtMs, isWorking, demo) {
+        val ms = if (demo) 0 else account.nicknameCooldownRemainingMs()
         if (ms <= 0) {
             null
         } else {
@@ -410,7 +422,7 @@ private fun AccountContent(
                     nicknameError = null
                 },
                 placeholder = loc.nicknamePlaceholder,
-                enabled = cooldown == null,
+                enabled = cooldown == null && !demo,
             )
             if (cooldown != null) {
                 Text(
@@ -442,10 +454,16 @@ private fun AccountContent(
 
     TerminalBox(title = "AVATAR") {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            if (isOperator && catalog.operatorAvatar != null) {
+            if (!demo && isOperator && catalog.operatorAvatar != null) {
                 Text(text = loc.operatorAvatarNote, color = Term.Yellow, style = terminalTextStyle(10.sp))
             }
-            AvatarPicker(catalog = catalog, selection = avatarId, korean = korean, onSelect = { avatarId = it })
+            AvatarPicker(
+                catalog = catalog,
+                selection = avatarId,
+                korean = korean,
+                onSelect = { avatarId = it },
+                enabled = !demo,
+            )
             if (avatarId != profile.avatarId) {
                 TerminalButton(
                     title = if (isWorking) "[ saving… ]" else "[ save avatar ]",
@@ -471,7 +489,7 @@ private fun AccountContent(
                 AccountBrandButtons(
                     showApple = AccountMethod.APPLE in missing,
                     showGoogle = AccountMethod.GOOGLE in missing,
-                    enabled = !isWorking,
+                    enabled = !isWorking && !demo,
                     continueLabels = true,
                     onApple = {
                         account.clearNotice()
@@ -492,7 +510,7 @@ private fun AccountContent(
                 "[ sign out ]",
                 onClick = { confirmSignOut = true },
                 color = Term.Cyan,
-                enabled = !isWorking,
+                enabled = !isWorking && !demo,
                 weight = FontWeight.Normal,
             )
             Spacer(modifier = Modifier.weight(1f))
@@ -500,7 +518,7 @@ private fun AccountContent(
                 "[ delete account ]",
                 onClick = { confirmDelete = true },
                 color = Term.Red,
-                enabled = !isWorking,
+                enabled = !isWorking && !demo,
                 weight = FontWeight.Normal,
             )
         }

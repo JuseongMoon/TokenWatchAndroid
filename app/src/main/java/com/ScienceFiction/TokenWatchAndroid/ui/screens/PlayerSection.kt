@@ -23,18 +23,19 @@ import com.ScienceFiction.TokenWatchAndroid.account.AccountState
 import com.ScienceFiction.TokenWatchAndroid.account.displayAvatarId
 import com.ScienceFiction.TokenWatchAndroid.domain.account.AccountMethod
 import com.ScienceFiction.TokenWatchAndroid.domain.account.AvatarCatalog
+import com.ScienceFiction.TokenWatchAndroid.domain.account.AvatarPreset
 import com.ScienceFiction.TokenWatchAndroid.domain.account.PlayerProfile
 import com.ScienceFiction.TokenWatchAndroid.localization.L10n
 import com.ScienceFiction.TokenWatchAndroid.localization.Lang
 import com.ScienceFiction.TokenWatchAndroid.localization.accountMethodName
 import com.ScienceFiction.TokenWatchAndroid.localization.accountNotice
 import com.ScienceFiction.TokenWatchAndroid.localization.playerDeleting
-import com.ScienceFiction.TokenWatchAndroid.localization.playerDemoDisabled
 import com.ScienceFiction.TokenWatchAndroid.localization.playerLoadFailed
 import com.ScienceFiction.TokenWatchAndroid.localization.playerLoading
 import com.ScienceFiction.TokenWatchAndroid.localization.playerNeedsProfile
 import com.ScienceFiction.TokenWatchAndroid.localization.playerSignedOutHelp
 import com.ScienceFiction.TokenWatchAndroid.localization.playerSigningIn
+import com.ScienceFiction.TokenWatchAndroid.monster.DemoAdventure
 import com.ScienceFiction.TokenWatchAndroid.ui.components.AccountNoticeLine
 import com.ScienceFiction.TokenWatchAndroid.ui.components.AvatarView
 import com.ScienceFiction.TokenWatchAndroid.ui.components.TerminalBox
@@ -56,8 +57,8 @@ enum class PlayerEntry(val wireId: String) {
 /**
  * The settings PLAYER box — a summary of the app account only (distinct from the provider ACCOUNTS
  * box). Signed out: help + `[ sign in ]`; no profile: `[ finish profile ]`; signed in: avatar and
- * `nickname #tag` + `[ manage ]`. The screens themselves live in [PlayerScreen]. Demo mode shows only a
- * disabled notice. Callers hide the box entirely while the account feature is unavailable.
+ * `nickname #tag` + `[ manage ]`. The screens themselves live in [PlayerScreen]. Demo mode shows the sample
+ * adventurer ([DemoAdventure]) instead. Callers hide the box entirely while the account feature is unavailable.
  */
 @Composable
 fun PlayerSection(
@@ -75,7 +76,14 @@ fun PlayerSection(
     TerminalBox(title = "PLAYER") {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             if (isDemo) {
-                PlayerHelp(loc.playerDemoDisabled)
+                val profile = DemoAdventure.profile(loc.lang == Lang.KO)
+                SignedInRow(
+                    profile = profile,
+                    avatar = catalog.resolve(profile.avatarId),
+                    methods = DemoAdventure.METHODS,
+                    loc = loc,
+                    onManage = { onOpen(PlayerEntry.MANAGE) },
+                )
                 return@Column
             }
             when (state) {
@@ -95,34 +103,45 @@ fun PlayerSection(
                     TerminalButton("[ retry ]", onClick = onRetry)
                 }
                 AccountState.Deleting -> PlayerHelp(loc.playerDeleting)
-                is AccountState.SignedIn -> {
-                    val avatar = catalog.resolve(displayAvatarId(state.profile, isOperator, catalog))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        AvatarView(
-                            preset = avatar,
-                            cell = 3.dp,
-                            contentDescription = avatar.name(loc.lang == Lang.KO),
-                        )
-                        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                            NametagText(profile = state.profile, size = 15.sp)
-                            Text(
-                                text = methods.joinToString(" · ") { loc.accountMethodName(it) },
-                                color = Term.Dim,
-                                style = terminalTextStyle(10.sp),
-                            )
-                        }
-                        TerminalTextButton("[ manage ]", onClick = { onOpen(PlayerEntry.MANAGE) }, size = 12.sp)
-                    }
-                }
+                is AccountState.SignedIn -> SignedInRow(
+                    profile = state.profile,
+                    avatar = catalog.resolve(displayAvatarId(state.profile, isOperator, catalog)),
+                    methods = methods,
+                    loc = loc,
+                    onManage = { onOpen(PlayerEntry.MANAGE) },
+                )
             }
             notice?.let {
                 AccountNoticeLine(text = loc.accountNotice(it), color = if (it.isPositive) Term.Green else Term.Red)
             }
         }
+    }
+}
+
+/** Avatar, `nickname #tag` and the sign-in methods, with `[ manage ]`. */
+@Composable
+private fun SignedInRow(
+    profile: PlayerProfile,
+    avatar: AvatarPreset,
+    methods: List<AccountMethod>,
+    loc: L10n,
+    onManage: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        AvatarView(preset = avatar, cell = 3.dp, contentDescription = avatar.name(loc.lang == Lang.KO))
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            NametagText(profile = profile, size = 15.sp)
+            Text(
+                text = methods.joinToString(" · ") { loc.accountMethodName(it) },
+                color = Term.Dim,
+                style = terminalTextStyle(10.sp),
+            )
+        }
+        TerminalTextButton("[ manage ]", onClick = onManage, size = 12.sp)
     }
 }
 

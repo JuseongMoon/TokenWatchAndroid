@@ -107,7 +107,8 @@ object MonsterEligibility {
 
     /**
      * Random spawn candidates. A window at 100% is one too, so draws go on until the reset even when the
-     * usage ran out early; only while its completion monster is alive does the caller ([MonsterStore]) skip it.
+     * usage ran out early. The caller ([MonsterStore]) sifts out bars with a living monster or a ghost from the
+     * last hour.
      */
     fun isRandomCandidate(window: UsageWindow, minUsedPercent: Double, now: Instant): Boolean =
         isTarget(window, now) && window.usedPercent >= minUsedPercent

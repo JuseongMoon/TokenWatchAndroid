@@ -233,6 +233,7 @@ class LocalizationTest {
         assertEquals("연결한 AI 계정마다 앱이 만든 무작위 식별값(계정 정보는 아님)", ko.consentSent[3])
         assertEquals("A random ID the app makes for each connected AI account (not the account itself)", en.consentSent[3])
         assertEquals("발견 2/5 · 총 처치 17" to "Found 2/5 · 17 defeated", ko.bestiarySummary(2, 5, 17) to en.bestiarySummary(2, 5, 17))
+        assertEquals("준비 중인 몬스터" to "Monster coming soon", ko.bestiaryComingSoon to en.bestiaryComingSoon)
         assertEquals("슬라임, 4마리 처치" to "Slime, 4 defeated", ko.bestiaryA11y("슬라임", 4) to en.bestiaryA11y("Slime", 4))
         // The public part names the defeat counts too: the leaderboard document carries them.
         assertEquals(

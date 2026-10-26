@@ -140,7 +140,8 @@ internal fun MonsterHpHearts(hp: Int, maxHp: Int, modifier: Modifier = Modifier)
  * The monsters on a gauge bar. They march across like the slime critter: a completion monster in from the
  * bar's left edge, a random one from the spot it appeared at. A hit drops a sword from above; the last hit holds the sword, plays the monster's
  * death animation, then a gray ghost with a halo walks at half speed — across the bar for a completion
- * monster, off the right edge for a random one. Taps are taken by the whole row, not by this layer.
+ * monster, on from the spot of the defeat for a random one, coming back in from the left past the right edge
+ * for an hour. Taps are taken by the whole row, not by this layer.
  *
  * The body is clipped to the bar's width (it walks in and out at the ends); the sword and the halo may
  * rise above the bar, which is why the gauge box itself does not clip.
@@ -320,8 +321,9 @@ object GaugeMonsterMotion {
         val x = if (completion) {
             marchX(tick, hop, width, barWidth)
         } else {
-            // Walks right from the spot of the defeat; past the right edge it is gone for good.
-            (deathX + (tick + 1) / 2 * hop).takeIf { it < barWidth } ?: return null
+            // Sets out from the spot of the defeat and comes back in from the left past the right edge, for the
+            // hour the store keeps it listed.
+            marchX(tick, 0L, deathX, hop, width, barWidth)
         }
         return Pose(Look.GHOST, (tick % 2L).toInt(), x, sword = false, halo = true)
     }
