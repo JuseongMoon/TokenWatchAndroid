@@ -143,8 +143,8 @@ internal fun MonsterHpHearts(hp: Int, maxHp: Int, modifier: Modifier = Modifier)
  * monster, on from the spot of the defeat for a random one, coming back in from the left past the right edge
  * for an hour. Taps are taken by the whole row, not by this layer.
  *
- * The body is clipped to the bar's width (it walks in and out at the ends); the sword and the halo may
- * rise above the bar, which is why the gauge box itself does not clip.
+ * The body, the sword and the halo are clipped to the bar's width, so they walk in and out at the ends
+ * together; the sword and the halo may rise above the bar, which is why the gauge box itself does not clip.
  */
 @Composable
 internal fun GaugeMonsterLayer(
@@ -207,8 +207,11 @@ internal fun GaugeMonsterLayer(
     }
 }
 
+/** The sword or the halo: free to rise above the bar, but cut at the bar's ends like the body. */
 private fun DrawScope.drawEffect(sprite: PixelSprite, cell: Float, x: Float, y: Float) =
-    drawPixelSpriteFrame(sprite.frame(0), sprite.palette, cell, origin = Offset(x, y))
+    clipRect(left = 0f, top = y, right = size.width, bottom = y + cell * sprite.rows) {
+        drawPixelSpriteFrame(sprite.frame(0), sprite.palette, cell, origin = Offset(x, y))
+    }
 
 /** The three drawings of one monster: alive, dying (per-monster animation) and the gray ghost. */
 private class MonsterLooks(val living: PixelSprite, val death: PixelSprite?, val ghost: PixelSprite) {

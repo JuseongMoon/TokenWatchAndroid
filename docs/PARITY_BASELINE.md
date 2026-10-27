@@ -177,7 +177,7 @@ Firebase Analytics runs against the Android app's own Firebase registration and
   app account is signed in. Credit gauges and balances never carry one. Monsters march across the bar
   like the slime critter and come back in from the left past the right edge: a completion monster sets
   out from the left edge, a random one from the spot it appeared at, at a pace that differs slightly by
-  monster. The slime critter of a 100% bar steps aside while any monster is on it. Tapping anywhere on
+  monster. The sword and the halo may rise above the bar but are cut at its ends with the body. The slime critter of a 100% bar steps aside while any monster is on it. Tapping anywhere on
   the gauge row hits the monster, ahead of the card's detail tap; special monsters show their HP as
   hearts after the first hit, and TalkBack offers an "attack" action. A defeat holds the sword
   briefly, plays the monster's own death animation, then the monster walks on in gray with a halo at
