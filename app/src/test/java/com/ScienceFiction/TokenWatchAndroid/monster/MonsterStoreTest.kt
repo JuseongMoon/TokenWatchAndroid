@@ -263,7 +263,8 @@ class MonsterStoreTest {
         val second = Agent(AgentProvider.CLAUDE)
         val third = Agent(AgentProvider.CODEX)
         val half = window(used = 40.0)
-        snapshots = listOf(agent to listOf(half), second to listOf(half), third to listOf(half))
+        val other = window(used = 70.0) // another account
+        snapshots = listOf(agent to listOf(half), second to listOf(other), third to listOf(half))
         val s = store()
         s.observe(agent, listOf(half))
         assertEquals(3, s.state.value.ledger.randomSchedule.size)
@@ -272,11 +273,34 @@ class MonsterStoreTest {
         assertEquals(setOf(agent.id, second.id, third.id), s.state.value.ledger.encounters.mapNotNull { it.agentId }.toSet())
     }
 
+    @Test fun sameAccountAddedTwiceDrawsOnce() = runBlocking {
+        cachedConfig(alwaysRandom)
+        val copy = Agent(AgentProvider.CLAUDE)
+        val half = window(used = 40.0)
+        snapshots = listOf(agent to listOf(half), copy to listOf(half)) // the same figures and reset = the same account
+        val s = store()
+        s.observe(agent, listOf(half))
+        assertEquals(setOf(MonsterSessionKey.agentToken(agent.id)), s.state.value.ledger.randomSchedule.keys)
+        clock += 40 * 60_000L
+        s.observe(agent, listOf(half))
+        assertEquals(listOf(agent.id), s.state.value.ledger.encounters.mapNotNull { it.agentId })
+    }
+
+    @Test fun unusedWindowWaitsForTheFirstUse() = runBlocking {
+        cachedConfig(alwaysRandom)
+        val unused = window(used = 0.0)
+        snapshots = listOf(agent to listOf(unused)) // under the default 1% minimum
+        val s = store()
+        s.observe(agent, listOf(unused))
+        assertNull(s.state.value.ledger.nextDraw(MonsterSessionKey.agentToken(agent.id)))
+    }
+
     @Test fun onlyMaxAgentsPerUserAgentsDraw() = runBlocking {
         cachedConfig("""{"spawn":{"random":{"chancePerSlot":1,"maxAgentsPerUser":2}}}""")
         val half = window(used = 40.0)
         // An agent with nothing to draw on does not use up the allowance.
-        snapshots = listOf(agent to listOf(creditWindow())) + List(3) { Agent(AgentProvider.CODEX) to listOf(half) }
+        snapshots = listOf(agent to listOf(creditWindow())) +
+            List(3) { Agent(AgentProvider.CODEX) to listOf(window(used = 40.0 + it)) } // three different accounts
         val s = store()
         s.observe(agent, emptyList())
         val drawing = snapshots.drop(1).take(2).map { MonsterSessionKey.agentToken(it.first.id) }.toSet()

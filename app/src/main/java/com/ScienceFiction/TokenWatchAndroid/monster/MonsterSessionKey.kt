@@ -112,4 +112,19 @@ object MonsterEligibility {
      */
     fun isRandomCandidate(window: UsageWindow, minUsedPercent: Double, now: Instant): Boolean =
         isTarget(window, now) && window.usedPercent >= minUsedPercent
+
+    /**
+     * What marks agents that look like one AI account (used on the device only). The same account added twice
+     * shows the same label, reset time and usage on every target window, so the random draw takes only one of
+     * them; different accounts part on the numbers.
+     */
+    fun accountSignature(provider: AgentProvider, windows: List<UsageWindow>, now: Instant): String {
+        val parts = windows.mapNotNull { window ->
+            val resetsAt = window.resetsAt
+            if (!isTarget(window, now) || resetsAt == null) return@mapNotNull null
+            val reset = MonsterSessionKey.resetBucketMs(MonsterSessionKey.keyResetsAtMs(provider, resetsAt))
+            "${window.label}|$reset|${Math.round(window.usedPercent)}"
+        }
+        return (listOf(provider.wireId) + parts.sorted()).joinToString("\n")
+    }
 }

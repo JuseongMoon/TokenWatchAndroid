@@ -58,7 +58,7 @@ data class MonsterConfig(
                 drawMinMinutes = 20,
                 drawMaxMinutes = 40,
                 lifetimeMinutes = 60,
-                minUsedPercent = 0.0,
+                minUsedPercent = 1.0,
                 maxAlivePerUser = 3,
                 maxAgentsPerUser = 10,
             ),

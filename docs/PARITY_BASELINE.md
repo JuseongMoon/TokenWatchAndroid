@@ -166,8 +166,10 @@ Firebase Analytics runs against the Android app's own Firebase registration and
 
 - Monsters appear on subscription gauges that have a future reset: a completion monster when a
   gauge reaches 100% (one per provider and reset, however many windows share that reset), and now
-  and then a random monster on a gauge in use: each connected AI account draws once every 20 to 40
-  minutes, picked at random, among its gauges without a living monster, so a gauge at 100% joins once
+  and then a random monster on a gauge in use (at least 1% used): each connected AI account draws once
+  every 20 to 40 minutes, picked at random, among its gauges without a living monster. Agents that look
+  like the same AI account added more than once (the same service with the same label, reset time and
+  rounded usage on every gauge, compared on the device only) draw only once. A gauge at 100% joins once
   its completion monster is defeated and the draws go on until the reset even when the usage ran out
   early. A gauge still showing a ghost from the last hour is picked only when no gauge is free, and the
   new monster then clears that ghost away: a bar shows one monster or ghost at a time. One seen for the

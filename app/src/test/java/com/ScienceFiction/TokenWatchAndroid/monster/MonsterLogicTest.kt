@@ -15,6 +15,7 @@ import java.time.ZoneId
 import java.util.UUID
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -125,6 +126,24 @@ class MonsterLogicTest {
         assertFalse(MonsterEligibility.isRandomCandidate(credit, 0.0, now))
     }
 
+    @Test fun accountSignatureSeparatesDifferentAccounts() {
+        val now = Instant.ofEpochSecond(1_800_000_000)
+        val reset = now.plusSeconds(3_600)
+        val a = listOf(
+            UsageWindow("s", 40.0, reset, WindowKind.SESSION),
+            UsageWindow("w", 12.0, reset.plusSeconds(86_400), WindowKind.WEEKLY),
+        )
+        fun sig(p: AgentProvider, w: List<UsageWindow>) = MonsterEligibility.accountSignature(p, w, now)
+        assertEquals(sig(AgentProvider.CLAUDE, a), sig(AgentProvider.CLAUDE, a.reversed())) // window order does not matter
+        val jitter = listOf(UsageWindow("s", 40.2, reset.plusSeconds(20), WindowKind.SESSION), a[1])
+        assertEquals(sig(AgentProvider.CLAUDE, a), sig(AgentProvider.CLAUDE, jitter)) // reset jitter and decimals: one account
+        val used = listOf(UsageWindow("s", 55.0, reset, WindowKind.SESSION), a[1])
+        assertNotEquals(sig(AgentProvider.CLAUDE, a), sig(AgentProvider.CLAUDE, used)) // other usage, other account
+        assertNotEquals(sig(AgentProvider.CLAUDE, a), sig(AgentProvider.CODEX, a)) // other service, other account
+        val credit = UsageWindow("c", 30.0, reset, WindowKind.WEEKLY, style = UsageStyle.CREDIT_GAUGE)
+        assertEquals(sig(AgentProvider.CLAUDE, a), sig(AgentProvider.CLAUDE, a + credit)) // non-target windows are ignored
+    }
+
     // MARK: Config
 
     @Test fun configEnvelopeAndDefaults() {
@@ -157,6 +176,7 @@ class MonsterLogicTest {
         assertEquals(listOf(1, 3, 5, 8, 12), c.catalog.map { it.hp })
         assertEquals(listOf(10, 50, 100, 190, 350), c.catalog.map { it.score })
         assertEquals(0.08, c.random.chancePerSlot, 0.0)
+        assertEquals(1.0, c.random.minUsedPercent, 0.0)
         assertEquals(
             listOf(20, 40, 60, 3, 10),
             c.random.let { listOf(it.drawMinMinutes, it.drawMaxMinutes, it.lifetimeMinutes, it.maxAlivePerUser, it.maxAgentsPerUser) },

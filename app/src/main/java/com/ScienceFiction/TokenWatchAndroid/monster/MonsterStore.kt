@@ -321,15 +321,17 @@ class MonsterStore(
      * Random spawns: each agent (a connected AI account) draws once every 20…40 minutes. The schedule
      * sits in the ledger per agent, independent of the account (switching accounts never adds draws),
      * and a signed-in account follows the server's next time. An agent seen for the first time only
-     * gets a schedule.
+     * gets a schedule. When the same AI account was added more than once, only the first agent draws.
      */
     private suspend fun handleRandom(owner: String?, now: Long) {
         val config = _state.value.config
         if (!config.random.enabled) return
         val instant = Instant.ofEpochMilli(now)
         var drawn = 0
+        val accounts = mutableSetOf<String>()
         for ((agent, windows) in env.snapshots()) {
             if (drawn >= config.random.maxAgentsPerUser) break
+            if (!accounts.add(MonsterEligibility.accountSignature(agent.provider, windows, instant))) continue
             // Candidates: this agent's target windows, one per label (at most 20). A bar with a living monster is
             // left out, and a bar with a ghost from the last hour is used only when no bar is free (the new
             // monster then clears that ghost away).
