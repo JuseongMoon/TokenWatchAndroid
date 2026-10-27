@@ -219,7 +219,7 @@ Firebase Analytics runs against the Android app's own Firebase registration and
 - Application ID/namespace: `com.ScienceFiction.TokenWatchAndroid`
 - Minimum SDK: 28
 - Target/compile SDK: 36
-- Version: 1.3.0 (16)
+- Version: 2.0.0 (17)
 
 ## Platform-specific parity adaptations
 
