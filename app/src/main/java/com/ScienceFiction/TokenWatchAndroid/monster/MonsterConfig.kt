@@ -46,6 +46,8 @@ data class MonsterConfig(
             balanceVersion = 1,
             catalog = listOf(
                 MonsterCatalogEntry(id = "slime", tier = "common", hp = 1, score = 10, weight = 90.0),
+                // The blue slime is never drawn on its own (weight 0): a slime drawn for a session window becomes it.
+                MonsterCatalogEntry(id = "slime-sky", tier = "common", hp = 2, score = 15, weight = 0.0),
                 MonsterCatalogEntry(id = "goblin", tier = "special", hp = 3, score = 50, weight = 6.0),
                 MonsterCatalogEntry(id = "skeleton", tier = "special", hp = 5, score = 100, weight = 2.5),
                 MonsterCatalogEntry(id = "orc", tier = "special", hp = 8, score = 190, weight = 1.0),

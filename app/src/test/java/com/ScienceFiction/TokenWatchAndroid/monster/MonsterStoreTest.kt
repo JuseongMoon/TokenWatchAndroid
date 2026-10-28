@@ -116,8 +116,11 @@ class MonsterStoreTest {
         ).also { it.load() }
     }
 
-    private fun window(label: String = "Current week (all models)", used: Double = 100.0) =
-        UsageWindow(label, used, Instant.ofEpochMilli(clock + 86_400_000), WindowKind.WEEKLY)
+    private fun window(label: String = "Current week (all models)", used: Double = 100.0, kind: WindowKind = WindowKind.WEEKLY) =
+        UsageWindow(label, used, Instant.ofEpochMilli(clock + 86_400_000), kind)
+
+    /** A session window (5 hours): its slime is the blue slime. */
+    private fun sessionWindow(used: Double = 40.0) = window(label = "Current session", used = used, kind = WindowKind.SESSION)
 
     /** A credit gauge: never a monster target. */
     private fun creditWindow() =
@@ -326,6 +329,16 @@ class MonsterStoreTest {
         assertEquals(agent.id to w.label, random.agentId to random.displayLabel)
     }
 
+    /** Hits until the HP runs out, a debounce interval apart (a session window's blue slime has 2 HP). The last result. */
+    private fun kill(s: MonsterStore, key: String): MonsterStore.HitResult {
+        var result = s.hit(key)
+        while (result is MonsterStore.HitResult.Damaged) {
+            clock += 200
+            result = s.hit(key)
+        }
+        return result
+    }
+
     /** Sets the schedule with a first look when there is none, then looks again at the due time: the random monster drawn. */
     private suspend fun drawOnce(s: MonsterStore, windows: List<UsageWindow>): MonsterEncounter {
         val token = MonsterSessionKey.agentToken(agent.id)
@@ -338,12 +351,12 @@ class MonsterStoreTest {
 
     @Test fun randomGhostStaysAnHourAfterTheKill() = runBlocking {
         cachedConfig(alwaysRandom)
-        val w = window(label = "Current session", used = 40.0)
+        val w = sessionWindow()
         snapshots = listOf(agent to listOf(w))
         val s = store()
         val e = drawOnce(s, listOf(w))
         clock += 30 * 60_000L
-        assertEquals(MonsterStore.HitResult.Defeated, s.hit(e.key))
+        assertEquals(MonsterStore.HitResult.Defeated, kill(s, e.key))
         val killedAt = clock
         clock = killedAt + 50 * 60_000L // past the time it had to live (spawn + 60 minutes)
         assertEquals(listOf(e.key), s.encounters(agent.id, AgentProvider.CLAUDE, w).map { it.key })
@@ -353,7 +366,7 @@ class MonsterStoreTest {
 
     @Test fun nextMonsterAvoidsBarsWithAMonsterOrAGhost() = runBlocking {
         cachedConfig(alwaysRandom)
-        val session = window(label = "Current session", used = 40.0)
+        val session = sessionWindow()
         val week = window(used = 40.0)
         val windows = listOf(session, week)
         snapshots = listOf(agent to windows)
@@ -361,8 +374,8 @@ class MonsterStoreTest {
         val first = drawOnce(s, windows)
         val second = drawOnce(s, windows) // within 40 minutes, so the first is still alive
         assertNotEquals(first.displayLabel, second.displayLabel) // a bar with a monster is avoided
-        assertEquals(MonsterStore.HitResult.Defeated, s.hit(first.key))
-        assertEquals(MonsterStore.HitResult.Defeated, s.hit(second.key))
+        assertEquals(MonsterStore.HitResult.Defeated, kill(s, first.key))
+        assertEquals(MonsterStore.HitResult.Defeated, kill(s, second.key))
         val third = drawOnce(s, windows) // both bars hold a ghost from the last hour: it takes one of them
         val thirdBar = windows.first { it.label == third.displayLabel }
         val otherBar = windows.first { it.label != third.displayLabel }
@@ -372,7 +385,7 @@ class MonsterStoreTest {
 
     @Test fun singleBarGhostMakesWayForTheNextMonster() = runBlocking {
         cachedConfig(alwaysRandom)
-        val w = window(label = "Current session", used = 40.0)
+        val w = sessionWindow()
         snapshots = listOf(agent to listOf(w))
         val s = store()
         val token = MonsterSessionKey.agentToken(agent.id)
@@ -383,12 +396,31 @@ class MonsterStoreTest {
         s.observe(agent, listOf(w))
         assertEquals(1, s.state.value.ledger.encounters.size)
         assertEquals(due, s.state.value.ledger.nextDraw(token))
-        assertEquals(MonsterStore.HitResult.Defeated, s.hit(first.key))
+        assertEquals(MonsterStore.HitResult.Defeated, kill(s, first.key))
         val next = drawOnce(s, listOf(w)) // with one bar only, it appears on the ghost's bar
         val shown = s.encounters(agent.id, AgentProvider.CLAUDE, w)
         assertEquals(listOf(next.key), shown.map { it.key })
         assertTrue(shown.single().isAlive) // the ghost made way
         assertNotNull(s.state.value.ledger.encounters.first { it.key == first.key }.dismissedAtMs)
+    }
+
+    @Test fun guestSessionBarSlimeIsTheBlueSlime() = runBlocking {
+        cachedConfig(alwaysRandom)
+        val session = sessionWindow()
+        snapshots = listOf(agent to listOf(session))
+        val s = store()
+        val e = drawOnce(s, listOf(session)) // the first three are common → on a session window, the blue slime
+        assertEquals(listOf("slime-sky", 2, 2), listOf(e.monsterId, e.maxHp, e.hp))
+        assertEquals(MonsterStore.HitResult.Damaged(1), s.hit(e.key))
+        clock += 200
+        assertEquals(MonsterStore.HitResult.Defeated, s.hit(e.key))
+        assertEquals(15, s.state.value.ledger.encounters.first { it.key == e.key }.awardedScore)
+        assertEquals(1, s.state.value.ledger.guest.kills["slime-sky"])
+        assertNull(s.state.value.ledger.guest.kills["slime"])
+        // A weekly window's completion spawn stays a slime.
+        val week = window()
+        s.observe(agent, listOf(week))
+        assertEquals("slime", s.encounters(agent.id, AgentProvider.CLAUDE, week).first().monsterId)
     }
 
     @Test fun agentWithoutCandidateWindowIsSkipped() = runBlocking {
@@ -412,10 +444,14 @@ class MonsterStoreTest {
         val sent = functions.data("spawnEncounter")
         // No usage figure, no account information.
         assertEquals(
-            setOf("source", "provider", "windowLabel", "periodSec", "resetBucketMs", "resetsAtMs", "platform", "appVersion", "spriteFormat"),
+            setOf(
+                "source", "provider", "windowLabel", "periodSec", "session", "resetBucketMs", "resetsAtMs",
+                "platform", "appVersion", "spriteFormat",
+            ),
             sent.keys,
         )
         assertEquals(604_800L, (sent["periodSec"] as Number).toLong())
+        assertEquals(false, sent["session"])
         assertEquals(1_800_086_400_000L, (sent["resetBucketMs"] as Number).toLong())
         assertEquals("android", sent["platform"])
         assertEquals(1L, (sent["spriteFormat"] as Number).toLong())
@@ -428,7 +464,7 @@ class MonsterStoreTest {
     @Test fun randomSpawnSendsEachAgentsCandidateWindows() = runBlocking {
         val codex = Agent(AgentProvider.CODEX)
         snapshots = listOf(
-            agent to listOf(window(used = 40.0), window(label = "Current session", used = 100.0)),
+            agent to listOf(window(used = 40.0), sessionWindow(used = 100.0)),
             codex to listOf(window(label = "추가 한도", used = 3.0)),
         )
         val s = store(terms = 2)
@@ -444,12 +480,15 @@ class MonsterStoreTest {
         // language-free key label.
         assertEquals(
             listOf(
-                mapOf("provider" to "claude", "windowLabel" to "Current week (all models)"),
-                mapOf("provider" to "claude", "windowLabel" to "Current session"),
+                mapOf("provider" to "claude", "windowLabel" to "Current week (all models)", "session" to false),
+                mapOf("provider" to "claude", "windowLabel" to "Current session", "session" to true),
             ),
             claudeSent["candidates"],
         )
-        assertEquals(listOf(mapOf("provider" to "codex", "windowLabel" to "Additional limit")), codexSent["candidates"])
+        assertEquals(
+            listOf(mapOf("provider" to "codex", "windowLabel" to "Additional limit", "session" to false)),
+            codexSent["candidates"],
+        )
         assertFalse(functions.rawBodies.any { it.contains("usedPercent") })
         // Nothing is asked again before the server's next draw time.
         s.observe(agent, emptyList())
@@ -707,7 +746,7 @@ class MonsterStoreTest {
         functions.respond("u1", 200, killsDocument("u1", 4))
         s.refreshBestiary()
         assertEquals(mapOf("slime" to 4), s.state.value.bestiaryKills)
-        assertEquals(listOf("slime", "goblin", "skeleton", "orc", "mimic"), s.bestiaryRows()!!.map { it.id })
+        assertEquals(listOf("slime", "slime-sky", "goblin", "skeleton", "orc", "mimic"), s.bestiaryRows()!!.map { it.id })
         // A failed re-read keeps what is on screen.
         s.refreshBestiary()
         assertEquals(mapOf("slime" to 4), s.state.value.bestiaryKills)

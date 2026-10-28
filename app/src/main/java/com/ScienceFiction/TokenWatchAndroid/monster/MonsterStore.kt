@@ -4,8 +4,10 @@ import com.ScienceFiction.TokenWatchAndroid.analytics.AnalyticsEvent
 import com.ScienceFiction.TokenWatchAndroid.domain.Agent
 import com.ScienceFiction.TokenWatchAndroid.domain.AgentProvider
 import com.ScienceFiction.TokenWatchAndroid.domain.UsageWindow
+import com.ScienceFiction.TokenWatchAndroid.domain.WindowKind
 import com.ScienceFiction.TokenWatchAndroid.monster.MonsterApiClient.CallError
 import com.ScienceFiction.TokenWatchAndroid.monster.MonsterApiClient.CallResult
+import com.ScienceFiction.TokenWatchAndroid.monster.MonsterApiClient.RandomCandidate
 import com.ScienceFiction.TokenWatchAndroid.monster.MonsterApiClient.SpawnResult
 import java.time.Instant
 import java.util.UUID
@@ -86,8 +88,9 @@ data class MonsterState(
  * - Spawns are requested from foreground refreshes only; a background refresh only expires monsters.
  *   Switching the gauge creatures off stops both spawning and drawing.
  * - Demo mode never calls the server or saves: the sample 100% gauges get memory-only sample monsters.
- * - The server receives the contract's values only (provider, window label, period, reset bucket, agent
- *   key, platform, app version) — never a usage figure or AI service account information.
+ * - The server receives the contract's values only (provider, window label, period, whether it is a session
+ *   window, reset bucket, agent key, platform, app version) — never a usage figure or AI service account
+ *   information.
  *
  * All state changes go through one lock, so the UI's hits and the refresh hook never interleave halfway;
  * network calls happen outside it, and refresh observations are serialized among themselves.
@@ -292,6 +295,7 @@ class MonsterStore(
                     provider = agent.provider.wireId,
                     windowLabel = keyLabel,
                     periodSec = MonsterSessionKey.periodSec(agent.provider, window.label, window.windowSeconds, window.kind),
+                    session = window.kind == WindowKind.SESSION,
                     resetBucketMs = bucket,
                     resetsAtMs = MonsterSessionKey.epochMs(resetsAt),
                 )
@@ -311,8 +315,12 @@ class MonsterStore(
             }
             addGuestEncounter(
                 key = key, source = MonsterEncounter.Source.COMPLETION, provider = agent.provider.wireId,
-                windowLabel = keyLabel, resetBucketMs = bucket, drawAtMs = null, entry = decision.entry, now = now,
-                expiresAtMs = MonsterSessionKey.epochMs(resetsAt), anchor = agent.id to window.label,
+                windowLabel = keyLabel, resetBucketMs = bucket, drawAtMs = null,
+                entry = MonsterDraw.forWindow(
+                    decision.entry, session = window.kind == WindowKind.SESSION, config = state.config,
+                    appVersion = env.appVersion,
+                ),
+                now = now, expiresAtMs = MonsterSessionKey.epochMs(resetsAt), anchor = agent.id to window.label,
             )
         }
     }
@@ -336,8 +344,8 @@ class MonsterStore(
             // left out, and a bar with a ghost from the last hour is used only when no bar is free (the new
             // monster then clears that ghost away).
             val anchors = linkedMapOf<String, String>()
-            val free = mutableListOf<Pair<String, String>>()
-            val haunted = mutableListOf<Pair<String, String>>()
+            val free = mutableListOf<RandomCandidate>()
+            val haunted = mutableListOf<RandomCandidate>()
             for (window in windows) {
                 if (!MonsterEligibility.isRandomCandidate(window, config.random.minUsedPercent, instant)) continue
                 val keyLabel = MonsterSessionKey.keyLabel(agent.provider, window.label)
@@ -349,7 +357,8 @@ class MonsterStore(
                     val defeatedAt = e.defeatedAtMs
                     e.state == MonsterEncounter.State.DEFEATED && defeatedAt != null && now - defeatedAt < GHOST_HOLD_MS
                 }
-                (if (ghost) haunted else free) += agent.provider.wireId to keyLabel
+                val candidate = RandomCandidate(agent.provider.wireId, keyLabel, session = window.kind == WindowKind.SESSION)
+                (if (ghost) haunted else free) += candidate
             }
             val candidates = free.ifEmpty { haunted }
             if (candidates.isEmpty()) continue // no target window: the schedule stays
@@ -360,7 +369,7 @@ class MonsterStore(
 
     private suspend fun drawRandom(
         agent: Agent,
-        candidates: List<Pair<String, String>>,
+        candidates: List<RandomCandidate>,
         anchors: Map<String, String>,
         owner: String?,
         now: Long,
@@ -406,12 +415,13 @@ class MonsterStore(
         )
         if (decision !is GuestSpawnPolicy.Outcome.Spawn) return
         val pick = minOf(candidates.size - 1, (MonsterDraw.unitRoll("$salt|$key|cand") * candidates.size).toInt())
-        val (provider, windowLabel) = candidates[pick]
+        val chosen = candidates[pick]
         addGuestEncounter(
-            key = key, source = MonsterEncounter.Source.RANDOM, provider = provider, windowLabel = windowLabel,
-            resetBucketMs = null, drawAtMs = due, entry = decision.entry, now = now,
+            key = key, source = MonsterEncounter.Source.RANDOM, provider = chosen.provider,
+            windowLabel = chosen.windowLabel, resetBucketMs = null, drawAtMs = due,
+            entry = MonsterDraw.forWindow(decision.entry, chosen.session, state.config, env.appVersion), now = now,
             expiresAtMs = now + state.config.random.lifetimeMinutes * 60_000L,
-            anchor = anchors[windowLabel]?.let { agent.id to it },
+            anchor = anchors[chosen.windowLabel]?.let { agent.id to it },
         )
     }
 

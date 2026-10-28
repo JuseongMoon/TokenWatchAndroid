@@ -23,8 +23,9 @@ import okhttp3.RequestBody.Companion.toRequestBody
  * of the player's own document. The app account's profile writes (`setProfile`) and in-app deletion
  * (`deleteAccount`) go through this client too (AccountStore).
  *
- * What is sent: provider, window label, period, reset bucket, agent key (a per-account hash), platform and
- * app version. Never a usage figure, AI service account information or a device identifier.
+ * What is sent: provider, window label, period, whether it is a session window, reset bucket, agent key (a
+ * per-account hash), platform and app version. Never a usage figure, AI service account information or a
+ * device identifier.
  */
 class MonsterApiClient(
     private val projectId: String,
@@ -61,12 +62,17 @@ class MonsterApiClient(
     /** A random draw's answer: the monster (null — not due yet, or not drawn) and the server's next draw time. */
     data class RandomDraw(val encounter: MonsterEncounterDto?, val nextDrawAtMs: Long?)
 
+    /** One random spawn candidate window. [session] means the same as for a completion spawn. */
+    data class RandomCandidate(val provider: String, val windowLabel: String, val session: Boolean)
+
     // MARK: Spawns and defeats
 
+    /** [session]: true for a session window (5 hours) — the server turns that window's slime into the blue slime. */
     suspend fun spawnCompletion(
         provider: String,
         windowLabel: String,
         periodSec: Long,
+        session: Boolean,
         resetBucketMs: Long,
         resetsAtMs: Long,
     ): CallResult<SpawnResult> = spawn(
@@ -75,6 +81,7 @@ class MonsterApiClient(
             "provider" to provider,
             "windowLabel" to windowLabel,
             "periodSec" to periodSec,
+            "session" to session,
             "resetBucketMs" to resetBucketMs,
             "resetsAtMs" to resetsAtMs,
         ),
@@ -84,14 +91,16 @@ class MonsterApiClient(
      * One agent's draw. The candidates are that agent's target windows (1…20, without a 100% window whose
      * completion monster is alive); the server picks one.
      */
-    suspend fun spawnRandom(agentKey: String, candidates: List<Pair<String, String>>): CallResult<RandomDraw> =
+    suspend fun spawnRandom(agentKey: String, candidates: List<RandomCandidate>): CallResult<RandomDraw> =
         call(
             "spawnEncounter",
             spawnBody(
                 mapOf(
                     "source" to "random",
                     "agentKey" to agentKey,
-                    "candidates" to candidates.map { (provider, label) -> mapOf("provider" to provider, "windowLabel" to label) },
+                    "candidates" to candidates.map {
+                        mapOf("provider" to it.provider, "windowLabel" to it.windowLabel, "session" to it.session)
+                    },
                 ),
             ),
         ).map { result ->

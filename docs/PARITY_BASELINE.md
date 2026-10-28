@@ -8,11 +8,12 @@ The Android sources mirror the portable iOS patches through commit `bfdb4ed` on 
 1.3.0 (16) content: the review prompt, login failure diagnostics, the two analytics additions,
 the split "hide unused graphs" setting, and the credit-gauge reset confirmation described below.
 On the `feature/account` branch it also mirrors the optional app account and the monster hunt
-through iOS commit `5e62173` on `feature/account` (`a8fc3a9`, `2d268f8`, `dfae3ea`, `26b74fc`,
+through iOS commit `399898c` on `feature/account` (`a8fc3a9`, `2d268f8`, `dfae3ea`, `26b74fc`,
 `0ab185e`, `816d6aa`, `8e5ab75`, `bef30eb`, `6bc67ae`, `b5aa200`, `e2e2152`, `5a452e8`,
 `35c4764`, `e5309c2`, `c18446d`, `d481230`, `9f86767`, `b4ba166`, `70c5f73`, `798d946`, `d536b55`,
-`29edee1`, `834613b`, `8c62ad9`, `78e7b1f`, `4a9112b`, `dd427e5`), described under "Optional app
-account" and "Monster hunt and adventurer ranks" below; `4a9112b` is the 2.0.0 (17) version bump.
+`29edee1`, `834613b`, `8c62ad9`, `78e7b1f`, `4a9112b`, `dd427e5`, `399898c`), described under
+"Optional app account" and "Monster hunt and adventurer ranks" below; `4a9112b` is the 2.0.0 (17)
+version bump.
 `a9867ee` only adds an iOS DEBUG launch argument and `5e62173` only extends the iOS privacy manifest,
 so neither has an Android counterpart.
 Uncommitted iOS working-tree changes are deliberately not part of this baseline.
@@ -175,12 +176,15 @@ Firebase Analytics runs against the Android app's own Firebase registration and
   early. A gauge still showing a ghost from the last hour is picked only when no gauge is free, and the
   new monster then clears that ghost away: a bar shows one monster or ghost at a time. One seen for the
   first time only gets its first draw time. The schedule stays on the device per AI account whichever
-  app account is signed in. Credit gauges and balances never carry one. Monsters march across the bar
+  app account is signed in. Credit gauges and balances never carry one. A slime drawn for a session
+  window (the 5-hour kind) is the blue slime, its own species with 2 HP and 15 points, whenever the
+  catalog has it released for this app version; it is never drawn by weight on its own and follows the
+  slime in the bestiary. The slime is always green and the blue slime always sky blue. Monsters march across the bar
   like the slime critter and come back in from the left past the right edge: a completion monster sets
   out from the left edge, a random one from the spot it appeared at, at a pace that differs slightly by
   monster. The sword and the halo may rise above the bar but are cut at its ends with the body. The slime critter of a 100% bar steps aside while any monster is on it. Tapping anywhere on
-  the gauge row hits the monster, ahead of the card's detail tap; special monsters show their HP as
-  hearts after the first hit, and TalkBack offers an "attack" action. A defeat holds the sword
+  the gauge row hits the monster, ahead of the card's detail tap; monsters with 2 HP or more show their
+  HP as hearts after the first hit, and TalkBack offers an "attack" action. A defeat holds the sword
   briefly, plays the monster's own death animation, then the monster walks on in gray with a halo at
   half speed: a completion monster's ghost until the reset, a random one's from where it fell, coming
   back in from the left, for an hour after the kill. The "gauge monsters" setting switches both
@@ -189,7 +193,8 @@ Firebase Analytics runs against the Android app's own Firebase registration and
   in the adventurer ranks. Everyone else hunts as a guest with deterministic device draws that
   stay unranked and are merged once, as history, after agreeing (up to 500 defeats, the most-hunted
   species first). Spawns are requested only from
-  foreground refreshes. The server receives the provider, window name, reset bucket, period, an agent
+  foreground refreshes. The server receives the provider, window name, whether it is a session window,
+  reset bucket, period, an agent
   key (a hash of the app account and the device's random agent ID, different per account), platform
   and app version — never usage percentages or AI service account details. Session keys
   (300-second reset buckets, Copilot's UTC-midnight date, the language-free Codex label, the period
@@ -201,8 +206,8 @@ Firebase Analytics runs against the Android app's own Firebase registration and
   outside the top 10 the player's rank shows only in their own box. Each tab caches its list for five
   minutes, and the week tab reads again as soon as the week turns. Before agreeing the sign opens
   the consent screen instead and carries a dot. In demo mode the sign opens sample ranks, where the
-  sample adventurer stands fourth this week and sixth all time, and its bestiary has caught the first
-  two species only; all of it comes from constants, with no server call and nothing stored. Memory-only
+  sample adventurer stands fourth this week and sixth all time, and its bestiary has caught the slime and
+  the goblin only; all of it comes from constants, with no server call and nothing stored. Memory-only
   sample monsters appear on the sample 100% gauges and play the same defeat animation as real ones.
 - The account screen carries a bestiary under the profile: every released species this app can draw, plus
   any species already defeated, in catalog order on a four-column grid as wide as the avatar grid, with the account's defeats per

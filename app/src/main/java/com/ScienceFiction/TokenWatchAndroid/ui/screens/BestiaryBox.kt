@@ -117,9 +117,10 @@ private const val MINIMUM_SLOTS = 8
 
 @Composable
 private fun BestiaryCell(row: BestiaryRow, sprites: MonsterSpriteSet, loc: L10n, modifier: Modifier = Modifier) {
-    // Never the sky-blue session slime here: the bestiary is not on a gauge.
+    // Not on a gauge: only the blue slime itself is sky blue here.
     val sprite = remember(row.entry, sprites) {
-        sprites.body(row.id, row.entry)?.toPixelSprite(gray = false) ?: PixelSprite.Slime
+        sprites.body(row.id, row.entry)?.toPixelSprite(gray = false)
+            ?: if (MonsterSpriteSet.skySlime(row.id, sessionWindow = false)) PixelSprite.SlimeSky else PixelSprite.Slime
     }
     val name = loc.monsterName(row.id)
     val description = if (row.discovered) loc.bestiaryA11y(name, row.kills) else loc.bestiaryUnknown

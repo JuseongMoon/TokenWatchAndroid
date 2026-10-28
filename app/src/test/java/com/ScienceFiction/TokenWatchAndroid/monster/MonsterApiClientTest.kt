@@ -30,7 +30,7 @@ class MonsterApiClientTest {
 
     @Test fun aCallableIsAPostWithABearerTokenAndADataEnvelope() = runBlocking {
         val transport = ScriptedTransport(response(200, """{"result":{"encounter":null}}"""))
-        val result = client(transport).spawnCompletion("claude", "Current week (all models)", 604_800, 1_800_086_400_000, 1_800_086_412_345)
+        val result = client(transport).spawnCompletion("claude", "Current week (all models)", 604_800, false, 1_800_086_400_000, 1_800_086_412_345)
 
         assertEquals(MonsterApiClient.CallResult.Success(MonsterApiClient.SpawnResult.None), result)
         val request = transport.requests.single()
@@ -42,7 +42,8 @@ class MonsterApiClientTest {
         assertEquals(
             mapOf(
                 "source" to "completion", "provider" to "claude", "windowLabel" to "Current week (all models)",
-                "periodSec" to 604_800.0, "resetBucketMs" to 1_800_086_400_000.0, "resetsAtMs" to 1_800_086_412_345.0,
+                "periodSec" to 604_800.0, "session" to false, "resetBucketMs" to 1_800_086_400_000.0,
+                "resetsAtMs" to 1_800_086_412_345.0,
                 "platform" to "android", "appVersion" to "1.4.0", "spriteFormat" to 1.0,
             ),
             data,
@@ -54,11 +55,14 @@ class MonsterApiClientTest {
 
     @Test fun aRandomSpawnSendsTheAgentKeyAndCandidates() = runBlocking {
         val transport = ScriptedTransport(response(200, """{"result":{"encounter":null,"nextDrawAtMs":1800001500000}}"""))
-        val result = client(transport).spawnRandom("agent-key", listOf("codex" to "Additional limit"))
+        val result = client(transport).spawnRandom(
+            "agent-key",
+            listOf(MonsterApiClient.RandomCandidate("codex", "Additional limit", session = false)),
+        )
         val data = transport.requests.single().json()["data"] as Map<*, *>
         assertEquals(setOf("source", "agentKey", "candidates", "platform", "appVersion", "spriteFormat"), data.keys)
         assertEquals("agent-key", data["agentKey"])
-        assertEquals(listOf(mapOf("provider" to "codex", "windowLabel" to "Additional limit")), data["candidates"])
+        assertEquals(listOf(mapOf("provider" to "codex", "windowLabel" to "Additional limit", "session" to false)), data["candidates"])
         assertEquals(
             MonsterApiClient.CallResult.Success(MonsterApiClient.RandomDraw(encounter = null, nextDrawAtMs = 1_800_001_500_000)),
             result,
@@ -72,7 +76,10 @@ class MonsterApiClientTest {
                 """{"result":{"encounter":{"key":"k","source":"random","provider":"kimi","windowLabel":"Current week","drawAtMs":"1800000000000","monsterId":"orc","maxHP":8,"state":"alive","spawnedAtMs":1,"expiresAtMs":2},"nextDrawAtMs":"1800001800000"}}""",
             ),
         )
-        val result = client(transport).spawnRandom("agent-key", listOf("kimi" to "Current week"))
+        val result = client(transport).spawnRandom(
+            "agent-key",
+            listOf(MonsterApiClient.RandomCandidate("kimi", "Current week", session = false)),
+        )
         val draw = (result as MonsterApiClient.CallResult.Success).value
         val dto = draw.encounter!!
         assertEquals("orc" to 8, dto.monsterId to dto.maxHp)

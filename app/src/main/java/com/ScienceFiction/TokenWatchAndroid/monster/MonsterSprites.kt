@@ -7,7 +7,8 @@ import kotlin.math.roundToInt
 /**
  * Gauge monster and effect sprites. The bundled `assets/monsters-v1.json` ships byte for byte the same
  * as iOS (SHA-256 parity) and the catalog's remote inline sprites (V3) go through the same decoder.
- * They are pixel data, not code. Slimes reuse the app's own sprites (`PixelSprite.Slime`/`SlimeSky`).
+ * They are pixel data, not code. The slime and the blue slime reuse the app's own sprites
+ * (`PixelSprite.Slime`/`SlimeSky`).
  *
  * A defeated monster turns its original colors gray (luma Y = 0.299R + 0.587G + 0.114B, × 0.8 — the
  * iOS formula). Right after the defeat a per-monster death animation (`{id}-death`, four frames) plays.
@@ -101,23 +102,32 @@ object MonsterSpriteDecoder {
 class MonsterSpriteSet(val bundled: Map<String, MonsterSpriteData>) {
     /**
      * What draws [monsterId]: the catalog's inline sprite, then the bundled one (the name the catalog
-     * points at, or the id). Null means a slime — the app's own slime sprites, sky blue on session
-     * windows like the gauge critter.
+     * points at, or the id). Null means a slime — the app's own slime sprites (see [skySlime]).
      */
     fun body(monsterId: String, entry: MonsterCatalogEntry?): MonsterSpriteData? {
-        if (monsterId == SLIME_ID || (entry == null && bundled[monsterId] == null)) return null
+        if (monsterId == SLIME_ID || monsterId == MonsterDraw.SESSION_SLIME_ID) return null
+        if (entry == null && bundled[monsterId] == null) return null
         return entry?.inlineSprite ?: bundled[entry?.bundledSprite ?: monsterId] ?: bundled[monsterId]
     }
 
-    /** The per-monster death animation (`{id}-death`; a session-window slime uses the sky-blue one). Null skips straight to the halo. */
-    fun death(monsterId: String, sessionWindow: Boolean): MonsterSpriteData? =
-        bundled[if (monsterId == SLIME_ID && sessionWindow) "slime-sky-death" else "$monsterId-death"]
+    /** The per-monster death animation (`{id}-death` — the blue slime's is `slime-sky-death`). Null skips straight to the halo. */
+    fun death(monsterId: String): MonsterSpriteData? = bundled["$monsterId-death"]
 
     val sword: MonsterSpriteData? get() = bundled[MonsterSpriteDecoder.SWORD_ID]
     val halo: MonsterSpriteData? get() = bundled[MonsterSpriteDecoder.HALO_ID]
 
     companion object {
         const val SLIME_ID = "slime"
+
+        /**
+         * Whether a monster drawn as a slime ([body] null) is the sky-blue one: the slime is always green and
+         * the blue slime always sky blue; a monster without a drawing is sky blue on a session window only.
+         */
+        fun skySlime(monsterId: String, sessionWindow: Boolean): Boolean = when (monsterId) {
+            SLIME_ID -> false
+            MonsterDraw.SESSION_SLIME_ID -> true
+            else -> sessionWindow
+        }
 
         fun fromFile(bytes: ByteArray?): MonsterSpriteSet =
             MonsterSpriteSet(bytes?.let(MonsterSpriteDecoder::decodeFile).orEmpty())

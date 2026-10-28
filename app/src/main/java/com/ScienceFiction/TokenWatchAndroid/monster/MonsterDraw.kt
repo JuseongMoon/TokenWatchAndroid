@@ -43,6 +43,25 @@ object MonsterDraw {
         return candidates.last()
     }
 
+    /** The slime of a session window (5 hours): its own species, with other HP and score (user decision 2026-10-28). */
+    const val SESSION_SLIME_ID = "slime-sky"
+
+    /**
+     * Fits the drawn species to its window: a session window's slime is the blue slime. It changes only when
+     * the catalog has that species released and this app version can draw it (the server's rule).
+     */
+    fun forWindow(
+        entry: MonsterCatalogEntry,
+        session: Boolean,
+        config: MonsterConfig,
+        appVersion: String,
+    ): MonsterCatalogEntry {
+        if (!session || entry.id != MonsterSpriteSet.SLIME_ID) return entry
+        val sky = config.entry(SESSION_SLIME_ID) ?: return entry
+        val drawable = sky.released && (sky.minAppVersion?.let { AppVersionCompare.isAtLeast(appVersion, it) } ?: true)
+        return if (drawable) sky else entry
+    }
+
     /** A random spawn's place inside the gauge (0.1…0.9). */
     fun position(key: String): Double = 0.1 + unitRoll("$key|pos") * 0.8
 

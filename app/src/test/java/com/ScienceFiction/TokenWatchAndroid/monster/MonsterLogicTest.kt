@@ -171,10 +171,10 @@ class MonsterLogicTest {
 
     @Test fun bundledDefaultsMatchTheServerSeed() {
         val c = MonsterConfig.BUNDLED_DEFAULT
-        assertEquals(listOf("slime", "goblin", "skeleton", "orc", "mimic"), c.catalog.map { it.id })
-        assertEquals(listOf(90.0, 6.0, 2.5, 1.0, 0.5), c.catalog.map { it.weight })
-        assertEquals(listOf(1, 3, 5, 8, 12), c.catalog.map { it.hp })
-        assertEquals(listOf(10, 50, 100, 190, 350), c.catalog.map { it.score })
+        assertEquals(listOf("slime", "slime-sky", "goblin", "skeleton", "orc", "mimic"), c.catalog.map { it.id })
+        assertEquals(listOf(90.0, 0.0, 6.0, 2.5, 1.0, 0.5), c.catalog.map { it.weight })
+        assertEquals(listOf(1, 2, 3, 5, 8, 12), c.catalog.map { it.hp })
+        assertEquals(listOf(10, 15, 50, 100, 190, 350), c.catalog.map { it.score })
         assertEquals(0.08, c.random.chancePerSlot, 0.0)
         assertEquals(1.0, c.random.minUsedPercent, 0.0)
         assertEquals(
@@ -220,10 +220,10 @@ class MonsterLogicTest {
         }
         val slimeDeath = sprites.getValue("slime-death")
         assertEquals(PixelSprite.Slime.rows to PixelSprite.Slime.columns, slimeDeath.rows to slimeDeath.cols)
-        assertNotNull(set.death("slime", sessionWindow = true))
-        assertEquals(sprites["slime-sky-death"], set.death("slime", sessionWindow = true))
-        assertEquals(sprites["slime-death"], set.death("slime", sessionWindow = false))
-        assertNull(set.death("pumpkin", sessionWindow = false))
+        assertNotNull(set.death("slime"))
+        assertEquals(sprites["slime-death"], set.death("slime"))
+        assertEquals(sprites["slime-sky-death"], set.death("slime-sky"))
+        assertNull(set.death("pumpkin"))
         assertNotNull(set.sword)
         assertNotNull(set.halo)
     }
@@ -231,7 +231,14 @@ class MonsterLogicTest {
     @Test fun spriteLookupFallsBackToSlime() {
         val set = MonsterSpriteSet.fromFile(spriteFile)
         assertNull(set.body("slime", MonsterConfig.BUNDLED_DEFAULT.entry("slime")))
+        // The blue slime is the app's own sprite too, even when the catalog points at a bundled name.
+        assertNull(set.body("slime-sky", MonsterCatalogEntry("slime-sky", "common", 2, 15, 0.0, bundledSprite = "slime-sky")))
         assertNull(set.body("pumpkin", null)) // unknown id → slime
+        // The slime is always green and the blue slime always sky blue; a missing drawing follows the bar.
+        assertFalse(MonsterSpriteSet.skySlime("slime", sessionWindow = true))
+        assertTrue(MonsterSpriteSet.skySlime("slime-sky", sessionWindow = false))
+        assertTrue(MonsterSpriteSet.skySlime("pumpkin", sessionWindow = true))
+        assertFalse(MonsterSpriteSet.skySlime("pumpkin", sessionWindow = false))
         assertEquals(set.bundled["orc"], set.body("orc", MonsterConfig.BUNDLED_DEFAULT.entry("orc")))
         val inline = MonsterSpriteData(1, 1, listOf(listOf(listOf(1))), mapOf(1 to 0xFF0000))
         val event = MonsterCatalogEntry("pumpkin", "event", 2, 30, 1.0, inlineSprite = inline)
@@ -274,6 +281,31 @@ class MonsterLogicTest {
         assertEquals("goblin", pick(0.9))
         assertEquals("mimic", pick(0.9999))
         assertEquals("slime", pick(0.9999, commonOnly = true))
+    }
+
+    @Test fun sessionBarSlimeBecomesTheBlueSlime() {
+        var c = MonsterConfig.BUNDLED_DEFAULT
+        val slime = c.entry("slime")!!
+        val goblin = c.entry("goblin")!!
+        val sky = MonsterDraw.forWindow(slime, session = true, config = c, appVersion = "2.0.0")
+        assertEquals(listOf("slime-sky", 2, 15, true), listOf(sky.id, sky.hp, sky.score, sky.isCommon))
+        assertEquals("slime", MonsterDraw.forWindow(slime, session = false, config = c, appVersion = "2.0.0").id)
+        assertEquals("goblin", MonsterDraw.forWindow(goblin, session = true, config = c, appVersion = "2.0.0").id)
+        // The blue slime has weight 0, so it is never drawn on its own.
+        for (step in 0 until 100) {
+            val roll = step / 100.0
+            assertNotEquals("slime-sky", MonsterDraw.pick(c, "2.0", commonOnly = false, roll = roll).id)
+            assertEquals("slime", MonsterDraw.pick(c, "2.0", commonOnly = true, roll = roll).id)
+        }
+        // Not released, newer than this app, or missing from the catalog: the slime stays.
+        fun withSky(transform: (MonsterCatalogEntry) -> MonsterCatalogEntry) =
+            c.copy(catalog = c.catalog.map { if (it.id == "slime-sky") transform(it) else it })
+        c = withSky { it.copy(released = false) }
+        assertEquals("slime", MonsterDraw.forWindow(slime, session = true, config = c, appVersion = "2.0.0").id)
+        c = withSky { it.copy(released = true, minAppVersion = "9.0") }
+        assertEquals("slime", MonsterDraw.forWindow(slime, session = true, config = c, appVersion = "2.0.0").id)
+        c = c.copy(catalog = c.catalog.filter { it.id != "slime-sky" })
+        assertEquals("slime", MonsterDraw.forWindow(slime, session = true, config = c, appVersion = "2.0.0").id)
     }
 
     @Test fun unreleasedAndNewerMonstersAreSkipped() {
@@ -557,7 +589,7 @@ class MonsterLogicTest {
             ),
         )
         val rows = MonsterBestiary.rows(config, mapOf("slime" to 4, "orc" to 1), "1.4.0")
-        assertEquals(listOf("slime", "goblin", "skeleton", "orc", "mimic"), rows.map { it.id })
+        assertEquals(listOf("slime", "slime-sky", "goblin", "skeleton", "orc", "mimic"), rows.map { it.id })
         assertEquals(listOf("slime", "orc"), rows.filter { it.discovered }.map { it.id })
         assertEquals(0, rows.first { it.id == "goblin" }.kills)
         // A species not yet released, or one this app cannot draw, still shows once defeated.
@@ -589,12 +621,13 @@ class MonsterLogicTest {
                 }
             }
         }
-        // The bestiary defeats add up to the all-time score; the species after the goblin are still silhouettes.
+        // The bestiary defeats add up to the all-time score; the blue slime and the species after the goblin are
+        // still silhouettes.
         val config = MonsterConfig.BUNDLED_DEFAULT
         val points = DemoAdventure.KILLS.entries.sumOf { (id, kills) -> (config.entry(id)?.score ?: 0) * kills }
         assertEquals(DemoAdventure.mine(LeaderboardScope.ALL_TIME).score, points)
         val rows = MonsterBestiary.rows(config, DemoAdventure.KILLS, "2.0.0")
-        assertEquals(listOf("skeleton", "orc", "mimic"), rows.filter { !it.discovered }.map { it.id })
+        assertEquals(listOf("slime-sky", "skeleton", "orc", "mimic"), rows.filter { !it.discovered }.map { it.id })
     }
 }
 

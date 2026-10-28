@@ -12,6 +12,7 @@ import com.ScienceFiction.TokenWatchAndroid.monster.LeaderboardScope
 
 fun L10n.monsterName(id: String): String = when (id) {
     "slime" -> choose("슬라임", "Slime")
+    "slime-sky" -> choose("파랑 슬라임", "Blue Slime")
     "goblin" -> choose("고블린", "Goblin")
     "skeleton" -> choose("스켈레톤", "Skeleton")
     "orc" -> choose("오크", "Orc")

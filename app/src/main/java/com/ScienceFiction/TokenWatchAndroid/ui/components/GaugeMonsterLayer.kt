@@ -116,7 +116,7 @@ internal fun Modifier.monsterHitTarget(monsters: GaugeMonsters?, loc: L10n, hapt
         .clickable(interactionSource = null, indication = null, onClickLabel = loc.monsterAttack, onClick = attack)
 }
 
-/** HP left as hearts (special monsters, after the first hit). Past five, `+n`. */
+/** HP left as hearts (monsters with 2 HP or more, after the first hit). Past five, `+n`. */
 @Composable
 internal fun MonsterHpHearts(hp: Int, maxHp: Int, modifier: Modifier = Modifier) {
     if (maxHp <= 1 || hp >= maxHp || hp <= 0) return
@@ -223,10 +223,11 @@ private class MonsterLooks(val living: PixelSprite, val death: PixelSprite?, val
             sessionWindow: Boolean,
         ): MonsterLooks {
             val body = sprites.body(encounter.monsterId, config.entry(encounter.monsterId))
-            val slime = if (sessionWindow) PixelSprite.SlimeSky else PixelSprite.Slime
+            val sky = MonsterSpriteSet.skySlime(encounter.monsterId, sessionWindow)
+            val slime = if (sky) PixelSprite.SlimeSky else PixelSprite.Slime
             return MonsterLooks(
                 living = body?.toPixelSprite(gray = false) ?: slime,
-                death = sprites.death(encounter.monsterId, sessionWindow)?.toPixelSprite(gray = false),
+                death = sprites.death(encounter.monsterId)?.toPixelSprite(gray = false),
                 ghost = body?.toPixelSprite(gray = true) ?: slime.grayscale(),
             )
         }
