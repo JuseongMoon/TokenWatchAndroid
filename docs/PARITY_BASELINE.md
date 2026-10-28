@@ -7,7 +7,7 @@
 The Android sources mirror the portable iOS patches through commit `bfdb4ed` on `dev`, the iOS
 1.3.0 (16) content: the review prompt, login failure diagnostics, the two analytics additions,
 the split "hide unused graphs" setting, and the credit-gauge reset confirmation described below.
-On the `feature/account` branch it also mirrors the optional app account and the monster hunt
+Since 2.0.0 (17) it also mirrors the optional app account and the monster hunt
 through iOS commit `399898c` on `feature/account` (`a8fc3a9`, `2d268f8`, `dfae3ea`, `26b74fc`,
 `0ab185e`, `816d6aa`, `8e5ab75`, `bef30eb`, `6bc67ae`, `b5aa200`, `e2e2152`, `5a452e8`,
 `35c4764`, `e5309c2`, `c18446d`, `d481230`, `9f86767`, `b4ba166`, `70c5f73`, `798d946`, `d536b55`,
