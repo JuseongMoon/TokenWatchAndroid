@@ -8,14 +8,14 @@ The Android sources mirror the portable iOS patches through commit `bfdb4ed` on 
 1.3.0 (16) content: the review prompt, login failure diagnostics, the two analytics additions,
 the split "hide unused graphs" setting, and the credit-gauge reset confirmation described below.
 Since 2.0.0 (17) it also mirrors the optional app account and the monster hunt
-through iOS commit `399898c` on `feature/account` (`a8fc3a9`, `2d268f8`, `dfae3ea`, `26b74fc`,
+through iOS commit `758d853` on `feature/account` (`a8fc3a9`, `2d268f8`, `dfae3ea`, `26b74fc`,
 `0ab185e`, `816d6aa`, `8e5ab75`, `bef30eb`, `6bc67ae`, `b5aa200`, `e2e2152`, `5a452e8`,
 `35c4764`, `e5309c2`, `c18446d`, `d481230`, `9f86767`, `b4ba166`, `70c5f73`, `798d946`, `d536b55`,
-`29edee1`, `834613b`, `8c62ad9`, `78e7b1f`, `4a9112b`, `dd427e5`, `399898c`), described under
+`29edee1`, `834613b`, `8c62ad9`, `78e7b1f`, `4a9112b`, `dd427e5`, `399898c`, `758d853`), described under
 "Optional app account" and "Monster hunt and adventurer ranks" below; `4a9112b` is the 2.0.0 (17)
 version bump.
-`a9867ee` only adds an iOS DEBUG launch argument and `5e62173` only extends the iOS privacy manifest,
-so neither has an Android counterpart.
+`a9867ee` only adds an iOS DEBUG launch argument, `5e62173` only extends the iOS privacy manifest and
+`ec0169e` only raises the iOS build number, so none of them has an Android counterpart.
 Uncommitted iOS working-tree changes are deliberately not part of this baseline.
 
 Firebase Analytics runs against the Android app's own Firebase registration and
@@ -208,7 +208,10 @@ Firebase Analytics runs against the Android app's own Firebase registration and
   the consent screen instead and carries a dot. In demo mode the sign opens sample ranks, where the
   sample adventurer stands fourth this week and sixth all time, and its bestiary has caught the slime and
   the goblin only; all of it comes from constants, with no server call and nothing stored. Memory-only
-  sample monsters appear on the sample 100% gauges and play the same defeat animation as real ones.
+  sample monsters appear on the sample 100% gauges and, as a random-spawn sample, a goblin on the sample
+  Codex weekly gauge that sets out from 35% of the bar. They play the same defeat animation as real ones,
+  their ghosts stay for the rest of the demo, and defeating them counts toward no record, score or guest
+  history.
 - The account screen carries a bestiary under the profile: every released species this app can draw, plus
   any species already defeated, in catalog order on a four-column grid as wide as the avatar grid, with the account's defeats per
   species (its own record plus the merged guest history, read from the player's document with a field mask

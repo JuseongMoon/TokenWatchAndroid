@@ -67,6 +67,8 @@ data class MonsterState(
     val consentRequested: Boolean = false,
     /** HP left on the demo's sample monsters (memory only). */
     val demoHp: Map<String, Int> = emptyMap(),
+    /** When demo mode first started this run: the demo's random sample sets out from its spot then (memory only). */
+    val demoSpawnedAtMs: Long? = null,
     /** Profile bestiary: the current account's defeats per species (server record + merged guest history). Null until read. */
     val bestiaryKills: Map<String, Int>? = null,
     val bestiaryFailed: Boolean = false,
@@ -87,7 +89,8 @@ data class MonsterState(
  *   monsters; anyone else is the guest (device draws, unranked). Only the current owner's monsters show.
  * - Spawns are requested from foreground refreshes only; a background refresh only expires monsters.
  *   Switching the gauge creatures off stops both spawning and drawing.
- * - Demo mode never calls the server or saves: the sample 100% gauges get memory-only sample monsters.
+ * - Demo mode never calls the server or saves: the sample 100% gauges and the Codex week gauge (a goblin) get
+ *   memory-only sample monsters, and defeating them counts toward no guest record or score.
  * - The server receives the contract's values only (provider, window label, period, whether it is a session
  *   window, reset bucket, agent key, platform, app version) — never a usage figure or AI service account
  *   information.
@@ -201,11 +204,13 @@ class MonsterStore(
         val owner = activeOwner
         val consent = needsConsent
         val demo = env.isDemo()
+        val now = env.nowMs()
         // Another account's defeats never show, not even for the moment before the bestiary reads again.
         val forgetBestiary = bestiaryOwner != null && bestiaryOwner != account.uid
         if (forgetBestiary) bestiaryOwner = null
         edit {
-            val base = it.copy(owner = owner, needsConsent = consent, isDemo = demo)
+            val spawnedAt = it.demoSpawnedAtMs ?: now.takeIf { demo }
+            val base = it.copy(owner = owner, needsConsent = consent, isDemo = demo, demoSpawnedAtMs = spawnedAt)
             if (forgetBestiary) base.copy(bestiaryKills = null, bestiaryFailed = false) else base
         }
     }
@@ -828,10 +833,21 @@ class MonsterStore(
         const val GUEST = "guest"
 
         private const val DEMO_PREFIX = "demo|"
+        private const val DEMO_RANDOM_PREFIX = "demo|rand|"
 
         /**
-         * The monsters a window draws, from one state snapshot (pure). Demo mode draws one memory-only
-         * sample monster per 100% gauge instead of the ledger.
+         * The demo's random-spawn sample: a goblin (HP 3) on the Codex week gauge (94%). Beside the 100% gauge's
+         * slime it shows a monster that takes several hits and a march that sets out from where it appeared.
+         * The same values as iOS.
+         */
+        private val DEMO_RANDOM_PROVIDER = AgentProvider.CODEX
+        private const val DEMO_RANDOM_LABEL = "Current week"
+        private const val DEMO_RANDOM_MONSTER = "goblin"
+        private const val DEMO_RANDOM_POSITION = 0.35
+
+        /**
+         * The monsters a window draws, from one state snapshot (pure). Demo mode draws memory-only sample
+         * monsters instead of the ledger: one per 100% gauge, and the goblin on the Codex week gauge.
          */
         fun visible(
             state: MonsterState,
@@ -840,7 +856,7 @@ class MonsterStore(
             window: UsageWindow,
             nowMs: Long,
         ): List<MonsterEncounter> {
-            if (state.isDemo) return demoEncounters(state, agentId, window, nowMs)
+            if (state.isDemo) return demoEncounters(state, agentId, provider, window, nowMs)
             val keyLabel = MonsterSessionKey.keyLabel(provider, window.label)
             return state.ledger.encounters.filter { e ->
                 if (e.ownerUid != state.owner || e.state == MonsterEncounter.State.EXPIRED || e.dismissedAtMs != null) {
@@ -860,31 +876,58 @@ class MonsterStore(
             }
         }
 
-        /** The sample monster for a demo key. The bundled catalog has no minimum versions, so no app version is needed. */
-        private fun demoEntry(key: String): MonsterCatalogEntry =
-            MonsterDraw.pick(MonsterConfig.BUNDLED_DEFAULT, appVersion = "0", commonOnly = false, roll = MonsterDraw.unitRoll(key))
+        /**
+         * The sample monster for a demo key: the goblin for the random sample, else a species fixed by the key.
+         * The bundled catalog has no minimum versions, so no app version is needed.
+         */
+        private fun demoEntry(key: String): MonsterCatalogEntry {
+            val config = MonsterConfig.BUNDLED_DEFAULT
+            if (key.startsWith(DEMO_RANDOM_PREFIX)) config.entry(DEMO_RANDOM_MONSTER)?.let { return it }
+            return MonsterDraw.pick(config, appVersion = "0", commonOnly = false, roll = MonsterDraw.unitRoll(key))
+        }
 
         private fun demoEncounters(
             state: MonsterState,
             agentId: UUID,
+            provider: AgentProvider,
             window: UsageWindow,
             nowMs: Long,
         ): List<MonsterEncounter> {
-            if (!MonsterEligibility.isCompleted(window, Instant.ofEpochMilli(nowMs))) return emptyList()
-            val key = "$DEMO_PREFIX$agentId|${window.label}"
+            val now = Instant.ofEpochMilli(nowMs)
+            val shown = mutableListOf<MonsterEncounter>()
+            if (MonsterEligibility.isCompleted(window, now)) {
+                val key = "$DEMO_PREFIX$agentId|${window.label}"
+                shown += demoEncounter(state, key, MonsterEncounter.Source.COMPLETION, 0L, 0.5, agentId, window)
+            }
+            if (provider == DEMO_RANDOM_PROVIDER && window.label == DEMO_RANDOM_LABEL && MonsterEligibility.isTarget(window, now)) {
+                val key = "$DEMO_RANDOM_PREFIX$agentId|${window.label}"
+                // It sets out from its spot when demo mode started.
+                val spawnedAt = state.demoSpawnedAtMs ?: nowMs
+                shown += demoEncounter(state, key, MonsterEncounter.Source.RANDOM, spawnedAt, DEMO_RANDOM_POSITION, agentId, window)
+            }
+            return shown
+        }
+
+        private fun demoEncounter(
+            state: MonsterState,
+            key: String,
+            source: MonsterEncounter.Source,
+            spawnedAtMs: Long,
+            position: Double,
+            agentId: UUID,
+            window: UsageWindow,
+        ): MonsterEncounter {
             val entry = demoEntry(key)
             val hp = (state.demoHp[key] ?: entry.hp).coerceAtLeast(0)
-            return listOf(
-                MonsterEncounter(
-                    key = key, ownerUid = "demo", source = MonsterEncounter.Source.COMPLETION, provider = "",
-                    windowLabel = window.label, resetBucketMs = null, drawAtMs = null, monsterId = entry.id,
-                    maxHp = entry.hp, hp = hp,
-                    state = if (hp > 0) MonsterEncounter.State.ALIVE else MonsterEncounter.State.DEFEATED,
-                    spawnedAtMs = 0L, expiresAtMs = Long.MAX_VALUE,
-                    // The last hit is the defeat, so the sample plays the same death as a real one.
-                    defeatedAtMs = if (hp > 0) null else state.lastHitAtMs[key],
-                    agentId = agentId, displayLabel = window.label, position = 0.5,
-                ),
+            return MonsterEncounter(
+                key = key, ownerUid = "demo", source = source, provider = "",
+                windowLabel = window.label, resetBucketMs = null, drawAtMs = null, monsterId = entry.id,
+                maxHp = entry.hp, hp = hp,
+                state = if (hp > 0) MonsterEncounter.State.ALIVE else MonsterEncounter.State.DEFEATED,
+                spawnedAtMs = spawnedAtMs, expiresAtMs = Long.MAX_VALUE,
+                // The last hit is the defeat, so the sample plays the same death as a real one.
+                defeatedAtMs = if (hp > 0) null else state.lastHitAtMs[key],
+                agentId = agentId, displayLabel = window.label, position = position,
             )
         }
     }

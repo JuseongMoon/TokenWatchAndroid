@@ -3,6 +3,7 @@ package com.ScienceFiction.TokenWatchAndroid.monster
 import com.ScienceFiction.TokenWatchAndroid.analytics.AnalyticsEvent
 import com.ScienceFiction.TokenWatchAndroid.domain.Agent
 import com.ScienceFiction.TokenWatchAndroid.domain.AgentProvider
+import com.ScienceFiction.TokenWatchAndroid.domain.DemoData
 import com.ScienceFiction.TokenWatchAndroid.domain.UsageStyle
 import com.ScienceFiction.TokenWatchAndroid.domain.UsageWindow
 import com.ScienceFiction.TokenWatchAndroid.domain.WindowKind
@@ -184,6 +185,45 @@ class MonsterStoreTest {
         assertEquals(0, ledger.saves)
         assertTrue(functions.calls.isEmpty())
         assertTrue(events.isEmpty())
+    }
+
+    /** The demo's Codex week gauge (under 100%) has a goblin (HP 3). Defeating it saves, records, sends and logs nothing. */
+    @Test fun demoGoblinOnCodexWeekIsCatchableAndCountsNothing() = runBlocking {
+        demo = true
+        val s = store()
+        val codex = DemoData.agents().single { it.provider == AgentProvider.CODEX }
+        val windows = DemoData.snapshots(Instant.ofEpochMilli(clock)).getValue(codex.id).windows
+        val week = windows.single { it.label == "Current week" }
+        val shown = s.encounters(codex.id, AgentProvider.CODEX, week)
+        assertEquals(1, shown.size)
+        assertEquals("goblin", shown[0].monsterId)
+        assertEquals(MonsterEncounter.Source.RANDOM, shown[0].source)
+        assertEquals(3, shown[0].maxHp)
+        // It sets out from its spot when demo mode started.
+        assertEquals(clock, shown[0].spawnedAtMs)
+        assertEquals(0.35, shown[0].position, 0.0)
+        // Not on the demo's other gauges under 100%.
+        assertTrue(s.encounters(codex.id, AgentProvider.CODEX, windows.single { it.label == "Current session" }).isEmpty())
+        assertTrue(s.encounters(agent.id, AgentProvider.CLAUDE, window(label = "Current week", used = 94.0)).isEmpty())
+        val key = shown[0].key
+        assertEquals(MonsterStore.HitResult.Damaged(2), s.hit(key))
+        clock += 200
+        assertEquals(MonsterStore.HitResult.Damaged(1), s.hit(key))
+        clock += 200
+        assertEquals(MonsterStore.HitResult.Defeated, s.hit(key))
+        // Its ghost stays for the rest of the demo.
+        clock += 2 * MonsterStore.GHOST_HOLD_MS
+        assertEquals(MonsterEncounter.State.DEFEATED, s.encounters(codex.id, AgentProvider.CODEX, week).single().state)
+        assertEquals(0, ledger.saves)
+        assertTrue(s.state.value.ledger.guest.kills.isEmpty())
+        assertEquals(0, s.state.value.guestKillCount)
+        assertTrue(functions.calls.isEmpty())
+        assertTrue(events.isEmpty())
+        // Out of demo mode, nothing of it is left to draw.
+        demo = false
+        s.syncAccount()
+        assertTrue(s.encounters(codex.id, AgentProvider.CODEX, week).isEmpty())
+        assertTrue(s.state.value.ledger.encounters.isEmpty())
     }
 
     @Test fun hitsAreDebouncedAndDefeatCountsForGuest() = runBlocking {
