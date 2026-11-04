@@ -188,6 +188,158 @@ class BrowserLoginTest {
 
     // endregion
 
+    // region A5: error callbacks and the listener timeout
+
+    @Test fun anErrorCallbackNeedsTheCallbackPathAndTheExpectedState() {
+        assertEquals(
+            "access_denied",
+            LoopbackCallbackServer.parseCallbackError("/callback?error=access_denied&state=$fallback", fallback),
+        )
+        assertNull(LoopbackCallbackServer.parseCallbackError("/callback?error=access_denied&state=attacker", fallback))
+        assertNull(LoopbackCallbackServer.parseCallbackError("/callback?error=access_denied&state=", fallback))
+        // Servers may omit the state on an error; that still ends this attempt.
+        assertEquals("access_denied", LoopbackCallbackServer.parseCallbackError("/callback?error=access_denied", fallback))
+        assertNull(LoopbackCallbackServer.parseCallbackError("/callback", fallback))
+        assertNull(LoopbackCallbackServer.parseCallbackError("/other?error=access_denied&state=$fallback", fallback))
+        assertNull(LoopbackCallbackServer.parseCallbackError("/callback?error=&state=$fallback", fallback))
+        // A code wins: that request is a success callback, not an error.
+        assertNull(LoopbackCallbackServer.parseCallbackError("/callback?code=c&error=x&state=$fallback", fallback))
+    }
+
+    @Test fun theErrorSessionRedirectRoundTrips() {
+        val location = LoopbackCallbackServer.errorRedirectLocation("access_denied", "s t#x")
+        assertEquals("access_denied" to "s t#x", LoopbackCallbackServer.parseSessionError(location))
+        assertNull(LoopbackCallbackServer.parseSessionCallback(location))
+        assertNull(LoopbackCallbackServer.parseSessionError("tokenwatch://login-complete?code=a&error=x&state=b"))
+        assertNull(LoopbackCallbackServer.parseSessionError("tokenwatch://other?error=x&state=b"))
+    }
+
+    private class Recorder {
+        val codes = java.util.concurrent.CopyOnWriteArrayList<String>()
+        val failures = java.util.concurrent.CopyOnWriteArrayList<LoopbackFailure>()
+        val terminal = CountDownLatch(1)
+    }
+
+    private fun withRecordingServer(
+        state: String,
+        lifetimeMillis: Long = LoopbackCallbackServer.DEFAULT_LIFETIME_MILLIS,
+        block: (port: Int, recorder: Recorder) -> Unit,
+    ) {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        val recorder = Recorder()
+        val server = LoopbackCallbackServer(
+            expectedState = state,
+            parentScope = scope,
+            lifetimeMillis = lifetimeMillis,
+            onFailure = { failure ->
+                recorder.failures += failure
+                recorder.terminal.countDown()
+            },
+        ) { code, _ ->
+            recorder.codes += code
+            recorder.terminal.countDown()
+        }
+        try {
+            block(runBlocking { server.start() }, recorder)
+        } finally {
+            server.stop()
+            scope.cancel()
+        }
+    }
+
+    @Test fun anErrorCallbackRedirectsToTheAppAndEndsTheAttemptOnce() {
+        val state = "error-state"
+        withRecordingServer(state) { port, recorder ->
+            noRedirects.newCall(
+                Request.Builder().url("http://127.0.0.1:$port/callback?error=access_denied&state=$state").build(),
+            ).execute().use {
+                assertEquals(302, it.code)
+                assertEquals(
+                    "access_denied" to state,
+                    it.header("Location")?.let(LoopbackCallbackServer::parseSessionError),
+                )
+            }
+            assertTrue(recorder.terminal.await(2, TimeUnit.SECONDS))
+            // A code arriving afterwards cannot produce a second terminal result.
+            runCatching {
+                noRedirects.newCall(
+                    Request.Builder().url("http://127.0.0.1:$port/callback?code=late&state=$state").build(),
+                ).execute().close()
+            }
+            Thread.sleep(200)
+            assertEquals(listOf<LoopbackFailure>(LoopbackFailure.ProviderError("access_denied")), recorder.failures.toList())
+            assertTrue(recorder.codes.isEmpty())
+        }
+    }
+
+    @Test fun anErrorCallbackWithAnotherStateIsIgnored() {
+        withRecordingServer("right") { port, recorder ->
+            noRedirects.newCall(
+                Request.Builder().url("http://127.0.0.1:$port/callback?error=access_denied&state=wrong").build(),
+            ).execute().use { assertEquals(404, it.code) }
+            assertFalse(recorder.terminal.await(300, TimeUnit.MILLISECONDS))
+            // The genuine callback still completes the attempt.
+            noRedirects.newCall(
+                Request.Builder().url("http://127.0.0.1:$port/callback?code=good&state=right").build(),
+            ).execute().use { assertEquals(302, it.code) }
+            assertTrue(recorder.terminal.await(2, TimeUnit.SECONDS))
+            assertEquals(listOf("good"), recorder.codes.toList())
+            assertTrue(recorder.failures.isEmpty())
+        }
+    }
+
+    @Test fun anErrorCallbackWithoutStateEndsTheAttemptButACodeStillNeedsTheState() {
+        withRecordingServer("needs-state") { port, recorder ->
+            // A code without the state is never accepted.
+            noRedirects.newCall(
+                Request.Builder().url("http://127.0.0.1:$port/callback?code=forged").build(),
+            ).execute().use { assertEquals(404, it.code) }
+            assertFalse(recorder.terminal.await(200, TimeUnit.MILLISECONDS))
+
+            noRedirects.newCall(
+                Request.Builder().url("http://127.0.0.1:$port/callback?error=access_denied").build(),
+            ).execute().use {
+                assertEquals(302, it.code)
+                assertEquals(
+                    "access_denied" to "needs-state",
+                    it.header("Location")?.let(LoopbackCallbackServer::parseSessionError),
+                )
+            }
+            assertTrue(recorder.terminal.await(2, TimeUnit.SECONDS))
+            assertEquals(listOf<LoopbackFailure>(LoopbackFailure.ProviderError("access_denied")), recorder.failures.toList())
+            assertTrue(recorder.codes.isEmpty())
+        }
+    }
+
+    @Test fun theListenerReportsItsTimeoutOnceAndCloses() {
+        withRecordingServer("timeout-state", lifetimeMillis = 150) { port, recorder ->
+            assertTrue(recorder.terminal.await(2, TimeUnit.SECONDS))
+            assertEquals(listOf<LoopbackFailure>(LoopbackFailure.TimedOut), recorder.failures.toList())
+            Thread.sleep(100)
+            assertThrows(IOException::class.java) {
+                noRedirects.newCall(
+                    Request.Builder().url("http://127.0.0.1:$port/callback?code=late&state=timeout-state").build(),
+                ).execute().close()
+            }
+            assertTrue(recorder.codes.isEmpty())
+        }
+    }
+
+    @Test fun aDeliveredCodeCancelsTheTimeout() {
+        val state = "code-then-deadline"
+        withRecordingServer(state, lifetimeMillis = 400) { port, recorder ->
+            noRedirects.newCall(
+                Request.Builder().url("http://127.0.0.1:$port/callback?code=c&state=$state").build(),
+            ).execute().use { assertEquals(302, it.code) }
+            assertTrue(recorder.terminal.await(2, TimeUnit.SECONDS))
+            Thread.sleep(600)
+            assertEquals(listOf("c"), recorder.codes.toList())
+            assertTrue(recorder.failures.isEmpty())
+        }
+    }
+
+    // endregion
+
     // region Provider dispatch
 
     /** The loopback redirect and authorize URL Claude signs in with, verified on devices. */

@@ -84,7 +84,7 @@ class UsageGateway(
             throw cancelled
         } catch (error: Throwable) {
             onFetchOutcome(provider, agentId, error)
-            errorSnapshot(localizedMessage(error, localization()))
+            errorSnapshot(localizedMessage(error, localization(), provider))
         }
     }
 
@@ -112,7 +112,24 @@ class UsageGateway(
     companion object {
         private const val MILLIS_PER_MINUTE = 60_000L
 
-        internal fun localizedMessage(error: Throwable, l10n: L10n): String = when (error) {
+        /**
+         * [provider] only refines the wording for errors whose meaning is provider-specific; the
+         * exception (and therefore the analytics bucket) is unchanged.
+         */
+        internal fun localizedMessage(
+            error: Throwable,
+            l10n: L10n,
+            provider: AgentProvider? = null,
+        ): String = when {
+            // An API key has no refresh token, so its 401 surfaces as NotAuthenticated.
+            provider == AgentProvider.OPENROUTER && error is OAuthException.NotAuthenticated ->
+                l10n.errOpenRouterKeyRejected
+            provider == AgentProvider.OPENROUTER && error is UsageException.Http && error.statusCode == 403 ->
+                l10n.errOpenRouterKeyPermission
+            else -> genericMessage(error, l10n)
+        }
+
+        private fun genericMessage(error: Throwable, l10n: L10n): String = when (error) {
             is UsageException.Unauthorized -> l10n.errAuthExpired
             is UsageException.RateLimited -> l10n.errRateLimited
             is UsageException.Http -> l10n.errHttp(error.statusCode)
@@ -124,6 +141,7 @@ class UsageGateway(
             is OAuthException.ExchangeFailed -> l10n.errTokenExchange(error.detailAfterPrefix())
             is OAuthException.StateMismatch -> l10n.errStateMismatch
             is OAuthException.CodeExpired -> l10n.errTokenExchange(l10n.errCodeExpired)
+            is java.io.IOException -> l10n.errNetwork
             else -> error.localizedMessage?.takeIf(String::isNotBlank)
                 ?: error::class.java.simpleName
         }

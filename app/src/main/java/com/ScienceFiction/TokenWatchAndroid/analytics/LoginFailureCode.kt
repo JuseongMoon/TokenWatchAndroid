@@ -43,6 +43,7 @@ object LoginFailureCode {
         is DeviceFlowException.Expired -> "expired"
         is DeviceFlowException.Denied -> "denied"
         is DeviceFlowException.TimedOut -> "timed_out"
+        is DeviceFlowException.AccountLookupFailed -> error.failureCode
         is DeviceFlowException.Http -> classifyDetail(error.message.orEmpty())
         is UsageException.Unauthorized -> "http_401"
         is UsageException.RateLimited -> "http_429"

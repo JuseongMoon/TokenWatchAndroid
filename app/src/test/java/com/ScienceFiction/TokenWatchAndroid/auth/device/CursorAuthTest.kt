@@ -6,6 +6,7 @@ import com.ScienceFiction.TokenWatchAndroid.network.core.NetworkResponse
 import com.ScienceFiction.TokenWatchAndroid.network.core.NetworkTransport
 import java.time.Instant
 import java.util.Base64
+import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Request
@@ -120,6 +121,52 @@ class CursorAuthTest {
         assertEquals("me@example.com", tokens.accountEmail)
         assertEquals("user_7", tokens.accountId)
         assertEquals(1, sleeps.size)
+    }
+
+    @Test fun networkFailuresWhilePollingNeverEndTheLogin() = runBlocking {
+        val token = jwt("""{"sub":"auth0|user_7","exp":1800000000}""")
+        var polls = 0
+        val transport = NetworkTransport { request ->
+            if (request.url.toString() == CursorAuth.ME_URL) {
+                return@NetworkTransport NetworkResponse(200, emptyMap(), """{"email":"me@example.com"}""".toByteArray())
+            }
+            polls += 1
+            when {
+                polls == 1 -> NetworkResponse(404, emptyMap(), "Not found".toByteArray())
+                polls <= 6 -> throw java.net.UnknownHostException("Unable to resolve host")
+                else -> NetworkResponse(200, emptyMap(), """{"accessToken":"$token","refreshToken":"rt"}""".toByteArray())
+            }
+        }
+        val tokens = CursorAuth(transport) {}.completeLogin(CursorAuth.makeHandshake())
+
+        assertEquals("user_7", tokens.accountId)
+        assertEquals(7, polls)
+    }
+
+    @Test fun aNetworkThatNeverComesBackEndsWhenTheAttemptsRunOut() {
+        val transport = NetworkTransport { throw java.io.IOException("offline") }
+        assertThrows(DeviceFlowException.TimedOut::class.java) {
+            runBlocking { CursorAuth(transport) {}.pollForAccessToken(CursorAuth.makeHandshake()) }
+        }
+    }
+
+    @Test fun theEmailCutOffInTheBackgroundIsReadAgainOnReturn() = runBlocking {
+        val token = jwt("""{"sub":"auth0|user_7","exp":1800000000}""")
+        val signal = com.ScienceFiction.TokenWatchAndroid.auth.ForegroundSignal()
+        signal.onBackground()
+        val transport = NetworkTransport { request ->
+            if (request.url.toString() == CursorAuth.ME_URL) {
+                if (!signal.isForeground) throw java.net.UnknownHostException("Unable to resolve host")
+                return@NetworkTransport NetworkResponse(200, emptyMap(), """{"email":"me@example.com"}""".toByteArray())
+            }
+            NetworkResponse(200, emptyMap(), """{"accessToken":"$token","refreshToken":"rt"}""".toByteArray())
+        }
+        val login = async { CursorAuth(transport) {}.completeLogin(CursorAuth.makeHandshake(), signal) }
+        kotlinx.coroutines.delay(200)
+        assertEquals(false, login.isCompleted)
+        signal.onForeground()
+
+        assertEquals("me@example.com", kotlinx.coroutines.withTimeout(5_000) { login.await() }.accountEmail)
     }
 
     @Test fun aRejectedLoginIsDenied() {

@@ -1,5 +1,6 @@
 package com.ScienceFiction.TokenWatchAndroid.auth.device
 
+import com.ScienceFiction.TokenWatchAndroid.auth.ForegroundSignal
 import com.ScienceFiction.TokenWatchAndroid.auth.Jwt
 import com.ScienceFiction.TokenWatchAndroid.auth.OAuthTokens
 import com.ScienceFiction.TokenWatchAndroid.auth.Pkce
@@ -76,23 +77,37 @@ class CursorAuth(
     }
 
     /** Polls until approved and builds the stored credential; the email comes from `auth/me`. */
-    suspend fun completeLogin(handshake: Handshake): OAuthTokens {
-        val accessToken = pollForAccessToken(handshake)
+    suspend fun completeLogin(handshake: Handshake, signal: ForegroundSignal = ForegroundSignal()): OAuthTokens {
+        val accessToken = pollForAccessToken(handshake, signal)
         val userId = userId(accessToken) ?: throw DeviceFlowException.Http("Cursor token")
         // The email only labels the card and prevents duplicates; its failure does not fail login.
+        // Right after approval the app may still be behind the login page and offline, so a network
+        // failure there waits for the app to return and asks once more.
         val email = try {
             fetchEmail(accessToken, userId)
-        } catch (error: IOException) {
-            null
+        } catch (_: IOException) {
+            if (signal.isForeground) {
+                null
+            } else {
+                signal.awaitForeground()
+                try {
+                    fetchEmail(accessToken, userId)
+                } catch (_: IOException) {
+                    null
+                }
+            }
         }
         return credential(accessToken, userId, email)
     }
 
     /**
      * Waits with backoff while pending (404). Returns the access token once approved; throws on
-     * rejection, a missing route, repeated errors, or when the attempts run out.
+     * rejection, a missing route, repeated server errors, or when the attempts run out. A network
+     * failure is never fatal on its own: while the login page covers the app, Android may cut the
+     * app off the network, so it waits for the next attempt, and [signal] ends a wait early when
+     * the app returns to the front.
      */
-    suspend fun pollForAccessToken(handshake: Handshake): String {
+    suspend fun pollForAccessToken(handshake: Handshake, signal: ForegroundSignal = ForegroundSignal()): String {
         var useGet = false
         var checkedPendingBody = false
         var consecutiveErrors = 0
@@ -102,11 +117,9 @@ class CursorAuth(
 
             val response = try {
                 transport.execute(pollRequest(handshake, useGet))
-            } catch (error: IOException) {
-                // A poll that runs for minutes should not restart the login over one dropped request.
-                consecutiveErrors += 1
-                if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) throw error
-                sleeper.sleep(delayMillis)
+            } catch (_: IOException) {
+                // Not counted: the attempt budget still ends a login that never gets through.
+                signal.pause { sleeper.sleep(delayMillis) }
                 continue
             }
 
@@ -115,7 +128,7 @@ class CursorAuth(
                 PollOutcome.Pending -> {
                     checkedPendingBody = true
                     consecutiveErrors = 0
-                    sleeper.sleep(delayMillis)
+                    signal.pause { sleeper.sleep(delayMillis) }
                 }
                 PollOutcome.SwitchToGet -> useGet = true
                 PollOutcome.Unavailable -> throw DeviceFlowException.Http("Cursor auth/poll unavailable")
@@ -126,7 +139,7 @@ class CursorAuth(
                     if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
                         throw DeviceFlowException.Http("HTTP ${response.statusCode}")
                     }
-                    sleeper.sleep(delayMillis)
+                    signal.pause { sleeper.sleep(delayMillis) }
                 }
             }
         }

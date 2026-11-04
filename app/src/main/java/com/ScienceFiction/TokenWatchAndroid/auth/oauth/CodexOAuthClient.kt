@@ -83,7 +83,7 @@ class CodexOAuthClient(
             val responseBody = response.bodyText()
             val detail = "HTTP ${response.statusCode}: $responseBody"
             if (exchange) throw OAuthException.ExchangeFailed(detail)
-            if (response.statusCode in listOf(400, 401) && "invalid_grant" in responseBody) {
+            if (isPermanentRefreshFailure(response.statusCode, responseBody)) {
                 throw OAuthException.RefreshRevoked()
             }
             throw OAuthException.RefreshFailed(detail)
@@ -110,6 +110,34 @@ class CodexOAuthClient(
         if (exchange) OAuthException.ExchangeFailed(detail) else OAuthException.RefreshFailed(detail)
 
     companion object {
+        /** Codes that are unrecoverable whatever the HTTP status (official Codex CLI classifier). */
+        private val PERMANENT_REFRESH_CODES = setOf(
+            "refresh_token_expired",
+            "refresh_token_reused",
+            "refresh_token_invalidated",
+        )
+
+        /**
+         * Mirrors the official Codex CLI (`codex-rs/login` `classify_refresh_token_failure` and its
+         * caller): a refresh is permanently dead on any 401, on one of [PERMANENT_REFRESH_CODES]
+         * (case-insensitive, any status), or on 400 with `invalid_grant`. Everything else — 429,
+         * 5xx, other 4xx codes, unreadable bodies — is transient and keeps the credential.
+         */
+        internal fun isPermanentRefreshFailure(statusCode: Int, body: String): Boolean {
+            if (statusCode == 401) return true
+            val code = refreshErrorCode(body)?.lowercase() ?: return false
+            if (code in PERMANENT_REFRESH_CODES) return true
+            return statusCode == 400 && code == "invalid_grant"
+        }
+
+        /** Reads `error` (string), `error.code`, or a top-level `code` from a token error body. */
+        internal fun refreshErrorCode(body: String): String? {
+            val json = JsonMap.decode(body) ?: return null
+            return json.string("error")
+                ?: json.map("error")?.string("code")
+                ?: json.string("code")
+        }
+
         const val CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
         const val AUTHORIZE_URL = "https://auth.openai.com/oauth/authorize"
         const val TOKEN_URL = "https://auth.openai.com/oauth/token"

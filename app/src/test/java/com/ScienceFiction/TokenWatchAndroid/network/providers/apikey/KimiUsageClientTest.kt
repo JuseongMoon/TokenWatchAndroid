@@ -131,7 +131,7 @@ class KimiUsageClientTest {
         assertEquals(listOf("api.kimi.com", "api.kimi.ai"), KimiUsageClient.HOSTS)
         assertEquals("https://api.kimi.ai/coding/v1/usages", KimiUsageClient.usagesUrl("api.kimi.ai"))
         assertNotNull(L10n(Lang.KO).apiKeyHint(AgentProvider.KIMI))
-        assertNull(L10n(Lang.EN).apiKeyHint(AgentProvider.OPENROUTER))
+        assertNull(L10n(Lang.EN).apiKeyHint(AgentProvider.DEEPSEEK))
     }
 
     /** Usage goes to the host stored with the key; an unknown stored value falls back to the first. */

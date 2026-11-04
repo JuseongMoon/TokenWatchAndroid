@@ -112,7 +112,7 @@ enum class AgentProvider(
     ),
     OPENROUTER(
         "openrouter", "OpenRouter", "[or]", TerminalColorKey.GREEN, AuthKind.API_KEY,
-        UsageCategory.API_CREDIT, "https://openrouter.ai/settings/keys",
+        UsageCategory.API_CREDIT, "https://openrouter.ai/settings/management-keys",
         "https://status.openrouter.ai", null,
     ),
     DEEPSEEK(

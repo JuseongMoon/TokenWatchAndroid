@@ -7,12 +7,14 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.ScienceFiction.TokenWatchAndroid.analytics.LoginFailureCode
 import com.ScienceFiction.TokenWatchAndroid.analytics.LoginStage
+import com.ScienceFiction.TokenWatchAndroid.auth.ForegroundSignal
 import com.ScienceFiction.TokenWatchAndroid.auth.OAuthTokens
 import com.ScienceFiction.TokenWatchAndroid.auth.Pkce
 import com.ScienceFiction.TokenWatchAndroid.auth.ProviderAuthRegistry
 import com.ScienceFiction.TokenWatchAndroid.auth.device.DeviceFlowException
 import com.ScienceFiction.TokenWatchAndroid.auth.oauth.ClaudeOAuthClient
 import com.ScienceFiction.TokenWatchAndroid.auth.oauth.LoopbackCallbackServer
+import com.ScienceFiction.TokenWatchAndroid.auth.oauth.LoopbackFailure
 import com.ScienceFiction.TokenWatchAndroid.auth.oauth.OAuthCallback
 import com.ScienceFiction.TokenWatchAndroid.auth.oauth.OAuthException
 import com.ScienceFiction.TokenWatchAndroid.auth.oauth.isTransientNetworkError
@@ -91,6 +93,12 @@ internal class AddAgentFlowViewModel : ViewModel() {
 
     private var flowJob: Job? = null
 
+    /**
+     * Front/back state for the sign-in requests that run while a tab covers the app (Android may
+     * cut a background app off the network). Exposed only so tests can drive it.
+     */
+    internal val foregroundSignal = ForegroundSignal()
+
     /** Code kept after an exchange failed before reaching the server; RETRY exchanges it again. */
     private var pendingExchange: PendingExchange? = null
 
@@ -110,6 +118,9 @@ internal class AddAgentFlowViewModel : ViewModel() {
 
     /** A code for the current attempt was accepted; later deliveries are ignored. */
     private var browserFinished = true
+
+    /** Lifetime of each attempt's loopback listener; shortened only by tests. */
+    internal var loopbackLifetimeMillis: Long = LoopbackCallbackServer.DEFAULT_LIFETIME_MILLIS
 
     fun selectProvider(
         provider: AgentProvider,
@@ -147,7 +158,14 @@ internal class AddAgentFlowViewModel : ViewModel() {
         browserFinished = false
         val client = providerAuth.browserClient(current.provider)
 
-        val server = LoopbackCallbackServer(current.pkce.state, viewModelScope) { code, state ->
+        val server = LoopbackCallbackServer(
+            expectedState = current.pkce.state,
+            parentScope = viewModelScope,
+            lifetimeMillis = loopbackLifetimeMillis,
+            onFailure = { failure ->
+                viewModelScope.launch { receiveLoopbackFailure(attempt, failure, loc) }
+            },
+        ) { code, state ->
             viewModelScope.launch { receiveLoopbackCode(attempt, code, state, providerAuth, loc, onAddAgent) }
         }
         val port = try {
@@ -167,6 +185,7 @@ internal class AddAgentFlowViewModel : ViewModel() {
         val redirect = client.loopbackRedirectUri(port)
         browserRedirect = redirect
         loginWindowOpen = true
+        foregroundSignal.onBackground()
         phase = latest.copy(isPresenting = true, wasCancelled = false, inlineError = null)
         return client.authorizeUrl(current.pkce, redirect)
     }
@@ -193,7 +212,12 @@ internal class AddAgentFlowViewModel : ViewModel() {
         if (browserFinished || !current.isPresenting) return
         val callback = resultUri?.let(LoopbackCallbackServer::parseSessionCallback)
         val redirect = browserRedirect
+        // The window may report the provider's error redirect before the listener's delivery does.
+        val sessionError = resultUri?.let(LoopbackCallbackServer::parseSessionError)
+            ?.takeIf { (_, state) -> state == current.pkce.state }
         when {
+            callback == null && sessionError != null ->
+                finishBrowserWithFailure(LoopbackFailure.ProviderError(sessionError.first), current, loc)
             callback != null && redirect != null -> {
                 browserFinished = true
                 stopLoopback()
@@ -254,6 +278,39 @@ internal class AddAgentFlowViewModel : ViewModel() {
         exchangeBrowser(current.provider, current.pkce, OAuthCallback(code, state), redirect, providerAuth, loc, onAddAgent)
     }
 
+    private fun receiveLoopbackFailure(attempt: Int, failure: LoopbackFailure, loc: L10n) {
+        val current = phase as? AddAgentPhase.BrowserLogin ?: return
+        if (attempt != browserAttempt || browserFinished) return
+        finishBrowserWithFailure(failure, current, loc)
+    }
+
+    /**
+     * Ends the attempt once, for a provider error callback or the listener's timeout. A timeout
+     * after the user already closed the window only retires the listener: the screen is already
+     * showing the closed-window hint and a new attempt starts a new listener.
+     */
+    private fun finishBrowserWithFailure(
+        failure: LoopbackFailure,
+        current: AddAgentPhase.BrowserLogin,
+        loc: L10n,
+    ) {
+        // The listener delivers only after its error redirect was written, and nothing more is
+        // exchanged afterwards, so the attempt (and its listener) can end right away.
+        stopBrowserAttempt()
+        phase = when (failure) {
+            LoopbackFailure.TimedOut -> if (current.isPresenting) {
+                AddAgentPhase.Failed(loc.pollingLoginTimedOut, LoginStage.BROWSER_WAIT, "timed_out")
+            } else {
+                current
+            }
+            is LoopbackFailure.ProviderError -> if (failure.error == "access_denied") {
+                AddAgentPhase.Failed(loc.deviceFlowDenied, LoginStage.BROWSER_WAIT, "denied")
+            } else {
+                AddAgentPhase.Failed(loc.browserProviderError, LoginStage.BROWSER_WAIT, LoginFailureCode.OTHER)
+            }
+        }
+    }
+
     private fun exchangeBrowser(
         provider: AgentProvider,
         pkce: Pkce,
@@ -271,8 +328,19 @@ internal class AddAgentFlowViewModel : ViewModel() {
         }
         phase = AddAgentPhase.Authenticating
         flowJob = viewModelScope.launch {
-            val tokens = try {
+            suspend fun exchangeOnce() =
                 providerAuth.browserClient(provider).exchange(callback.code, callback.state, pkce, redirect)
+            val tokens = try {
+                try {
+                    exchangeOnce()
+                } catch (error: IOException) {
+                    // The callback usually lands while the sign-in window still covers the app,
+                    // which may be offline until it returns. Such a request never reached the
+                    // server, so the code is still good: exchange it once the app is in front.
+                    if (foregroundSignal.isForeground) throw error
+                    foregroundSignal.awaitForeground()
+                    exchangeOnce()
+                }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Throwable) {
@@ -396,7 +464,7 @@ internal class AddAgentFlowViewModel : ViewModel() {
     ) {
         flowJob = viewModelScope.launch {
             val tokens = try {
-                val login = providerAuth.startPollingLogin(provider)
+                val login = providerAuth.startPollingLogin(provider, foregroundSignal)
                 phase = AddAgentPhase.DeviceFlow(
                     provider = provider,
                     login = PollingLoginInfo(login.userCode, login.verificationUrl),
@@ -427,11 +495,21 @@ internal class AddAgentFlowViewModel : ViewModel() {
 
     fun markLoginWindowOpened() {
         loginWindowOpen = true
+        foregroundSignal.onBackground()
     }
 
-    /** The app is in front again, so no tab covers it any more. */
+    /**
+     * The app is in front again, so no tab covers it any more. A waiting poll asks right away, and a
+     * request that failed offline in the background is retried.
+     */
     fun onAppResumed() {
         loginWindowOpen = false
+        foregroundSignal.onForeground()
+    }
+
+    /** The app went to the background (another app, the home screen, or a sign-in tab). */
+    fun onAppStopped() {
+        foregroundSignal.onBackground()
     }
 
     fun fail(message: String) {
@@ -515,7 +593,10 @@ internal fun authErrorMessage(error: Throwable, loc: L10n): String = when (error
     is DeviceFlowException.Expired -> loc.deviceFlowExpired
     is DeviceFlowException.Denied -> loc.deviceFlowDenied
     is DeviceFlowException.TimedOut -> loc.pollingLoginTimedOut
+    is DeviceFlowException.AccountLookupFailed -> loc.copilotAccountLookupFailed
     is KimiKeyException -> loc.errInvalidApiKey
     is UsageException -> UsageGateway.localizedMessage(error, loc)
+    // Never the raw exception text ("Unable to resolve host …").
+    is IOException -> loc.errNetwork
     else -> error.localizedMessage?.takeIf(String::isNotBlank) ?: error::class.java.simpleName
 }

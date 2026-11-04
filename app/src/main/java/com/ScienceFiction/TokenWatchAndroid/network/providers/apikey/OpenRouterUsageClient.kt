@@ -5,6 +5,11 @@ import com.ScienceFiction.TokenWatchAndroid.domain.UsageWindow
 import com.ScienceFiction.TokenWatchAndroid.network.core.NetworkTransport
 import java.util.Locale
 
+/**
+ * Account-wide credit balance from `GET /api/v1/credits`, which OpenRouter serves only to a
+ * management key. A regular key's own spend/limit (`/api/v1/key`) is a different quantity and is
+ * deliberately not substituted for the account balance.
+ */
 class OpenRouterUsageClient(
     transport: NetworkTransport,
     endpoint: String = DEFAULT_ENDPOINT,
@@ -14,8 +19,10 @@ class OpenRouterUsageClient(
 
     override fun mapSuccessfulBody(body: String): List<UsageWindow> {
         val response = checkNotNull(apiKeyProviderMoshi.adapter(Response::class.java).fromJson(body))
-        val total = response.data?.total_credits ?: 0.0
-        val remaining = (total - (response.data?.total_usage ?: 0.0)).coerceAtLeast(0.0)
+        // A body without `data` is not a balance; showing it as 0 credits would look like success.
+        val data = checkNotNull(response.data) { "Missing credits data" }
+        val total = data.total_credits ?: 0.0
+        val remaining = (total - (data.total_usage ?: 0.0)).coerceAtLeast(0.0)
         val value = String.format(Locale.US, "%.2f credits left", remaining)
         return listOf(
             balanceWindow(

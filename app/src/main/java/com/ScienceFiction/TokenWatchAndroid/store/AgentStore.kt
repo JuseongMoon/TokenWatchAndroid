@@ -107,6 +107,11 @@ data class AgentStoreDependencies(
     val fireResetEvents: suspend (Agent, List<ResetEvent>) -> Unit = { _, _ -> },
     val applyResetSchedule: suspend (List<ResetScheduleTarget>, List<Agent>) -> Unit = { _, _ -> },
     val removeResetNotifications: suspend (UUID) -> Unit = {},
+    /**
+     * Looks up a provider's stable account id with a stored credential, used only to identify
+     * legacy cards saved before the id was recorded (Copilot). Null means "cannot tell".
+     */
+    val resolveAccountId: suspend (AgentProvider, OAuthTokens) -> String? = { _, _ -> null },
 )
 
 /**
@@ -133,6 +138,7 @@ class AgentStore(
         resetNotificationManager: ResetNotificationManager,
         now: () -> Instant = Instant::now,
         sleeper: StoreSleeper = StoreSleeper.DEFAULT,
+        resolveAccountId: suspend (AgentProvider, OAuthTokens) -> String? = { _, _ -> null },
     ) : this(
         parentScope = scope,
         dependencies = AgentStoreDependencies(
@@ -157,6 +163,7 @@ class AgentStore(
                 resetNotificationManager.applyScheduled(targets, agents)
             },
             removeResetNotifications = { id -> resetNotificationManager.removePending(id) },
+            resolveAccountId = resolveAccountId,
         ),
         now = now,
         sleeper = sleeper,
@@ -189,6 +196,15 @@ class AgentStore(
     val loadingIDs: StateFlow<Set<UUID>> = _loadingIDs.asStateFlow()
     private val inFlightRefreshIDs = mutableSetOf<UUID>()
     private val lastFetchAt = mutableMapOf<UUID, Instant>()
+
+    /**
+     * Guarded by [loadingMutex]. Advanced when a sign-in replaces an account's credential, so a
+     * usage request that started with the previous credential is recognised as stale.
+     */
+    private val credentialEpochs = mutableMapOf<UUID, Long>()
+
+    /** Guarded by [loadingMutex]. Accounts whose replaced credential still needs its own fetch. */
+    private val pendingCredentialRefreshIDs = mutableSetOf<UUID>()
 
     private val _serviceStatus = MutableStateFlow<Map<AgentProvider, ServiceHealth>>(emptyMap())
     val serviceStatus: StateFlow<Map<AgentProvider, ServiceHealth>> = _serviceStatus.asStateFlow()
@@ -290,13 +306,17 @@ class AgentStore(
     suspend fun addAgent(provider: AgentProvider, tokens: OAuthTokens): AddAgentResult {
         check(!_isDemo.value) { "Accounts cannot be added in demo mode" }
         awaitAgentsReady()
-        val existing = tokens.accountEmail?.let { email ->
-            _agents.value.firstOrNull { it.provider == provider && it.accountLabel == email }
-        }
+        val existing = findSameAccount(provider, tokens)
         if (existing != null) {
-            withContext(NonCancellable) { dependencies.saveTokens(existing.id, tokens) }
+            withContext(NonCancellable) {
+                dependencies.saveTokens(existing.id, tokens)
+                // After the save: any request that began earlier is now stale and is re-run.
+                markCredentialsReplaced(existing.id)
+            }
             currentCoroutineContext().ensureActive()
             // Manual, so the new token is used right away instead of waiting out the fetch spacing.
+            // If an older request is still in flight this call is skipped, and that request's
+            // completion discards its stale result and starts the follow-up fetch instead.
             refresh(existing, manual = true)
             return AddAgentResult(existing, replacedExisting = true)
         }
@@ -326,6 +346,49 @@ class AgentStore(
         currentCoroutineContext().ensureActive()
         refresh(agent)
         return AddAgentResult(agent, replacedExisting = false)
+    }
+
+    /**
+     * The card a sign-in re-authenticates, or null for a new account. Most providers are matched
+     * by the signed-in email. Copilot returns no email, so it is matched by the GitHub user id in
+     * [OAuthTokens.accountId]; different GitHub accounts therefore stay separate cards.
+     */
+    private suspend fun findSameAccount(provider: AgentProvider, tokens: OAuthTokens): Agent? {
+        if (provider == AgentProvider.COPILOT) return findCopilotAccount(tokens)
+        val email = tokens.accountEmail ?: return null
+        return _agents.value.firstOrNull { it.provider == provider && it.accountLabel == email }
+    }
+
+    /**
+     * Cards that already store an id are compared directly. A legacy card (saved without an id)
+     * is matched only when its own stored token still proves the same id; a card whose token no
+     * longer works is never merged on a guess, and the sign-in becomes a new card instead.
+     */
+    private suspend fun findCopilotAccount(tokens: OAuthTokens): Agent? {
+        val accountId = tokens.accountId ?: return null
+        val candidates = _agents.value.filter { it.provider == AgentProvider.COPILOT }
+            .mapNotNull { agent -> storedTokensOrNull(agent.id)?.let { agent to it } }
+        candidates.firstOrNull { (_, stored) -> stored.accountId == accountId }?.let { return it.first }
+        for ((agent, stored) in candidates) {
+            if (stored.accountId != null) continue
+            val resolved = try {
+                dependencies.resolveAccountId(AgentProvider.COPILOT, stored)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                null
+            }
+            if (resolved == accountId) return agent
+        }
+        return null
+    }
+
+    private suspend fun storedTokensOrNull(agentId: UUID): OAuthTokens? = try {
+        dependencies.loadTokens(agentId)
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (_: Exception) {
+        null
     }
 
     suspend fun remove(agent: Agent) {
@@ -450,7 +513,8 @@ class AgentStore(
             _snapshots.value = DemoData.advanced(_snapshots.value, now())
             return
         }
-        if (!beginRefresh(agent.id, manual = manual)) return
+        val epoch = beginRefresh(agent.id, manual = manual) ?: return
+        var rerunWithNewCredential = false
         try {
             val fetched = if (manual) {
                 dependencies.fetchManualSnapshot?.invoke(agent.provider, agent.id)
@@ -458,7 +522,9 @@ class AgentStore(
             } else {
                 dependencies.fetchSnapshot(agent.provider, agent.id)
             }
-            val incoming = applyIncomingSnapshot(agent.id, fetched)
+            // Fetched with a credential a sign-in has since replaced: never publish it.
+            val incoming = applyIncomingSnapshot(agent.id, fetched) { credentialEpochIs(agent.id, epoch) }
+                ?: return
 
             if (incoming.planLabel != null) {
                 enrichAccountLabel(agent.id, incoming.planLabel)
@@ -474,9 +540,30 @@ class AgentStore(
             loadingMutex.withLock { lastFetchAt.remove(agent.id) }
             throw cancelled
         } finally {
-            withContext(NonCancellable) { finishRefresh(agent.id) }
+            withContext(NonCancellable) { rerunWithNewCredential = finishRefresh(agent.id) }
+            if (rerunWithNewCredential) launchCredentialFollowUp(agent.id)
         }
     }
+
+    /**
+     * Starts the fetch a replaced credential is owed, in the store's own scope so it survives the
+     * cancellation of whichever caller owned the stale request.
+     */
+    private fun launchCredentialFollowUp(agentId: UUID) {
+        if (closed.get()) return
+        scope.launch {
+            val agent = _agents.value.firstOrNull { it.id == agentId } ?: return@launch
+            refresh(agent, manual = true)
+        }
+    }
+
+    private suspend fun markCredentialsReplaced(agentId: UUID) = loadingMutex.withLock {
+        credentialEpochs[agentId] = (credentialEpochs[agentId] ?: 0L) + 1
+        if (agentId in inFlightRefreshIDs) pendingCredentialRefreshIDs += agentId
+    }
+
+    private suspend fun credentialEpochIs(agentId: UUID, epoch: Long): Boolean =
+        loadingMutex.withLock { (credentialEpochs[agentId] ?: 0L) == epoch }
 
     /**
      * Promotes raw prepaid balances and applies the resulting snapshot while holding the same
@@ -486,13 +573,16 @@ class AgentStore(
     private suspend fun applyIncomingSnapshot(
         agentID: UUID,
         incoming: AgentSnapshot,
-    ): AgentSnapshot {
+        isCurrent: suspend () -> Boolean = { true },
+    ): AgentSnapshot? {
         creditPeaksLoaded.await()
         return withContext(NonCancellable) {
             creditPeakMutex.withLock {
                 // A provider request can finish after its account was removed. Never let that
                 // late response recreate an orphan snapshot or persisted peak.
                 if (_agents.value.none { agent -> agent.id == agentID }) return@withLock incoming
+                // Checked under the publishing lock; a sign-in after this point re-runs the fetch.
+                if (!isCurrent()) return@withLock null
 
                 val promotion = promoteCreditWindows(incoming.windows, agentID, creditPeaks)
                 commitCreditPeaksIfChanged(promotion.peaks)
@@ -727,8 +817,8 @@ class AgentStore(
      * deliberately retained after both success and failure, and an exact 20-second boundary is
      * allowed.
      */
-    private suspend fun beginRefresh(agentId: UUID, manual: Boolean): Boolean = loadingMutex.withLock {
-        if (agentId in inFlightRefreshIDs) return@withLock false
+    private suspend fun beginRefresh(agentId: UUID, manual: Boolean): Long? = loadingMutex.withLock {
+        if (agentId in inFlightRefreshIDs) return@withLock null
 
         val startedAt = now()
         val previousStart = lastFetchAt[agentId]
@@ -736,18 +826,20 @@ class AgentStore(
             !manual && previousStart != null &&
             Duration.between(previousStart, startedAt) < USAGE_MIN_FETCH_SPACING
         ) {
-            return@withLock false
+            return@withLock null
         }
 
         lastFetchAt[agentId] = startedAt
         inFlightRefreshIDs += agentId
         _loadingIDs.value = inFlightRefreshIDs.toSet()
-        true
+        credentialEpochs[agentId] ?: 0L
     }
 
-    private suspend fun finishRefresh(agentId: UUID) = loadingMutex.withLock {
+    /** Releases the gate; true when a sign-in arrived meanwhile and is owed a fresh fetch. */
+    private suspend fun finishRefresh(agentId: UUID): Boolean = loadingMutex.withLock {
         inFlightRefreshIDs -= agentId
         _loadingIDs.value = inFlightRefreshIDs.toSet()
+        pendingCredentialRefreshIDs.remove(agentId)
     }
 
     /**

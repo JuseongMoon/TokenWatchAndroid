@@ -156,6 +156,122 @@ class UsageGatewayTest {
         assertTrue(snapshot.windows.isEmpty())
     }
 
+    // region A6: OpenRouter key kind and status meaning
+
+    private fun openRouter(status: Int, body: String) = com.ScienceFiction.TokenWatchAndroid.network.providers.apikey
+        .OpenRouterUsageClient(
+            NetworkTransport {
+                com.ScienceFiction.TokenWatchAndroid.network.core.NetworkResponse(status, emptyMap(), body.toByteArray())
+            },
+        )
+
+    private fun openRouterSnapshot(
+        status: Int,
+        body: String,
+        provider: AgentProvider = AgentProvider.OPENROUTER,
+        outcomes: MutableList<Throwable?> = mutableListOf(),
+    ) = runBlocking {
+        val id = UUID.randomUUID()
+        gateway(
+            openRouter(status, body),
+            storeWithApiKey(id),
+            RateLimitGate(now = { now }),
+            onFetchOutcome = { _, _, error -> outcomes += error },
+        ).fetchSnapshot(provider, id)
+    }
+
+    @Test
+    fun openRouterAsksForAManagementKeyWhereTheKeyIsEntered() {
+        for (lang in Lang.entries) {
+            assertTrue(L10n(lang).apiKeyHint(AgentProvider.OPENROUTER)!!.contains("Management Key"))
+        }
+        assertEquals("https://openrouter.ai/settings/management-keys", AgentProvider.OPENROUTER.apiKeyUrl)
+    }
+
+    @Test
+    fun openRouterManagementKeyCreditsAreTheAccountBalance() {
+        val snapshot = openRouterSnapshot(200, """{"data":{"total_credits":10.5,"total_usage":3.0}}""")
+
+        assertNull(snapshot.error)
+        assertEquals(7.5, snapshot.windows.single().balanceRemaining!!, 0.0)
+        assertEquals(10.5, snapshot.windows.single().balanceTotal!!, 0.0)
+    }
+
+    @Test
+    fun openRouter403ExplainsTheManagementKeyInsteadOfShowingABalance() {
+        val outcomes = mutableListOf<Throwable?>()
+        val snapshot = openRouterSnapshot(
+            403,
+            """{"error":{"code":403,"message":"Only management keys can perform this operation"}}""",
+            outcomes = outcomes,
+        )
+
+        assertEquals(l10n.errOpenRouterKeyPermission, snapshot.error)
+        assertTrue(snapshot.windows.isEmpty())
+        // The analytics input is unchanged: still an HTTP 403, so its bucket stays HTTP_4XX.
+        assertEquals(403, (outcomes.single() as UsageException.Http).statusCode)
+    }
+
+    @Test
+    fun openRouter401SaysTheKeyWasRejected() {
+        val snapshot = openRouterSnapshot(401, """{"error":{"code":401,"message":"API key expired"}}""")
+
+        assertEquals(l10n.errOpenRouterKeyRejected, snapshot.error)
+        assertTrue(snapshot.windows.isEmpty())
+    }
+
+    @Test
+    fun openRouterServerFailureAndRateLimitKeepTheirGenericMeaning() {
+        assertEquals(l10n.errHttp(500), openRouterSnapshot(500, "upstream").error)
+        assertEquals(l10n.errHttp(503), openRouterSnapshot(503, "").error)
+        assertEquals(l10n.errRateLimitedRetry(5), openRouterSnapshot(429, "{}").error)
+    }
+
+    @Test
+    fun aBodyWithoutCreditsIsNotShownAsZeroCredits() {
+        val snapshot = openRouterSnapshot(200, "{}")
+
+        assertTrue(snapshot.error!!.isNotEmpty())
+        assertTrue(snapshot.windows.isEmpty())
+    }
+
+    @Test
+    fun the403WordingIsOpenRouterSpecific() {
+        // Same response for another API-key provider keeps the generic HTTP message.
+        assertEquals(l10n.errHttp(403), openRouterSnapshot(403, "{}", provider = AgentProvider.DEEPSEEK).error)
+    }
+
+    // endregion
+
+    @Test
+    fun copilotAccountWithoutQuotaShowsNoUsageInsteadOfAnEmptyGauge() = runBlocking {
+        val id = UUID.randomUUID()
+        val client = com.ScienceFiction.TokenWatchAndroid.network.providers.subscription.CopilotUsageClient(
+            NetworkTransport {
+                com.ScienceFiction.TokenWatchAndroid.network.core.NetworkResponse(
+                    200,
+                    emptyMap(),
+                    """{"copilot_plan":"individual"}""".toByteArray(),
+                )
+            },
+        )
+        val snapshot = gateway(client, storeWithApiKey(id), RateLimitGate(now = { now }))
+            .fetchSnapshot(AgentProvider.COPILOT, id)
+
+        assertEquals(l10n.errNoWindows, snapshot.error)
+        assertTrue(snapshot.windows.isEmpty())
+    }
+
+    @Test
+    fun aNetworkFailureIsShownAsANetworkMessageNotItsRawText() = runBlocking {
+        val id = UUID.randomUUID()
+        val client = ProviderUsageClient { throw java.net.UnknownHostException("Unable to resolve host \"api.github.com\"") }
+        val snapshot = gateway(client, storeWithApiKey(id), RateLimitGate(now = { now }))
+            .fetchSnapshot(AgentProvider.COPILOT, id)
+
+        assertEquals(l10n.errNetwork, snapshot.error)
+    }
+
     @Test
     fun defaultRegistryMapsEveryProviderToItsConcreteClient() {
         val transport = NetworkTransport { error("No network expected") }

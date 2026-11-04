@@ -46,6 +46,13 @@ class ProviderTokenRefresher(
  * Serializes credential access and coalesces refreshes so concurrent usage requests cannot rotate
  * the same refresh token twice. A refresh runs in an application-owned scope: cancelling a screen
  * or background worker must not abandon a newly rotated token before encrypted persistence.
+ *
+ * Each agent also has a credential generation that a sign-in ([save]) or [delete] advances. A
+ * refresh records the generation it started from and may persist its rotated token, or clear a
+ * revoked refresh token, only while that generation is still current; the comparison and the
+ * write share one critical section. A superseded refresh hands its caller the current credential
+ * instead of the stale one, so a late response can never overwrite or invalidate a newer sign-in.
+ * Plan-only updates ([updatePlan]) keep the generation: they do not replace the credential.
  */
 class TokenStore(
     private val vault: CredentialVault,
@@ -56,8 +63,19 @@ class TokenStore(
     private val refreshScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val refreshTasks = mutableMapOf<UUID, Deferred<OAuthTokens>>()
 
+    /** Guarded by [mutex]. Missing means generation 0. */
+    private val generations = mutableMapOf<UUID, Long>()
+
+    /**
+     * Stores a newly signed-in credential and starts a new generation. A refresh still running for
+     * the previous credential is detached rather than cancelled: it finishes, but cannot persist,
+     * and later callers start a fresh refresh against the new credential.
+     */
     suspend fun save(agentId: UUID, tokens: OAuthTokens) = exclusive {
         saveToVault(agentId, tokens)
+        advanceGeneration(agentId)
+        refreshTasks.remove(agentId)
+        Unit
     }
 
     suspend fun tokens(agentId: UUID): OAuthTokens? = exclusive {
@@ -65,9 +83,13 @@ class TokenStore(
     }
 
     suspend fun delete(agentId: UUID) {
-        val task = mutex.withLock { refreshTasks.remove(agentId) }
+        // A late refresh response sees the advanced generation and cannot recreate the credential.
+        val task = exclusive {
+            advanceGeneration(agentId)
+            deleteFromVault(agentId)
+            refreshTasks.remove(agentId)
+        }
         task?.cancel()
-        exclusive { deleteFromVault(agentId) }
     }
 
     /** Updates only the cached account plan (live Codex lookup, or a plan in the usage response). */
@@ -109,37 +131,57 @@ class TokenStore(
     }
 
     private suspend fun refreshAndPersist(agentId: UUID, provider: AgentProvider): OAuthTokens {
-        val current = exclusive { loadFromVault(agentId) }
+        val (current, generation) = exclusive { loadFromVault(agentId) to generationOf(agentId) }
         if (current?.refreshToken == null) throw OAuthException.NotAuthenticated()
-        return try {
-            refresher.refresh(provider, current).also { persistRotated(agentId, it) }
+        val rotated = try {
+            refresher.refresh(provider, current)
         } catch (revoked: OAuthException.RefreshRevoked) {
-            exclusive { loadFromVault(agentId) }
-                ?.takeIf { it.refreshToken != null }
-                ?.let {
-                    persistRotated(agentId, it.copy(refreshToken = null))
-                }
+            val superseded = exclusive {
+                if (generationOf(agentId) != generation) return@exclusive true
+                // Clear only the refresh token that was actually rejected; anything else in the
+                // vault (an unrelated write) is left untouched.
+                loadFromVault(agentId)
+                    ?.takeIf { it.refreshToken == current.refreshToken }
+                    ?.let { saveWithRetry(agentId, it.copy(refreshToken = null)) }
+                false
+            }
+            if (superseded) return currentCredential(agentId)
             throw revoked
         }
+        val persisted = exclusive {
+            if (generationOf(agentId) != generation) return@exclusive false
+            saveWithRetry(agentId, rotated)
+            true
+        }
+        return if (persisted) rotated else currentCredential(agentId)
     }
 
-    private suspend fun persistRotated(agentId: UUID, tokens: OAuthTokens) {
-        exclusive {
+    /** The credential of the generation that superseded a refresh, e.g. a sign-in made meanwhile. */
+    private suspend fun currentCredential(agentId: UUID): OAuthTokens =
+        exclusive { loadFromVault(agentId) } ?: throw OAuthException.NotAuthenticated()
+
+    /** Must run inside [exclusive] so the generation check and the write cannot be separated. */
+    private suspend fun saveWithRetry(agentId: UUID, tokens: OAuthTokens) {
+        try {
+            saveToVault(agentId, tokens)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            // Losing a rotated token is unrecoverable, so retry the encrypted write once.
             try {
                 saveToVault(agentId, tokens)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
-                // Losing a rotated token is unrecoverable, so retry the encrypted write once.
-                try {
-                    saveToVault(agentId, tokens)
-                } catch (cancelled: CancellationException) {
-                    throw cancelled
-                } catch (_: Exception) {
-                    // The current in-memory request may still succeed; a later call will require login.
-                }
+                // The current in-memory request may still succeed; a later call will require login.
             }
         }
+    }
+
+    private fun generationOf(agentId: UUID): Long = generations[agentId] ?: 0L
+
+    private fun advanceGeneration(agentId: UUID) {
+        generations[agentId] = generationOf(agentId) + 1
     }
 
     private suspend fun loadFromVault(agentId: UUID): OAuthTokens? =

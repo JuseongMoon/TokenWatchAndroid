@@ -89,19 +89,20 @@ class ProviderAuthRegistry(
     }
 
     /** Starts a polling login (`OAUTH_DEVICE_FLOW`): the approval page and its poller. */
-    suspend fun startPollingLogin(provider: AgentProvider): PollingLogin {
+    /** [signal] tells the poller when the app returns to the front (see [ForegroundSignal]). */
+    suspend fun startPollingLogin(provider: AgentProvider, signal: ForegroundSignal = ForegroundSignal()): PollingLogin {
         require(provider.authKind == AuthKind.OAUTH_DEVICE_FLOW) {
             "Polling login is unavailable for ${provider.wireId}"
         }
         return when (provider) {
             AgentProvider.COPILOT -> {
                 val device = copilotDeviceFlow.requestDeviceCode()
-                PollingLogin(device.userCode, device.verificationUri) { copilotDeviceFlow.pollForToken(device) }
+                PollingLogin(device.userCode, device.verificationUri) { copilotDeviceFlow.pollForToken(device, signal) }
             }
             AgentProvider.CURSOR -> {
                 val handshake = CursorAuth.makeHandshake()
                 PollingLogin(userCode = null, verificationUrl = handshake.loginUrl) {
-                    cursorAuth.completeLogin(handshake)
+                    cursorAuth.completeLogin(handshake, signal)
                 }
             }
             AgentProvider.CLAUDE, AgentProvider.CODEX, AgentProvider.GROK, AgentProvider.KIMI,

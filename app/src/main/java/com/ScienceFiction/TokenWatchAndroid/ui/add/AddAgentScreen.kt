@@ -105,7 +105,11 @@ internal fun AddAgentScreen(
 
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) flowState.onAppResumed()
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> flowState.onAppResumed()
+                Lifecycle.Event.ON_STOP -> flowState.onAppStopped()
+                else -> Unit
+            }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }

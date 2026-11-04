@@ -275,6 +275,22 @@ data class L10n(val lang: Lang) {
     fun errTokenExchange(message: String) = choose("토큰 교환 실패: $message", "Token exchange failed: $message")
     fun errTokenRefresh(message: String) = choose("토큰 갱신 실패: $message", "Token refresh failed: $message")
     val errNotAuthenticated get() = choose("로그인이 필요합니다.", "Login required.")
+    val errNetwork get() = choose(
+        "네트워크에 연결할 수 없습니다. 인터넷 연결을 확인한 뒤 다시 시도해 주세요.",
+        "Couldn't reach the network. Check your internet connection and try again.",
+    )
+
+    /** OpenRouter 401: the key is wrong, expired, or deleted. */
+    val errOpenRouterKeyRejected get() = choose(
+        "OpenRouter가 키를 거부했습니다(HTTP 401). 키가 만료되거나 삭제되지 않았는지 확인하고 관리 키를 다시 등록해 주세요.",
+        "OpenRouter rejected the key (HTTP 401). Check that it has not expired or been deleted, then add the management key again.",
+    )
+
+    /** OpenRouter 403: authenticated, but this key may not read the account's credits. */
+    val errOpenRouterKeyPermission get() = choose(
+        "이 키로는 계정 크레딧 잔액을 조회할 수 없습니다(HTTP 403). 일반 API 키가 아닌 관리 키가 필요하며, 워크스페이스 전용 관리 키는 계정 단위 조회가 거부될 수 있습니다.",
+        "This key cannot read the account's credit balance (HTTP 403). A management key is required, not a regular API key, and a workspace-scoped management key may be refused for account-level lookups.",
+    )
     fun errParse(message: String) = choose("응답 파싱 실패: $message", "Failed to parse response: $message")
     val errInvalidApiKey get() = choose(
         "API 키가 올바르지 않습니다. 키를 다시 확인해 주세요.",
@@ -287,8 +303,13 @@ data class L10n(val lang: Lang) {
             "Kimi Code 콘솔에서 이 앱 전용 키를 새로 만들어 붙여넣으세요. 키로 쿼터를 사용할 수도 있습니다.",
             "Create a new key just for this app in the Kimi Code console. A key can also spend your quota.",
         )
+        // GET /api/v1/credits (the account-wide balance) accepts only a management key.
+        AgentProvider.OPENROUTER -> choose(
+            "계정 전체 크레딧 잔액은 관리 키(Management key)로만 조회됩니다. OpenRouter 설정 → Management Keys에서 만든 키를 붙여넣으세요. 일반 API 키로는 잔액을 볼 수 없습니다.",
+            "The account-wide credit balance can only be read with a management key. Paste a key created under OpenRouter Settings → Management Keys; a regular API key cannot read the balance.",
+        )
         AgentProvider.CLAUDE, AgentProvider.CODEX, AgentProvider.COPILOT, AgentProvider.GROK,
-        AgentProvider.CURSOR, AgentProvider.OPENROUTER, AgentProvider.DEEPSEEK, AgentProvider.POE,
+        AgentProvider.CURSOR, AgentProvider.DEEPSEEK, AgentProvider.POE,
         AgentProvider.ELEVENLABS,
         -> null
     }
@@ -342,6 +363,10 @@ data class L10n(val lang: Lang) {
     } else {
         choose("로그인 창을 열지 못했습니다. 다시 시도해 주세요.", "Couldn't open the sign-in window. Please try again.")
     }
+    val browserProviderError get() = choose(
+        "로그인 창에서 승인이 완료되지 않았습니다. 다시 시도해 주세요.",
+        "Sign-in was not completed in the sign-in window. Please try again.",
+    )
     val browserManualHint get() = choose("자동으로 연결되지 않나요?", "Not connecting automatically?")
     val browserManualButton get() = choose("[ 코드 직접 입력 ]", "[ enter code manually ]")
     val manualCodeGet get() = choose("[ 코드 받기 ↗ ]", "[ get code ↗ ]")
@@ -369,6 +394,10 @@ data class L10n(val lang: Lang) {
         "The code expired. Please try again.",
     )
     val deviceFlowDenied get() = choose("인증이 거부되었습니다.", "Authorization was denied.")
+    val copilotAccountLookupFailed get() = choose(
+        "GitHub 계정 정보를 확인하지 못해 로그인을 완료하지 않았습니다. 다시 시도해 주세요.",
+        "Couldn't confirm the GitHub account, so sign-in was not completed. Please try again.",
+    )
 
     /** Polling login that only needs the page approved, without a code to enter (Cursor). */
     fun pollingLoginPrompt(provider: String) = choose(

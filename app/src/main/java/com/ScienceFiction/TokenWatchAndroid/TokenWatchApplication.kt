@@ -85,11 +85,12 @@ class TokenWatchContainer(context: Context) : Closeable {
     private val codexOAuth = CodexOAuthClient(transport)
     private val grokOAuth = GrokOAuthClient(transport)
     private val kimiUsage = KimiUsageClient(transport)
+    private val copilotDeviceFlow = CopilotDeviceFlow(transport)
     val providerAuth = ProviderAuthRegistry(
         claudeOAuth = claudeOAuth,
         codexOAuth = codexOAuth,
         grokOAuth = grokOAuth,
-        copilotDeviceFlow = CopilotDeviceFlow(transport),
+        copilotDeviceFlow = copilotDeviceFlow,
         cursorAuth = CursorAuth(noRedirectTransport),
         kimi = kimiUsage,
     )
@@ -128,6 +129,9 @@ class TokenWatchContainer(context: Context) : Closeable {
         usageGateway = usageGateway,
         serviceStatusClient = serviceStatusClient,
         resetNotificationManager = resetNotificationManager,
+        resolveAccountId = { provider, tokens ->
+            if (provider == AgentProvider.COPILOT) copilotDeviceFlow.accountId(tokens.accessToken) else null
+        },
     )
 
     /**

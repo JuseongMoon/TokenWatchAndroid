@@ -20,6 +20,18 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
+/** How a loopback sign-in attempt ended without a code. */
+sealed interface LoopbackFailure {
+    /**
+     * The authorization server redirected back with an OAuth `error` (e.g. `access_denied`) and the
+     * expected state. [error] is used only to choose a message; it is never logged.
+     */
+    data class ProviderError(val error: String) : LoopbackFailure
+
+    /** No callback arrived within the listener's lifetime. */
+    data object TimedOut : LoopbackFailure
+}
+
 /**
  * One-shot loopback HTTP listener that receives a single OAuth callback, ported from iOS
  * `LoopbackCallbackServer` (4f0eda5, 7d0d9da).
@@ -34,6 +46,10 @@ import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
  * has been written: handing it over first let the receiver's cleanup cut the connection before the
  * 302 left (the iOS 1.1.0 build 12 defect).
  *
+ * Exactly one terminal result is delivered: the code ([onCode]), a provider error callback, or the
+ * timeout ([onFailure]). An error callback is accepted only on the callback path, and is ignored
+ * when it carries another attempt's state.
+ *
  * Security: bound to 127.0.0.1/::1 only, never the LAN. Only a request carrying the expected state is
  * accepted, and the code is useless without the PKCE verifier. Speculative browser preconnects that
  * never send a request line time out on their own thread without blocking the real request.
@@ -42,6 +58,10 @@ class LoopbackCallbackServer(
     /** Only a callback with exactly this state is accepted (CSRF defence). */
     private val expectedState: String,
     parentScope: CoroutineScope,
+    /** Upper bound on the listener's life; injectable so tests need not wait ten minutes. */
+    private val lifetimeMillis: Long = DEFAULT_LIFETIME_MILLIS,
+    /** Called at most once (and never together with [onCode]), on a background thread. */
+    private val onFailure: (LoopbackFailure) -> Unit = {},
     /** Called at most once, on a background thread, after the 302 has been written. */
     private val onCode: (code: String, state: String) -> Unit,
 ) {
@@ -66,8 +86,11 @@ class LoopbackCallbackServer(
                 acceptLoop(v6)
             }
         scope.launch {
-            delay(LIFETIME_MILLIS)
+            delay(lifetimeMillis)
+            // Claim the one terminal result first so a callback racing the deadline cannot also land.
+            val timedOut = delivered.compareAndSet(false, true)
             stop()
+            if (timedOut) onFailure(LoopbackFailure.TimedOut)
         }
         port
     }
@@ -93,7 +116,7 @@ class LoopbackCallbackServer(
     }
 
     private fun handle(socket: Socket) {
-        val callback = try {
+        val result: Any = try {
             socket.use { connection ->
                 connection.soTimeout = READ_TIMEOUT_MILLIS
                 val head = readHead(connection.getInputStream()) ?: return
@@ -103,34 +126,44 @@ class LoopbackCallbackServer(
                     return
                 }
                 val parsed = parseCallback(target, expectedState)
-                if (parsed == null) {
-                    respond(connection, "404 Not Found", body = "not found")
-                    return
+                if (parsed != null) {
+                    respond(
+                        connection,
+                        "302 Found",
+                        extraHeaders = listOf("Location: ${redirectLocation(parsed.code, parsed.state)}"),
+                    )
+                    return@use parsed
                 }
-                respond(
-                    connection,
-                    "302 Found",
-                    extraHeaders = listOf("Location: ${redirectLocation(parsed.code, parsed.state)}"),
-                )
-                parsed
+                val error = parseCallbackError(target, expectedState)
+                if (error != null) {
+                    // Same window-closing redirect, carrying the error instead of a code.
+                    respond(
+                        connection,
+                        "302 Found",
+                        extraHeaders = listOf("Location: ${errorRedirectLocation(error, expectedState)}"),
+                    )
+                    return@use LoopbackFailure.ProviderError(error)
+                }
+                respond(connection, "404 Not Found", body = "not found")
+                return
             }
         } catch (_: IOException) {
             // A dropped connection before a valid request line carries nothing to deliver.
             return
         }
-        // The 302 is out; only now hand over the code. A delivery that fails to reach the browser
+        // The 302 is out; only now hand over the result. A delivery that fails to reach the browser
         // still yields the code, which is all the exchange needs.
-        deliver(callback)
+        if (delivered.compareAndSet(false, true)) {
+            when (result) {
+                is OAuthCallback -> onCode(result.code, result.state)
+                is LoopbackFailure -> onFailure(result)
+            }
+        }
         // Fold the listener once the response has had time to leave.
         scope.launch {
             delay(SHUTDOWN_DELAY_MILLIS)
             stop()
         }
-    }
-
-    private fun deliver(callback: OAuthCallback) {
-        if (!delivered.compareAndSet(false, true)) return
-        onCode(callback.code, callback.state)
     }
 
     private fun respond(
@@ -173,7 +206,7 @@ class LoopbackCallbackServer(
         const val SESSION_CALLBACK_HOST = "login-complete"
 
         /** Upper bound on the listener's life, so an abandoned login never leaks the port. */
-        private const val LIFETIME_MILLIS = 600_000L
+        const val DEFAULT_LIFETIME_MILLIS = 600_000L
         private const val SHUTDOWN_DELAY_MILLIS = 1_000L
         private const val READ_TIMEOUT_MILLIS = 15_000
 
@@ -207,6 +240,35 @@ class LoopbackCallbackServer(
             return OAuthCallback(code, state)
         }
 
+        /**
+         * The OAuth `error` of an error callback (RFC 6749 4.1.2.1): callback path and no code. An
+         * authorization server may omit the state on an error (the official xAI CLI does not check
+         * it there), so a missing state is accepted; a state that is present but different belongs
+         * to another attempt and is ignored. An error can only end the attempt, never complete it —
+         * a code still requires the exact state ([parseCallback]).
+         */
+        fun parseCallbackError(target: String, expectedState: String): String? {
+            val url = "http://localhost$target".toHttpUrlOrNull() ?: return null
+            if (url.encodedPath != "/callback") return null
+            if (!url.queryParameter("code").isNullOrEmpty()) return null
+            val state = url.queryParameter("state")
+            if (state != null && state != expectedState) return null
+            return url.queryParameter("error")?.takeIf(String::isNotEmpty)
+        }
+
+        fun errorRedirectLocation(error: String, state: String): String =
+            "$SESSION_CALLBACK_SCHEME://$SESSION_CALLBACK_HOST" +
+                "?error=${percentEncodeStrict(error)}&state=${percentEncodeStrict(state)}"
+
+        /** Error and state from the sign-in window's result URL when it carries no code. */
+        fun parseSessionError(url: String): Pair<String, String>? {
+            val query = sessionQuery(url) ?: return null
+            if (!query["code"].isNullOrEmpty()) return null
+            val error = query["error"]?.takeIf(String::isNotEmpty) ?: return null
+            val state = query["state"] ?: return null
+            return error to state
+        }
+
         /** Redirect that closes the sign-in window, with code and state strictly percent-encoded. */
         fun redirectLocation(code: String, state: String): String =
             "$SESSION_CALLBACK_SCHEME://$SESSION_CALLBACK_HOST" +
@@ -214,16 +276,20 @@ class LoopbackCallbackServer(
 
         /** Code and state from the sign-in window's result URL; null for any other address. */
         fun parseSessionCallback(url: String): OAuthCallback? {
+            val query = sessionQuery(url) ?: return null
+            val code = query["code"]?.takeIf(String::isNotEmpty) ?: return null
+            val state = query["state"] ?: return null
+            return OAuthCallback(code, state)
+        }
+
+        private fun sessionQuery(url: String): Map<String, String>? {
             val uri = runCatching { URI(url) }.getOrNull() ?: return null
             if (uri.scheme != SESSION_CALLBACK_SCHEME || uri.host != SESSION_CALLBACK_HOST) return null
-            val query = uri.rawQuery?.split('&').orEmpty().associate { pair ->
+            return uri.rawQuery?.split('&').orEmpty().associate { pair ->
                 val name = pair.substringBefore('=')
                 val value = pair.substringAfter('=', missingDelimiterValue = "")
                 decode(name) to decode(value)
             }
-            val code = query["code"]?.takeIf(String::isNotEmpty) ?: return null
-            val state = query["state"] ?: return null
-            return OAuthCallback(code, state)
         }
 
         private fun decode(text: String): String =
