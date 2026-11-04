@@ -14,6 +14,13 @@ through iOS commit `758d853` on `feature/account` (`a8fc3a9`, `2d268f8`, `dfae3e
 `29edee1`, `834613b`, `8c62ad9`, `78e7b1f`, `4a9112b`, `dd427e5`, `399898c`, `758d853`), described under
 "Optional app account" and "Monster hunt and adventurer ranks" below; `4a9112b` is the 2.0.0 (17)
 version bump.
+It also mirrors the authentication fixes of iOS `cfe6076` on `dev`: a per-account credential
+generation so a refresh or fetch that finishes after a re-login or removal cannot overwrite or clear
+the newer credential, Codex refresh failures classified like the official Codex CLI, Copilot
+accounts identified by the GitHub numeric user id, Copilot Free quotas read per lane, one outcome per
+loopback sign-in attempt (code, provider error or timeout), polling logins that survive transient
+network errors and poll again on return to the foreground, network failures shown as a localized
+message, and OpenRouter key rejections explained (the balance needs a management key).
 `a9867ee` only adds an iOS DEBUG launch argument, `5e62173` only extends the iOS privacy manifest and
 `ec0169e` only raises the iOS build number, so none of them has an Android counterpart.
 Uncommitted iOS working-tree changes are deliberately not part of this baseline.
