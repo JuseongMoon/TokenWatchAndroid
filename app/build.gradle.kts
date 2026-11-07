@@ -69,8 +69,8 @@ android {
         applicationId = "com.ScienceFiction.TokenWatchAndroid"
         minSdk = 28
         targetSdk = 36
-        versionCode = 18
-        versionName = "2.0.1"
+        versionCode = 19
+        versionName = "2.0.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
