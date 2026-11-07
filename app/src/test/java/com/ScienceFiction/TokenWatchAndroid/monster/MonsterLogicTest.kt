@@ -123,7 +123,22 @@ class MonsterLogicTest {
         assertFalse(MonsterEligibility.isRandomCandidate(half, 50.0, now))
         // A window at 100% stays in the draw (the store skips it only while its completion monster lives).
         assertTrue(MonsterEligibility.isRandomCandidate(full, 0.0, now))
-        assertFalse(MonsterEligibility.isRandomCandidate(credit, 0.0, now))
+        // A credit gauge never gets a completion monster, but it is a random candidate whatever its balance,
+        // usage or reset.
+        assertFalse(MonsterEligibility.isCompleted(credit, now))
+        assertTrue(MonsterEligibility.isRandomCandidate(credit, 0.0, now))
+        val emptyCredit = UsageWindow(
+            "Credits", 100.0, null, WindowKind.WEEKLY, style = UsageStyle.CREDIT_GAUGE,
+            balanceRemaining = 0.0, balanceTotal = 0.0,
+        )
+        val fullCredit = UsageWindow(
+            "Credits", 0.0, null, WindowKind.WEEKLY, style = UsageStyle.CREDIT_GAUGE,
+            balanceRemaining = 50.0, balanceTotal = 50.0,
+        )
+        assertTrue(MonsterEligibility.isRandomCandidate(emptyCredit, 1.0, now)) // an account at 0
+        assertTrue(MonsterEligibility.isRandomCandidate(fullCredit, 1.0, now)) // just topped up
+        val balance = UsageWindow("Credits", 0.0, null, WindowKind.WEEKLY, style = UsageStyle.BALANCE, valueText = "6.50 USD")
+        assertFalse(MonsterEligibility.isRandomCandidate(balance, 0.0, now)) // a text balance has no bar
     }
 
     @Test fun accountSignatureSeparatesDifferentAccounts() {
@@ -140,8 +155,19 @@ class MonsterLogicTest {
         val used = listOf(UsageWindow("s", 55.0, reset, WindowKind.SESSION), a[1])
         assertNotEquals(sig(AgentProvider.CLAUDE, a), sig(AgentProvider.CLAUDE, used)) // other usage, other account
         assertNotEquals(sig(AgentProvider.CLAUDE, a), sig(AgentProvider.CODEX, a)) // other service, other account
-        val credit = UsageWindow("c", 30.0, reset, WindowKind.WEEKLY, style = UsageStyle.CREDIT_GAUGE)
-        assertEquals(sig(AgentProvider.CLAUDE, a), sig(AgentProvider.CLAUDE, a + credit)) // non-target windows are ignored
+        val balance = UsageWindow("b", 0.0, null, WindowKind.WEEKLY, style = UsageStyle.BALANCE)
+        assertEquals(sig(AgentProvider.CLAUDE, a), sig(AgentProvider.CLAUDE, a + balance)) // windows without a bar are ignored
+        // A credit gauge parts on its total and balance: the same key twice is one account, another balance another.
+        fun credit(remaining: Double, total: Double) = UsageWindow(
+            "Credits", 0.0, null, WindowKind.WEEKLY, style = UsageStyle.CREDIT_GAUGE,
+            balanceRemaining = remaining, balanceTotal = total,
+        )
+        assertEquals(sig(AgentProvider.OPENROUTER, listOf(credit(37.1, 50.0))), sig(AgentProvider.OPENROUTER, listOf(credit(37.1, 50.0))))
+        assertNotEquals(sig(AgentProvider.OPENROUTER, listOf(credit(37.1, 50.0))), sig(AgentProvider.OPENROUTER, listOf(credit(12.0, 50.0))))
+        assertNotEquals(sig(AgentProvider.OPENROUTER, listOf(credit(0.0, 0.0))), sig(AgentProvider.OPENROUTER, emptyList()))
+        assertEquals("openrouter\nCredits|credit|5000|3710", sig(AgentProvider.OPENROUTER, listOf(credit(37.1, 50.0))))
+        val noTotal = UsageWindow("Credits", 0.0, null, WindowKind.WEEKLY, style = UsageStyle.CREDIT_GAUGE)
+        assertEquals("openrouter\nCredits|credit|-|-", sig(AgentProvider.OPENROUTER, listOf(noTotal)))
     }
 
     // MARK: Config

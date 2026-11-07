@@ -100,9 +100,13 @@ data class UsageWindow(
 
 /** Pure prepaid-credit scale policy shared by the store and JVM tests. */
 object CreditGaugePolicy {
-    /** Converts a remaining balance into consumed percent, clamped to 0..100. */
+    /**
+     * Converts a remaining balance into consumed percent, clamped to 0..100. An account that was never
+     * topped up (total ≤ 0 with nothing left) is 100%: an empty gauge, so a monster has a bar to stand on.
+     * A balance without a known total stays null (balance text).
+     */
     fun usedPercent(remaining: Double, total: Double): Double? {
-        if (total <= 0.0) return null
+        if (total <= 0.0) return if (remaining <= 0.0) 100.0 else null
         return ((1.0 - remaining / total) * 100.0).coerceIn(0.0, 100.0)
     }
 

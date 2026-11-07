@@ -338,8 +338,10 @@ private fun DetailUsageRow(
     when (window.style) {
         UsageStyle.BALANCE -> BalanceDetailRow(window = window, loc = loc, now = now)
         UsageStyle.CREDIT_GAUGE -> CreditGaugeDetailRow(
+            agent = agent,
             window = window,
             loc = loc,
+            now = now,
             gaugeCritterEnabled = gaugeCritterEnabled,
             onRequestResetPeak = if (window.estimatedTotal) {
                 { onRequestResetPeak(window.label) }
@@ -360,20 +362,32 @@ private fun DetailUsageRow(
 
 @Composable
 private fun CreditGaugeDetailRow(
+    agent: Agent,
     window: UsageWindow,
     loc: L10n,
+    now: Instant,
     gaugeCritterEnabled: Boolean,
     onRequestResetPeak: (() -> Unit)?,
 ) {
     val statusColor = Term.statusColor(window.remainingPercent)
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(modifier = Modifier.fillMaxWidth()) {
+    // Random monsters only (a credit gauge has no reset); the whole row is the hit area while one lives on it.
+    val monsters = rememberGaugeMonsters(agent, window, gaugeCritterEnabled, now)
+    Column(
+        modifier = Modifier.monsterHitTarget(monsters, loc, LocalHapticFeedback.current),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Text(
                 text = window.label.uppercase(loc.dateLocale),
                 color = Term.Cyan,
                 style = terminalTextStyle(12.sp, FontWeight.SemiBold),
                 modifier = Modifier.weight(1f),
             )
+            monsters?.target?.let { MonsterHpHearts(hp = it.hp, maxHp = it.maxHp) }
             Text(
                 text = "${if (window.estimatedTotal) "~" else ""}${window.remainingPercent.roundToInt()}% left",
                 color = statusColor,
@@ -391,6 +405,7 @@ private fun CreditGaugeDetailRow(
             gaugeCritterEnabled = gaugeCritterEnabled,
             usedContentDescription = loc::a11yUsed,
             remainingContentDescription = loc::a11yRemaining,
+            monsters = monsters,
         )
         KvRow(
             key = "remaining",

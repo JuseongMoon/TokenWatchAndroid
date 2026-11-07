@@ -32,7 +32,6 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ScienceFiction.TokenWatchAndroid.domain.Agent
-import com.ScienceFiction.TokenWatchAndroid.domain.UsageStyle
 import com.ScienceFiction.TokenWatchAndroid.domain.UsageWindow
 import com.ScienceFiction.TokenWatchAndroid.localization.L10n
 import com.ScienceFiction.TokenWatchAndroid.localization.monsterA11yValue
@@ -90,7 +89,7 @@ class GaugeMonsters(
 @Composable
 internal fun rememberGaugeMonsters(agent: Agent?, window: UsageWindow, enabled: Boolean, now: Instant): GaugeMonsters? {
     val ui = LocalMonsterUi.current ?: return null
-    if (agent == null || !enabled || window.style != UsageStyle.GAUGE) return null
+    if (agent == null || !enabled || !window.isGaugeLike) return null
     val state by ui.store.state.collectAsStateWithLifecycle()
     val encounters = remember(state, agent.id, window, now) {
         MonsterStore.visible(state, agent.id, agent.provider, window, now.toEpochMilli())

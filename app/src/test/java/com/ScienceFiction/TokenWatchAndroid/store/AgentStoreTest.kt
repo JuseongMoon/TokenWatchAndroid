@@ -20,6 +20,10 @@ import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
@@ -319,6 +323,30 @@ class AgentStoreTest {
         assertEquals(UsageStyle.CREDIT_GAUGE, promoted.style)
         assertEquals(25.0, promoted.usedPercent, 0.0)
         assertFalse(promoted.estimatedTotal)
+        assertTrue(persistedPeaks.isEmpty())
+        fixture.close()
+    }
+
+    @Test
+    fun `provider total of zero creates an exact empty credit gauge`() = runBlocking {
+        // An OpenRouter key that was never topped up: total 0, balance 0.
+        val agent = Agent(AgentProvider.OPENROUTER)
+        val persistedPeaks = mutableListOf<Map<String, Double>>()
+        val fixture = fixture(
+            parentScope = this,
+            initialAgents = listOf(agent),
+            persistCreditPeaks = { persistedPeaks += it },
+            fetchSnapshot = { _, _ -> creditSnapshot(remaining = 0.0, total = 0.0) },
+        )
+        fixture.store.awaitInitialLoad()
+
+        fixture.store.refresh(agent)
+
+        val promoted = fixture.store.snapshots.value.getValue(agent.id).windows.single()
+        assertEquals(UsageStyle.CREDIT_GAUGE, promoted.style)
+        assertEquals(100.0, promoted.usedPercent, 0.0)
+        assertFalse(promoted.estimatedTotal)
+        assertFalse(promoted.isUnusedCredit)
         assertTrue(persistedPeaks.isEmpty())
         fixture.close()
     }
@@ -782,6 +810,108 @@ class AgentStoreTest {
             requests.send(request)
             request.release.await()
         }
+    }
+
+    @Test
+    fun `a foreground restart during the first pass still loads every card`() = runBlocking {
+        // Cold start on a device: ON_STOP/ON_START (or a settings change) restarts the pass while a
+        // slow provider is still loading. The new pass used to be turned away by the cancelled
+        // request, which then never published: the card kept "no usage data" for a minute or more.
+        repeat(50) {
+            val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+            val fast = Agent(AgentProvider.CODEX)
+            val slow = Agent(AgentProvider.OPENROUTER)
+            val slowStarted = CompletableDeferred<Unit>()
+            val fixture = fixture(
+                parentScope = scope,
+                initialAgents = listOf(fast, slow),
+                sleeper = StoreSleeper { awaitCancellation() },
+                fetchSnapshot = { _, id ->
+                    if (id == slow.id) {
+                        slowStarted.complete(Unit)
+                        delay(50)
+                    }
+                    snapshot(10.0)
+                },
+            )
+            fixture.store.awaitInitialLoad()
+            fixture.store.startAutoRefresh(60)
+            withTimeout(2_000) { slowStarted.await() }
+            fixture.store.stopAutoRefresh()
+            fixture.store.startAutoRefresh(60)
+
+            awaitCondition { fixture.store.snapshots.value[slow.id] != null }
+            awaitCondition { fixture.store.snapshots.value[fast.id] != null }
+            awaitCondition { fixture.store.loadingIDs.value.isEmpty() }
+            fixture.close()
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun `a refresh turned away by a request that is then cancelled is fetched again in front`() = runBlocking {
+        // A background job's fetch holds the gate when the app comes forward; the foreground pass is
+        // turned away, and then the job is stopped.
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val agent = Agent(AgentProvider.COPILOT)
+        val fetches = AtomicInteger(0)
+        val firstEntered = CompletableDeferred<Unit>()
+        val fixture = fixture(
+            parentScope = scope,
+            initialAgents = listOf(agent),
+            sleeper = StoreSleeper { awaitCancellation() },
+            fetchSnapshot = { _, _ ->
+                if (fetches.incrementAndGet() == 1) {
+                    firstEntered.complete(Unit)
+                    awaitCancellation()
+                }
+                snapshot(25.0)
+            },
+        )
+        fixture.store.awaitInitialLoad()
+        val background = scope.launch { fixture.store.performBackgroundRefresh() }
+        withTimeout(2_000) { firstEntered.await() }
+        fixture.store.startAutoRefresh(60) // turned away: the background fetch is in flight
+        delay(50)
+        assertNull(fixture.store.snapshots.value[agent.id])
+
+        background.cancel()
+
+        awaitCondition { fixture.store.snapshots.value[agent.id] != null }
+        assertEquals(25.0, fixture.store.snapshots.value.getValue(agent.id).windows.single().usedPercent, 0.0)
+        assertEquals(2, fetches.get())
+        fixture.close()
+        scope.cancel()
+    }
+
+    @Test
+    fun `a pass cancelled on going to the background is not fetched again`() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val agent = Agent(AgentProvider.CLAUDE)
+        val fetches = AtomicInteger(0)
+        val entered = CompletableDeferred<Unit>()
+        val fixture = fixture(
+            parentScope = scope,
+            initialAgents = listOf(agent),
+            sleeper = StoreSleeper { awaitCancellation() },
+            fetchSnapshot = { _, _ ->
+                fetches.incrementAndGet()
+                entered.complete(Unit)
+                awaitCancellation()
+            },
+        )
+        fixture.store.awaitInitialLoad()
+        fixture.store.startAutoRefresh(60)
+        withTimeout(2_000) { entered.await() }
+        fixture.store.refresh(agent) // a card tap while it loads: turned away
+        fixture.store.stopAutoRefresh()
+
+        awaitCondition { fixture.store.loadingIDs.value.isEmpty() }
+        delay(100)
+        assertEquals(1, fetches.get())
+        assertNull(fixture.store.snapshots.value[agent.id])
+        fixture.close()
+        scope.cancel()
     }
 
     private data class Fixture(

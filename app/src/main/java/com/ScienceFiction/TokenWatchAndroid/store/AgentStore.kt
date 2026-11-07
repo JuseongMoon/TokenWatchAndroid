@@ -206,6 +206,13 @@ class AgentStore(
     /** Guarded by [loadingMutex]. Accounts whose replaced credential still needs its own fetch. */
     private val pendingCredentialRefreshIDs = mutableSetOf<UUID>()
 
+    /**
+     * Guarded by [loadingMutex]. Accounts that turned a refresh away because one was already in
+     * flight. If that one is then cancelled (the foreground pass restarting, a background job being
+     * stopped) it never publishes, so the request it turned away is owed a fetch of its own.
+     */
+    private val turnedAwayRefreshIDs = mutableSetOf<UUID>()
+
     private val _serviceStatus = MutableStateFlow<Map<AgentProvider, ServiceHealth>>(emptyMap())
     val serviceStatus: StateFlow<Map<AgentProvider, ServiceHealth>> = _serviceStatus.asStateFlow()
 
@@ -515,6 +522,8 @@ class AgentStore(
         }
         val epoch = beginRefresh(agent.id, manual = manual) ?: return
         var rerunWithNewCredential = false
+        var cancelled = false
+        var owedAfterCancel = false
         try {
             val fetched = if (manual) {
                 dependencies.fetchManualSnapshot?.invoke(agent.provider, agent.id)
@@ -536,12 +545,34 @@ class AgentStore(
             // Monster spawns read the last-good merged windows, right where resets are detected.
             _snapshots.value[agent.id]?.windows?.let { windows -> onRefreshed?.invoke(agent, windows) }
             refreshStatus(agent.provider)
-        } catch (cancelled: CancellationException) {
-            loadingMutex.withLock { lastFetchAt.remove(agent.id) }
-            throw cancelled
+        } catch (cancellation: CancellationException) {
+            cancelled = true
+            throw cancellation
         } finally {
-            withContext(NonCancellable) { rerunWithNewCredential = finishRefresh(agent.id) }
-            if (rerunWithNewCredential) launchCredentialFollowUp(agent.id)
+            withContext(NonCancellable) {
+                val finish = finishRefresh(agent.id, cancelled)
+                rerunWithNewCredential = finish.credentialReplaced
+                owedAfterCancel = finish.owedAfterCancel
+            }
+            when {
+                rerunWithNewCredential -> launchCredentialFollowUp(agent.id)
+                owedAfterCancel -> launchCancelledFollowUp(agent.id)
+            }
+        }
+    }
+
+    /**
+     * Re-runs a refresh that was cancelled after turning another request away (see
+     * [turnedAwayRefreshIDs]), while the app is still in front. Without it the card keeps "no usage
+     * data" until the next automatic pass, a minute or more later.
+     */
+    private fun launchCancelledFollowUp(agentId: UUID) {
+        if (closed.get()) return
+        val inFront = synchronized(lifecycleLock) { foregroundRefreshStarted }
+        if (!inFront) return
+        scope.launch {
+            val agent = _agents.value.firstOrNull { it.id == agentId } ?: return@launch
+            refresh(agent)
         }
     }
 
@@ -666,7 +697,8 @@ class AgentStore(
             val remaining = window.balanceRemaining ?: return@map window
             val total: Double
             val estimated: Boolean
-            if (window.balanceTotal != null && window.balanceTotal > 0.0) {
+            // An API total of 0 (never topped up) is exact as it is; it does not fall back to the peak estimate.
+            if (window.balanceTotal != null && window.balanceTotal >= 0.0) {
                 total = window.balanceTotal
                 estimated = false
             } else {
@@ -818,7 +850,10 @@ class AgentStore(
      * allowed.
      */
     private suspend fun beginRefresh(agentId: UUID, manual: Boolean): Long? = loadingMutex.withLock {
-        if (agentId in inFlightRefreshIDs) return@withLock null
+        if (agentId in inFlightRefreshIDs) {
+            turnedAwayRefreshIDs += agentId
+            return@withLock null
+        }
 
         val startedAt = now()
         val previousStart = lastFetchAt[agentId]
@@ -835,11 +870,22 @@ class AgentStore(
         credentialEpochs[agentId] ?: 0L
     }
 
-    /** Releases the gate; true when a sign-in arrived meanwhile and is owed a fresh fetch. */
-    private suspend fun finishRefresh(agentId: UUID): Boolean = loadingMutex.withLock {
+    private data class RefreshFinish(val credentialReplaced: Boolean, val owedAfterCancel: Boolean)
+
+    /**
+     * Releases the gate. A cancelled fetch also gives back its start time, so the next attempt is
+     * not held off by the 20-second spacing (done here, under [NonCancellable], because a lock taken
+     * in the cancelled coroutine itself can fail before it runs).
+     */
+    private suspend fun finishRefresh(agentId: UUID, cancelled: Boolean): RefreshFinish = loadingMutex.withLock {
         inFlightRefreshIDs -= agentId
         _loadingIDs.value = inFlightRefreshIDs.toSet()
-        pendingCredentialRefreshIDs.remove(agentId)
+        if (cancelled) lastFetchAt.remove(agentId)
+        val turnedAway = turnedAwayRefreshIDs.remove(agentId)
+        RefreshFinish(
+            credentialReplaced = pendingCredentialRefreshIDs.remove(agentId),
+            owedAfterCancel = cancelled && turnedAway,
+        )
     }
 
     /**

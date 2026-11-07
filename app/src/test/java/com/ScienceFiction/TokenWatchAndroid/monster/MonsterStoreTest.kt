@@ -124,8 +124,9 @@ class MonsterStoreTest {
     private fun sessionWindow(used: Double = 40.0) = window(label = "Current session", used = used, kind = WindowKind.SESSION)
 
     /** A credit gauge: never a monster target. */
-    private fun creditWindow() =
-        UsageWindow("credits", 40.0, Instant.ofEpochMilli(clock + 86_400_000), WindowKind.WEEKLY, style = UsageStyle.CREDIT_GAUGE)
+    /** A text balance: no bar, so nothing to draw on. */
+    private fun balanceWindow() =
+        UsageWindow("credits", 0.0, null, WindowKind.WEEKLY, style = UsageStyle.BALANCE, valueText = "6.50 USD")
 
     private val completionKey = MonsterSessionKey.completionKey("u1", AgentProvider.CLAUDE, 1_800_086_400_000)
 
@@ -342,7 +343,7 @@ class MonsterStoreTest {
         cachedConfig("""{"spawn":{"random":{"chancePerSlot":1,"maxAgentsPerUser":2}}}""")
         val half = window(used = 40.0)
         // An agent with nothing to draw on does not use up the allowance.
-        snapshots = listOf(agent to listOf(creditWindow())) +
+        snapshots = listOf(agent to listOf(balanceWindow())) +
             List(3) { Agent(AgentProvider.CODEX) to listOf(window(used = 40.0 + it)) } // three different accounts
         val s = store()
         s.observe(agent, emptyList())
@@ -465,10 +466,31 @@ class MonsterStoreTest {
 
     @Test fun agentWithoutCandidateWindowIsSkipped() = runBlocking {
         cachedConfig(alwaysRandom)
-        snapshots = listOf(agent to listOf(creditWindow())) // a credit gauge is never a target
+        snapshots = listOf(agent to listOf(balanceWindow())) // a text balance has no bar to draw on
         val s = store()
         s.observe(agent, emptyList())
         assertNull(s.state.value.ledger.nextDraw(MonsterSessionKey.agentToken(agent.id)))
+    }
+
+    @Test fun zeroCreditGaugeGetsRandomSchedule() = runBlocking {
+        cachedConfig(alwaysRandom)
+        val empty = UsageWindow(
+            "Credits", 100.0, null, WindowKind.WEEKLY, style = UsageStyle.CREDIT_GAUGE,
+            valueText = "0.00 credits left", balanceRemaining = 0.0, balanceTotal = 0.0,
+        )
+        snapshots = listOf(agent to listOf(empty)) // the empty bar of an account never topped up is a candidate too
+        val s = store()
+        val token = MonsterSessionKey.agentToken(agent.id)
+        s.observe(agent, emptyList())
+        val due = s.state.value.ledger.nextDraw(token)
+        assertNotNull(due)
+        clock = due!!
+        s.observe(agent, emptyList())
+        // At the due time a random monster lands on that credit bar (never a completion one: it has no reset).
+        val random = s.encounters(agent.id, agent.provider, empty).single()
+        assertEquals(MonsterEncounter.Source.RANDOM, random.source)
+        assertEquals(agent.id to empty.label, random.agentId to random.displayLabel)
+        assertTrue(s.state.value.ledger.encounters.none { it.source == MonsterEncounter.Source.COMPLETION })
     }
 
     // MARK: Account

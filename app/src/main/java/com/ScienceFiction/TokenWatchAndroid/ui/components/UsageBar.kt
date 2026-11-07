@@ -83,6 +83,7 @@ fun UsageBar(
                 window = window,
                 loc = loc,
                 gaugeCritterEnabled = gaugeCritterEnabled,
+                monsters = monsters,
             )
             UsageStyle.GAUGE -> GaugeValue(
                 window = window,
@@ -91,6 +92,15 @@ fun UsageBar(
                 gaugeCritterEnabled = gaugeCritterEnabled,
                 workHoursSchedule = workHoursSchedule,
                 monsters = monsters,
+            )
+        }
+
+        // A credit gauge's amount sits on the dim line below the bar, where a subscription gauge has its reset summary.
+        if (window.style == UsageStyle.CREDIT_GAUGE) {
+            Text(
+                text = creditBalanceText(window),
+                color = Term.Dim,
+                style = terminalTextStyle(10),
             )
         }
 
@@ -155,7 +165,7 @@ private fun GaugeValue(
             monsters = monsters,
         )
         Text(
-            text = String.format(Locale.US, "%3d%% used", window.usedPercent.roundToInt()),
+            text = gaugePercentCell(window.usedPercent, "used"),
             color = statusColor,
             maxLines = 1,
             style = terminalTextStyle(12),
@@ -168,6 +178,8 @@ private fun CreditGaugeValue(
     window: UsageWindow,
     loc: L10n,
     gaugeCritterEnabled: Boolean,
+    /** Only random monsters reach a credit gauge (it has no reset, so no completion monster). */
+    monsters: GaugeMonsters?,
 ) {
     val statusColor = Term.statusColor(window.remainingPercent)
     Row(
@@ -187,15 +199,25 @@ private fun CreditGaugeValue(
             gaugeCritterEnabled = gaugeCritterEnabled,
             usedContentDescription = loc::a11yUsed,
             remainingContentDescription = loc::a11yRemaining,
+            monsters = monsters,
         )
+        // `%3d% left` is nine cells, like the subscription gauge's `%3d% used`, so both bars are equally long.
         Text(
-            text = "${if (window.estimatedTotal) "~" else ""}${window.valueText ?: "—"}",
+            text = gaugePercentCell(window.remainingPercent, "left"),
             color = statusColor,
             maxLines = 1,
             style = terminalTextStyle(12),
         )
     }
 }
+
+/** The nine-cell percentage right of a card's bar (`%3d% used` / `%3d% left`), so every bar is equally long. */
+internal fun gaugePercentCell(percent: Double, suffix: String): String =
+    String.format(Locale.US, "%3d%% %s", percent.roundToInt(), suffix)
+
+/** A credit gauge's balance text; `~` marks an estimated (peak) total. */
+internal fun creditBalanceText(window: UsageWindow): String =
+    "${if (window.estimatedTotal) "~" else ""}${window.valueText ?: "—"}"
 
 @Composable
 private fun BalanceValue(valueText: String?) {

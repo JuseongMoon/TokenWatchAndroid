@@ -160,7 +160,11 @@ private fun TokenWatchAppContent(
     var playerReturnRoute by rememberSaveable { mutableStateOf(ROUTE_SETTINGS) }
     var consentReturnRoute by rememberSaveable { mutableStateOf(ROUTE_MAIN) }
     var initialLoadFinished by remember { mutableStateOf(false) }
-    var isForeground by remember { mutableStateOf(false) }
+    // Seeded from the lifecycle: the first composition usually happens with the activity already
+    // started, and a false seed flipped to true a frame later re-ran the refresh effect below.
+    var isForeground by remember {
+        mutableStateOf(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED))
+    }
     var isRefreshingAll by remember { mutableStateOf(false) }
     var notificationPermissionRevision by remember { mutableIntStateOf(0) }
     val mainStateHolder = rememberSaveableStateHolder()
@@ -220,14 +224,19 @@ private fun TokenWatchAppContent(
 
     // Notification permission as a user property. Android asks once and the answer can change in
     // system settings afterwards, so it is re-read every time the app comes forward.
-    LaunchedEffect(isForeground, notificationPermissionRevision, settings.analyticsEnabled) {
-        if (!isForeground) return@LaunchedEffect
+    // Effects below act on the values they were keyed with, never on the live state: reading the
+    // live state let the first run of a stale key act like the next one (on a cold start the
+    // refresh effect started the auto refresh twice, 240 ms apart, cancelling the first pass).
+    val foreground = isForeground
+    val refreshInterval = settings.refreshInterval
+    LaunchedEffect(foreground, notificationPermissionRevision, settings.analyticsEnabled) {
+        if (!foreground) return@LaunchedEffect
         analytics.syncNotificationAuthorization(notificationAuthorizationTag(context))
     }
 
-    LaunchedEffect(isForeground, settings.refreshInterval, store) {
-        if (isForeground) {
-            store.startAutoRefresh(settings.refreshInterval)
+    LaunchedEffect(foreground, refreshInterval, store) {
+        if (foreground) {
+            store.startAutoRefresh(refreshInterval)
         } else {
             store.stopAutoRefresh()
         }

@@ -108,18 +108,27 @@ object MonsterEligibility {
     /**
      * Random spawn candidates. A window at 100% is one too, so draws go on until the reset even when the
      * usage ran out early. The caller ([MonsterStore]) sifts out bars with a living monster or a ghost from the
-     * last hour.
+     * last hour. A credit gauge has no reset, so it never gets a completion monster, but it is a random
+     * candidate whatever its balance or usage (the minimum usage waits for the first use in a reset period,
+     * which a credit gauge does not have; an account at 0 is a candidate too).
      */
-    fun isRandomCandidate(window: UsageWindow, minUsedPercent: Double, now: Instant): Boolean =
-        isTarget(window, now) && window.usedPercent >= minUsedPercent
+    fun isRandomCandidate(window: UsageWindow, minUsedPercent: Double, now: Instant): Boolean {
+        if (window.style == UsageStyle.CREDIT_GAUGE) return true
+        return isTarget(window, now) && window.usedPercent >= minUsedPercent
+    }
 
     /**
      * What marks agents that look like one AI account (used on the device only). The same account added twice
      * shows the same label, reset time and usage on every target window, so the random draw takes only one of
-     * them; different accounts part on the numbers.
+     * them; different accounts part on the numbers. A credit gauge parts on its total and balance (in cents)
+     * instead of a reset.
      */
     fun accountSignature(provider: AgentProvider, windows: List<UsageWindow>, now: Instant): String {
         val parts = windows.mapNotNull { window ->
+            if (window.style == UsageStyle.CREDIT_GAUGE) {
+                fun cents(value: Double?) = value?.let { Math.round(it * 100.0).toString() } ?: "-"
+                return@mapNotNull "${window.label}|credit|${cents(window.balanceTotal)}|${cents(window.balanceRemaining)}"
+            }
             val resetsAt = window.resetsAt
             if (!isTarget(window, now) || resetsAt == null) return@mapNotNull null
             val reset = MonsterSessionKey.resetBucketMs(MonsterSessionKey.keyResetsAtMs(provider, resetsAt))

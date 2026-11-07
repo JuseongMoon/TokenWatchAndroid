@@ -85,8 +85,16 @@ class UsageModelsTest {
         assertEquals(100.0, CreditGaugePolicy.usedPercent(0.0, 500.0)!!, 0.0)
         assertEquals(100.0, CreditGaugePolicy.usedPercent(-10.0, 500.0)!!, 0.0)
         assertEquals(0.0, CreditGaugePolicy.usedPercent(600.0, 500.0)!!, 0.0)
+        // A balance without a known total stays balance text.
         assertNull(CreditGaugePolicy.usedPercent(100.0, 0.0))
         assertNull(CreditGaugePolicy.usedPercent(100.0, -5.0))
+    }
+
+    @Test
+    fun zeroTotalZeroRemainingIsEmptyGauge() {
+        // An account never topped up (total 0, nothing left) is an empty gauge (100% used): a bar for monsters.
+        assertEquals(100.0, CreditGaugePolicy.usedPercent(0.0, 0.0)!!, 0.0)
+        assertEquals(100.0, CreditGaugePolicy.usedPercent(-1.0, 0.0)!!, 0.0)
     }
 
     @Test
