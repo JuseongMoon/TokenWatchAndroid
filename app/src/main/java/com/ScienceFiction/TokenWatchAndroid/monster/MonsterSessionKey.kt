@@ -106,6 +106,30 @@ object MonsterEligibility {
         isTarget(window, now) && window.usedPercent / 100.0 >= COMPLETION_THRESHOLD
 
     /**
+     * The virtual window a depleted credit gauge (an account at 0 included) completes on: one sure monster
+     * per service a **month**. A credit gauge has no reset, so the next 1st of the month at 00:00 KST stands
+     * in for it, with a 31-day period. That passes the server's consistency checks (a future reset, the
+     * period, 90% of a period since the last completion) unchanged, and a period of 28 days or more skips
+     * its reset-overlap (shared-account suspicion) records; a one-day period would bucket every user at 0 on
+     * the same midnight. The monster stays until that reset (the month's end). A copy of the shown window
+     * (label, style, balance kept) with only the reset and the period filled in; null otherwise.
+     */
+    fun creditCompletionWindow(window: UsageWindow, now: Instant): UsageWindow? {
+        if (window.style != UsageStyle.CREDIT_GAUGE || window.usedPercent / 100.0 < COMPLETION_THRESHOLD) return null
+        return window.copy(
+            resetsAt = nextCreditCycleStart(now),
+            kind = WindowKind.WEEKLY,
+            windowSeconds = MonsterSessionKey.MONTH_SECONDS.toDouble(),
+        )
+    }
+
+    /** The next start of the credit completion cycle: the 1st of next month, 00:00 KST, whatever the device zone. */
+    fun nextCreditCycleStart(now: Instant): Instant =
+        now.atZone(KST).toLocalDate().withDayOfMonth(1).plusMonths(1).atStartOfDay(KST).toInstant()
+
+    private val KST: ZoneId = ZoneId.of("Asia/Seoul")
+
+    /**
      * Random spawn candidates. A window at 100% is one too, so draws go on until the reset even when the
      * usage ran out early. The caller ([MonsterStore]) sifts out bars with a living monster or a ghost from the
      * last hour. A credit gauge has no reset, so it never gets a completion monster, but it is a random

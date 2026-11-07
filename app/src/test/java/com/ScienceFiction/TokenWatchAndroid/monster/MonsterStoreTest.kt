@@ -123,7 +123,6 @@ class MonsterStoreTest {
     /** A session window (5 hours): its slime is the blue slime. */
     private fun sessionWindow(used: Double = 40.0) = window(label = "Current session", used = used, kind = WindowKind.SESSION)
 
-    /** A credit gauge: never a monster target. */
     /** A text balance: no bar, so nothing to draw on. */
     private fun balanceWindow() =
         UsageWindow("credits", 0.0, null, WindowKind.WEEKLY, style = UsageStyle.BALANCE, valueText = "6.50 USD")
@@ -472,25 +471,70 @@ class MonsterStoreTest {
         assertNull(s.state.value.ledger.nextDraw(MonsterSessionKey.agentToken(agent.id)))
     }
 
-    @Test fun zeroCreditGaugeGetsRandomSchedule() = runBlocking {
+    @Test fun creditGaugeGetsRandomSchedule() = runBlocking {
         cachedConfig(alwaysRandom)
+        val funded = UsageWindow(
+            "Credits", 0.0, null, WindowKind.WEEKLY, style = UsageStyle.CREDIT_GAUGE,
+            valueText = "50.00 credits left", balanceRemaining = 50.0, balanceTotal = 50.0,
+        )
+        // A funded credit bar is a random candidate whatever its usage. (A depleted one first gets its monthly
+        // completion monster and joins the draw once it is defeated, like a subscription bar at 100%.)
+        snapshots = listOf(agent to listOf(funded))
+        val s = store()
+        val token = MonsterSessionKey.agentToken(agent.id)
+        s.observe(agent, listOf(funded))
+        val due = s.state.value.ledger.nextDraw(token)
+        assertNotNull(due)
+        clock = due!!
+        s.observe(agent, listOf(funded))
+        // At the due time a random monster lands on that credit bar; a funded bar has no completion monster.
+        val random = s.encounters(agent.id, agent.provider, funded).single()
+        assertEquals(MonsterEncounter.Source.RANDOM, random.source)
+        assertEquals(agent.id to funded.label, random.agentId to random.displayLabel)
+        assertTrue(s.state.value.ledger.encounters.none { it.source == MonsterEncounter.Source.COMPLETION })
+    }
+
+    @Test fun depletedCreditGaugeSpawnsAMonthlyCompletionMonster() = runBlocking {
         val empty = UsageWindow(
             "Credits", 100.0, null, WindowKind.WEEKLY, style = UsageStyle.CREDIT_GAUGE,
             valueText = "0.00 credits left", balanceRemaining = 0.0, balanceTotal = 0.0,
         )
-        snapshots = listOf(agent to listOf(empty)) // the empty bar of an account never topped up is a candidate too
         val s = store()
-        val token = MonsterSessionKey.agentToken(agent.id)
-        s.observe(agent, emptyList())
-        val due = s.state.value.ledger.nextDraw(token)
-        assertNotNull(due)
-        clock = due!!
-        s.observe(agent, emptyList())
-        // At the due time a random monster lands on that credit bar (never a completion one: it has no reset).
-        val random = s.encounters(agent.id, agent.provider, empty).single()
-        assertEquals(MonsterEncounter.Source.RANDOM, random.source)
-        assertEquals(agent.id to empty.label, random.agentId to random.displayLabel)
-        assertTrue(s.state.value.ledger.encounters.none { it.source == MonsterEncounter.Source.COMPLETION })
+        s.observe(agent, listOf(empty))
+        s.observe(agent, listOf(empty))
+        val shown = s.encounters(agent.id, agent.provider, empty)
+        assertEquals(1, shown.size) // one monster to catch right away
+        assertTrue(shown.single().isAlive)
+        assertEquals(MonsterEncounter.Source.COMPLETION, shown.single().source)
+        val reset = MonsterEligibility.nextCreditCycleStart(Instant.ofEpochMilli(clock))
+        assertEquals(MonsterSessionKey.epochMs(reset), shown.single().expiresAtMs) // it stays until the month's end
+        assertTrue(functions.calls.isEmpty())
+
+        // Defeated, the bar joins the random draw (its ghost lingers, the monthly key is spent).
+        assertEquals(MonsterStore.HitResult.Defeated, s.hit(shown.single().key)) // the first is a 1 HP slime
+        s.observe(agent, listOf(empty))
+        assertEquals(1, s.state.value.ledger.encounters.count { it.source == MonsterEncounter.Source.COMPLETION })
+    }
+
+    @Test fun depletedCreditGaugeAsksTheServerWithAMonthlyPeriod() = runBlocking {
+        val openRouter = Agent(AgentProvider.OPENROUTER)
+        val empty = UsageWindow(
+            "Credits", 100.0, null, WindowKind.WEEKLY, style = UsageStyle.CREDIT_GAUGE,
+            balanceRemaining = 0.0, balanceTotal = 0.0,
+        )
+        snapshots = listOf(openRouter to listOf(empty))
+        val s = store(terms = 2)
+        val reset = MonsterEligibility.nextCreditCycleStart(Instant.ofEpochMilli(clock))
+        val bucket = MonsterSessionKey.resetBucketMs(MonsterSessionKey.epochMs(reset))
+        functions.respond("spawnEncounter", 200, encounterJson(MonsterSessionKey.completionKey("u1", AgentProvider.OPENROUTER, bucket)))
+        s.observe(openRouter, listOf(empty))
+        val sent = functions.calls.first { it.second["source"] == "completion" }.second
+        assertEquals("openrouter", sent["provider"])
+        assertEquals("Credits", sent["windowLabel"])
+        assertEquals(31L * 86_400L, (sent["periodSec"] as Number).toLong())
+        assertEquals(false, sent["session"])
+        assertEquals(bucket, (sent["resetBucketMs"] as Number).toLong())
+        assertEquals(MonsterSessionKey.epochMs(reset), (sent["resetsAtMs"] as Number).toLong())
     }
 
     // MARK: Account

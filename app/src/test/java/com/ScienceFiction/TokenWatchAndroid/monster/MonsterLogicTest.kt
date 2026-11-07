@@ -141,6 +141,43 @@ class MonsterLogicTest {
         assertFalse(MonsterEligibility.isRandomCandidate(balance, 0.0, now)) // a text balance has no bar
     }
 
+    @Test fun depletedCreditGaugeGetsAMonthlyCompletionWindow() {
+        // 2027-01-15 12:00 KST -> the next cycle starts 2027-02-01 00:00 KST (2027-01-31 15:00 UTC).
+        val now = Instant.ofEpochSecond(1_799_982_000)
+        val start = MonsterEligibility.nextCreditCycleStart(now)
+        assertEquals(1_801_407_600L, start.epochSecond)
+        // A minute before the month ends (KST) it is still the 1st of next month, whatever the device zone.
+        assertEquals(start, MonsterEligibility.nextCreditCycleStart(Instant.ofEpochSecond(1_801_407_540)))
+        // At the start of the month, the cycle runs to the next month.
+        assertEquals(
+            Instant.parse("2027-02-28T15:00:00Z"),
+            MonsterEligibility.nextCreditCycleStart(Instant.ofEpochSecond(1_801_407_600)),
+        )
+
+        val empty = UsageWindow(
+            "Credits", 100.0, null, WindowKind.WEEKLY, style = UsageStyle.CREDIT_GAUGE,
+            balanceRemaining = 0.0, balanceTotal = 0.0,
+        )
+        val w = MonsterEligibility.creditCompletionWindow(empty, now)!!
+        assertEquals("Credits" to start, w.label to w.resetsAt)
+        assertEquals(UsageStyle.CREDIT_GAUGE, w.style)
+        assertEquals(WindowKind.WEEKLY, w.kind) // session false
+        // 31 days: the server skips its reset-overlap records for periods of 28 days or more.
+        assertEquals(31L * 86_400L, MonsterSessionKey.periodSec(AgentProvider.OPENROUTER, w.label, w.windowSeconds, w.kind))
+        val startMs = MonsterSessionKey.epochMs(start)
+        assertEquals(startMs, MonsterSessionKey.resetBucketMs(startMs)) // already on a bucket boundary
+        // A funded credit gauge, a subscription gauge and a text balance have none.
+        val funded = UsageWindow(
+            "Credits", 25.0, null, WindowKind.WEEKLY, style = UsageStyle.CREDIT_GAUGE,
+            balanceRemaining = 37.1, balanceTotal = 50.0,
+        )
+        assertNull(MonsterEligibility.creditCompletionWindow(funded, now))
+        val gauge = UsageWindow("w", 100.0, now.plusSeconds(3_600), WindowKind.WEEKLY)
+        assertNull(MonsterEligibility.creditCompletionWindow(gauge, now))
+        val balance = UsageWindow("Credits", 100.0, null, WindowKind.WEEKLY, style = UsageStyle.BALANCE)
+        assertNull(MonsterEligibility.creditCompletionWindow(balance, now))
+    }
+
     @Test fun accountSignatureSeparatesDifferentAccounts() {
         val now = Instant.ofEpochSecond(1_800_000_000)
         val reset = now.plusSeconds(3_600)

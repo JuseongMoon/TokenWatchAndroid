@@ -270,7 +270,13 @@ class MonsterStore(
             if (owner != null && owner !in _state.value.ledger.mergedUids) mergeGuestHistoryIfNeeded()
             val instant = Instant.ofEpochMilli(now)
             for (window in windows) {
-                if (MonsterEligibility.isCompleted(window, instant)) handleCompletion(agent, window, owner, now)
+                if (MonsterEligibility.isCompleted(window, instant)) {
+                    handleCompletion(agent, window, owner, now)
+                } else {
+                    // A depleted credit gauge: one sure monster a month (virtual reset: the 1st, KST).
+                    MonsterEligibility.creditCompletionWindow(window, instant)
+                        ?.let { handleCompletion(agent, it, owner, now) }
+                }
             }
             handleRandom(owner, now)
             retryPendingDefeats(owner)
