@@ -28,7 +28,9 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertSame
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
 import org.junit.Before
 import org.junit.Test
 
@@ -257,6 +259,53 @@ class AddAgentFlowViewModelBrowserTest {
 
         assertTrue(presenting(viewModel.phase))
     }
+
+    // region Codex (fixed loopback localhost:1455/auth/callback)
+
+    private fun portIsFree(port: Int): Boolean = runCatching {
+        java.net.ServerSocket(port, 1, java.net.InetAddress.getByName("127.0.0.1")).close()
+    }.isSuccess
+
+    @Test fun codexSignsInThroughTheRegisteredLoopbackAndCompletes() {
+        assumeTrue("port 1455 is in use on this machine", portIsFree(1455))
+        viewModel.selectProvider(AgentProvider.CODEX, providerAuth, loc, onAddAgent)
+        assertTrue(viewModel.phase is AddAgentPhase.BrowserLogin)
+        val (port, state) = begin()
+        assertEquals(1455, port)
+
+        // Only the registered path is a callback.
+        assertEquals(404, get(port, "code=synthetic-code&state=$state"))
+        val status = noRedirects.newCall(
+            Request.Builder().url("http://127.0.0.1:1455/auth/callback?code=synthetic-code&state=$state").build(),
+        ).execute().use { it.code }
+        assertEquals(302, status)
+
+        awaitPhase { it == AddAgentPhase.Completed }
+        assertEquals(AgentProvider.CODEX, added.single().first)
+        assertEquals("synthetic-access", added.single().second.accessToken)
+    }
+
+    @Test fun codexWithItsPortHeldElsewhereFailsWithAPortInUseCode() {
+        // If something else already holds the port, the outcome is the same.
+        val holder = runCatching {
+            java.net.ServerSocket(1455, 1, java.net.InetAddress.getByName("127.0.0.1"))
+        }.getOrNull()
+        try {
+            viewModel.selectProvider(AgentProvider.CODEX, providerAuth, loc, onAddAgent)
+            val url = runBlocking { viewModel.beginBrowserLogin(providerAuth, loc, onAddAgent) }
+
+            assertNull(url)
+            val failed = viewModel.phase as AddAgentPhase.Failed
+            assertEquals(loc.browserPortInUse, failed.message)
+            assertEquals(LoginStage.BROWSER_WAIT, failed.stage)
+            assertEquals("loopback_port_in_use", failed.code)
+            assertTrue(!viewModel.loginWindowOpen)
+        } finally {
+            holder?.close()
+        }
+    }
+
+    // endregion
 
     @Test fun aSuccessfulCallbackStillCompletesAndItsTimeoutNeverFires() {
         val (port, state) = begin(lifetimeMillis = 300)

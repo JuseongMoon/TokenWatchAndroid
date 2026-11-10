@@ -363,6 +363,11 @@ data class L10n(val lang: Lang) {
     } else {
         choose("로그인 창을 열지 못했습니다. 다시 시도해 주세요.", "Couldn't open the sign-in window. Please try again.")
     }
+    /** The fixed loopback port (Codex) is taken, usually by a sign-in still waiting elsewhere. */
+    val browserPortInUse get() = choose(
+        "로그인을 받을 준비를 하지 못했습니다. 다른 앱에서 진행 중인 로그인이 있다면 끝낸 뒤, 잠시 후 다시 시도해 주세요.",
+        "Couldn't get ready to receive the sign-in. If another app has a sign-in in progress, finish it, then try again in a moment.",
+    )
     val browserProviderError get() = choose(
         "로그인 창에서 승인이 완료되지 않았습니다. 다시 시도해 주세요.",
         "Sign-in was not completed in the sign-in window. Please try again.",

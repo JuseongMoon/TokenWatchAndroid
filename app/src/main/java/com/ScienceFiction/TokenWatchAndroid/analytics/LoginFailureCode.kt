@@ -27,10 +27,13 @@ import java.net.UnknownHostException
  * | denied / expired / timed_out | polling sign-in refused, code expired, approval timed out |
  * | network_offline / network_timeout / network_other | transport failures |
  * | state_mismatch / code_parse / keystore_save | in-app steps |
+ * | loopback_port_in_use | the sign-in window's fixed loopback port (Codex: 1455) is held by another app |
+ * | loopback_listen | the loopback listener could not start for any other reason |
  * | other | anything unclassified |
  */
 object LoginFailureCode {
     const val OTHER = "other"
+    const val LOOPBACK_PORT_IN_USE = "loopback_port_in_use"
 
     /** Classifies an exception caught anywhere in the sign-in flow. */
     fun from(error: Throwable): String = when (error) {

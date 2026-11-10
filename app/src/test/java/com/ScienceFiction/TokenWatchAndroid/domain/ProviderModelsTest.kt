@@ -22,11 +22,12 @@ class ProviderModelsTest {
         assertNull(AgentProvider.fromWireId("unknown"))
     }
 
-    @Test fun authKindsMatchIos() {
+    /** Codex alone differs from iOS, which still signs it in through a WebView. */
+    @Test fun authKinds() {
         val expected = mapOf(
             AgentProvider.CLAUDE to AuthKind.OAUTH_BROWSER,
             AgentProvider.GROK to AuthKind.OAUTH_BROWSER,
-            AgentProvider.CODEX to AuthKind.OAUTH_CODE,
+            AgentProvider.CODEX to AuthKind.OAUTH_BROWSER,
             AgentProvider.COPILOT to AuthKind.OAUTH_DEVICE_FLOW,
             AgentProvider.CURSOR to AuthKind.OAUTH_DEVICE_FLOW,
         )

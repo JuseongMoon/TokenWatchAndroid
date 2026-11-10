@@ -1,8 +1,6 @@
 package com.ScienceFiction.TokenWatchAndroid.auth
 
 import com.ScienceFiction.TokenWatchAndroid.auth.oauth.BrowserOAuthClient
-import com.ScienceFiction.TokenWatchAndroid.auth.oauth.OAuthCallback
-import com.ScienceFiction.TokenWatchAndroid.auth.oauth.OAuthCodeClient
 import com.ScienceFiction.TokenWatchAndroid.auth.oauth.OAuthException
 import com.ScienceFiction.TokenWatchAndroid.domain.AgentProvider
 import java.time.Instant
@@ -297,7 +295,7 @@ class TokenStoreTest {
         val grokResult = OAuthTokens("grok")
         val dispatcher = ProviderTokenRefresher(
             claude = FakeBrowserClient(claudeResult),
-            codex = FakeOAuthClient(codexResult),
+            codex = FakeBrowserClient(codexResult),
             grok = FakeBrowserClient(grokResult),
         )
 
@@ -332,13 +330,6 @@ class TokenStoreTest {
         override val manualCodeRedirect: String? = null
         override suspend fun exchange(code: String, state: String, pkce: Pkce, redirect: String): OAuthTokens =
             error("unused")
-        override suspend fun refresh(tokens: OAuthTokens): OAuthTokens = refreshResult
-    }
-
-    private class FakeOAuthClient(private val refreshResult: OAuthTokens) : OAuthCodeClient {
-        override fun authorizeUrl(pkce: Pkce): String = error("unused")
-        override fun parseCallback(url: String): OAuthCallback? = error("unused")
-        override suspend fun exchange(callback: OAuthCallback, pkce: Pkce): OAuthTokens = error("unused")
         override suspend fun refresh(tokens: OAuthTokens): OAuthTokens = refreshResult
     }
 }

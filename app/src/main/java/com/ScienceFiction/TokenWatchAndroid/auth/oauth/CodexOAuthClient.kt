@@ -7,21 +7,36 @@ import com.ScienceFiction.TokenWatchAndroid.network.core.NetworkTransport
 import java.time.Instant
 import okhttp3.FormBody
 import okhttp3.HttpUrl.Companion.toHttpUrl
-import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
 import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 
+/**
+ * Codex (OpenAI) OAuth with PKCE, using the official Codex CLI's public client and authorize
+ * parameters. Sign-in runs in the in-app sign-in window with a loopback redirect, like Claude and
+ * Grok: an embedded WebView was blocked for many users abroad (Cloudflare's browser check, identity
+ * providers that refuse embedded browsers).
+ *
+ * The client is registered on one exact redirect, so the listener must take port [REDIRECT_PORT] on
+ * [CALLBACK_PATH], and authorize and exchange both send [REDIRECT_URI] unchanged. There is no
+ * paste-the-code fallback: the code only ever arrives at that address. Stored credentials and their
+ * refresh are unchanged by the move from the WebView.
+ */
 class CodexOAuthClient(
     private val transport: NetworkTransport,
     private val now: () -> Instant = Instant::now,
     private val tokenUrl: String = TOKEN_URL,
-) : OAuthCodeClient {
-    override fun authorizeUrl(pkce: Pkce): String = AUTHORIZE_URL.toHttpUrl().newBuilder()
+) : BrowserOAuthClient {
+    override val loopbackPort: Int = REDIRECT_PORT
+    override val loopbackCallbackPath: String = CALLBACK_PATH
+
+    override fun loopbackRedirectUri(port: Int): String = "http://localhost:$port$CALLBACK_PATH"
+
+    override fun authorizeUrl(pkce: Pkce, redirect: String): String = AUTHORIZE_URL.toHttpUrl().newBuilder()
         .addQueryParameter("response_type", "code")
         .addQueryParameter("client_id", CLIENT_ID)
-        .addQueryParameter("redirect_uri", REDIRECT_URI)
+        .addQueryParameter("redirect_uri", redirect)
         .addQueryParameter("scope", SCOPES.joinToString(" "))
         .addQueryParameter("code_challenge", pkce.challenge)
         .addQueryParameter("code_challenge_method", "S256")
@@ -31,23 +46,18 @@ class CodexOAuthClient(
         .build()
         .toString()
 
-    override fun parseCallback(url: String): OAuthCallback? {
-        if (!url.startsWith(CALLBACK_PREFIX)) return null
-        val parsed = url.toHttpUrlOrNull() ?: return null
-        val code = parsed.queryParameter("code") ?: return null
-        return OAuthCallback(code, parsed.queryParameter("state").orEmpty())
-    }
+    override val manualCodeRedirect: String? = null
 
-    override suspend fun exchange(callback: OAuthCallback, pkce: Pkce): OAuthTokens {
-        if (callback.state != pkce.state) throw OAuthException.StateMismatch()
+    override suspend fun exchange(code: String, state: String, pkce: Pkce, redirect: String): OAuthTokens {
+        if (state != pkce.state) throw OAuthException.StateMismatch()
         val body = FormBody.Builder()
             .add("grant_type", "authorization_code")
-            .add("code", callback.code)
-            .add("redirect_uri", REDIRECT_URI)
+            .add("code", code)
+            .add("redirect_uri", redirect)
             .add("client_id", CLIENT_ID)
             .add("code_verifier", pkce.verifier)
             .build()
-        return postToken(body, previous = null, exchange = true)
+        return retryingTransientFailureOnce { postToken(body, previous = null, exchange = true) }
     }
 
     override suspend fun refresh(tokens: OAuthTokens): OAuthTokens {
@@ -141,8 +151,10 @@ class CodexOAuthClient(
         const val CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
         const val AUTHORIZE_URL = "https://auth.openai.com/oauth/authorize"
         const val TOKEN_URL = "https://auth.openai.com/oauth/token"
+        /** The registered redirect: [loopbackRedirectUri] of [REDIRECT_PORT]. */
         const val REDIRECT_URI = "http://localhost:1455/auth/callback"
-        const val CALLBACK_PREFIX = REDIRECT_URI
+        const val REDIRECT_PORT = 1455
+        const val CALLBACK_PATH = "/auth/callback"
         val SCOPES = listOf("openid", "profile", "email", "offline_access")
         private val JSON_MEDIA_TYPE = "application/json".toMediaType()
     }

@@ -60,7 +60,6 @@ import com.ScienceFiction.TokenWatchAndroid.auth.ProviderAuthRegistry
 import com.ScienceFiction.TokenWatchAndroid.domain.AgentProvider
 import com.ScienceFiction.TokenWatchAndroid.localization.L10n
 import com.ScienceFiction.TokenWatchAndroid.ui.auth.InAppBrowser
-import com.ScienceFiction.TokenWatchAndroid.ui.auth.LoginWebView
 import com.ScienceFiction.TokenWatchAndroid.ui.components.AnimatedPixelSpriteView
 import com.ScienceFiction.TokenWatchAndroid.ui.components.BlinkingCursor
 import com.ScienceFiction.TokenWatchAndroid.ui.components.PixelSprite
@@ -74,9 +73,8 @@ import kotlinx.coroutines.launch
 /**
  * Add-agent flow (terminal style): pick a provider → sign in → exchange → add. The sign-in UI
  * follows the provider's auth kind, as on iOS `AddAgentSheet`:
- * - `OAUTH_BROWSER` (Claude, Grok): in-app sign-in window + loopback callback; Claude also has a
- *   paste-the-code fallback.
- * - `OAUTH_CODE` (Codex): WebView with an intercepted callback.
+ * - `OAUTH_BROWSER` (Claude, Grok, Codex): in-app sign-in window + loopback callback; Claude also
+ *   has a paste-the-code fallback. (iOS still signs Codex in through a WebView.)
  * - `OAUTH_DEVICE_FLOW` (Copilot, Cursor): approval page in an in-app tab while polling.
  * - `API_KEY` (the rest): paste a key.
  */
@@ -151,19 +149,6 @@ internal fun AddAgentScreen(
                 onAddAgent = onAddAgent,
                 launchSignIn = { url, ephemeral -> InAppBrowser.launchSignIn(signInLauncher, url, ephemeral) },
             )
-
-            is AddAgentPhase.OAuthLogin -> {
-                val client = remember(current.provider) { providerAuth.oauthClient(current.provider) }
-                LoginWebView(
-                    startUrl = client.authorizeUrl(current.pkce),
-                    callbackParser = client::parseCallback,
-                    onCode = { callback ->
-                        flowState.exchangeOAuth(callback, providerAuth, loc, onAddAgent)
-                    },
-                    onError = flowState::fail,
-                    modifier = Modifier.fillMaxSize(),
-                )
-            }
 
             is AddAgentPhase.ApiKey -> ApiKeyEntry(
                 provider = current.provider,

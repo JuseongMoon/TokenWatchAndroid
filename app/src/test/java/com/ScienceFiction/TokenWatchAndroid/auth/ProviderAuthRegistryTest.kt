@@ -3,8 +3,6 @@ package com.ScienceFiction.TokenWatchAndroid.auth
 import com.ScienceFiction.TokenWatchAndroid.auth.device.CopilotDeviceFlow
 import com.ScienceFiction.TokenWatchAndroid.auth.device.CursorAuth
 import com.ScienceFiction.TokenWatchAndroid.auth.oauth.BrowserOAuthClient
-import com.ScienceFiction.TokenWatchAndroid.auth.oauth.OAuthCallback
-import com.ScienceFiction.TokenWatchAndroid.auth.oauth.OAuthCodeClient
 import com.ScienceFiction.TokenWatchAndroid.domain.AgentProvider
 import com.ScienceFiction.TokenWatchAndroid.domain.AuthKind
 import com.ScienceFiction.TokenWatchAndroid.network.core.NetworkResponse
@@ -22,7 +20,7 @@ import org.junit.Test
 class ProviderAuthRegistryTest {
     private val claude = FakeBrowserClient("claude", manual = "https://console.example/code")
     private val grok = FakeBrowserClient("grok", manual = null)
-    private val codex = FakeOAuthClient("codex")
+    private val codex = FakeBrowserClient("codex", manual = null)
     private val requestedHosts = mutableListOf<String>()
 
     /** Kimi's regional probe: the first host rejects the key, the second accepts it. */
@@ -47,15 +45,10 @@ class ProviderAuthRegistryTest {
         kimi = KimiUsageClient(kimiTransport),
     )
 
-    @Test fun oauthDispatchIsLimitedToOAuthProviders() {
-        assertSame(codex, registry.oauthClient(AgentProvider.CODEX))
-        assertThrows(IllegalArgumentException::class.java) { registry.oauthClient(AgentProvider.CLAUDE) }
-        assertThrows(IllegalArgumentException::class.java) { registry.oauthClient(AgentProvider.COPILOT) }
-    }
-
-    @Test fun browserSignInCoversClaudeAndGrokOnly() {
+    @Test fun browserSignInCoversClaudeGrokAndCodexOnly() {
         assertSame(claude, registry.browserClient(AgentProvider.CLAUDE))
         assertSame(grok, registry.browserClient(AgentProvider.GROK))
+        assertSame(codex, registry.browserClient(AgentProvider.CODEX))
         AgentProvider.entries.filter { it.authKind != AuthKind.OAUTH_BROWSER }.forEach { provider ->
             assertThrows(IllegalArgumentException::class.java) { registry.browserClient(provider) }
         }
@@ -101,13 +94,6 @@ class ProviderAuthRegistryTest {
         assertThrows(IllegalArgumentException::class.java) {
             runBlocking { registry.startPollingLogin(AgentProvider.CLAUDE) }
         }
-    }
-
-    private class FakeOAuthClient(private val id: String) : OAuthCodeClient {
-        override fun authorizeUrl(pkce: Pkce): String = "$id:${pkce.state}"
-        override fun parseCallback(url: String): OAuthCallback? = null
-        override suspend fun exchange(callback: OAuthCallback, pkce: Pkce): OAuthTokens = error("unused")
-        override suspend fun refresh(tokens: OAuthTokens): OAuthTokens = error("unused")
     }
 
     private class FakeBrowserClient(private val id: String, manual: String?) : BrowserOAuthClient {

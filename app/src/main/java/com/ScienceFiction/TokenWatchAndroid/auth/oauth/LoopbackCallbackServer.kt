@@ -4,6 +4,7 @@ import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.io.InputStream
 import java.net.InetAddress
+import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.net.URI
@@ -38,7 +39,9 @@ sealed interface LoopbackFailure {
  *
  * Why it exists: the claude.ai authorization server rejects custom-scheme redirect URIs, so the
  * sign-in window is sent to `http://localhost:<port>/callback` and the app receives the code itself
- * (the same structure as the Claude Code and Grok CLI logins).
+ * (the same structure as the Claude Code, Grok and Codex CLI logins). Most providers accept any
+ * port, so a fresh ephemeral one is bound per attempt; Codex's client is registered on one exact
+ * redirect (`http://localhost:1455/auth/callback`), so [port] and [callbackPath] can pin both.
  *
  * The response is `302 Found` to `tokenwatch://login-complete?code=…&state=…`. The Auth Tab closes
  * itself on a redirect to that scheme, and without Auth Tab support the scheme opens
@@ -58,6 +61,13 @@ class LoopbackCallbackServer(
     /** Only a callback with exactly this state is accepted (CSRF defence). */
     private val expectedState: String,
     parentScope: CoroutineScope,
+    /**
+     * The port to listen on; 0 (the default) binds a fresh ephemeral port. A fixed port that another
+     * app holds makes [start] throw a [java.net.BindException].
+     */
+    private val port: Int = 0,
+    /** The only path a callback is accepted on. */
+    private val callbackPath: String = DEFAULT_CALLBACK_PATH,
     /** Upper bound on the listener's life; injectable so tests need not wait ten minutes. */
     private val lifetimeMillis: Long = DEFAULT_LIFETIME_MILLIS,
     /** Called at most once (and never together with [onCode]), on a background thread. */
@@ -71,15 +81,18 @@ class LoopbackCallbackServer(
     private val delivered = AtomicBoolean(false)
     private val stopped = AtomicBoolean(false)
 
-    /** Binds an ephemeral loopback port and returns it. */
+    /**
+     * Binds the loopback port ([port], or an ephemeral one) and returns it. Throws an [IOException]
+     * when the port cannot be bound; nothing is left listening then.
+     */
     suspend fun start(): Int = withContext(Dispatchers.IO) {
-        val v4 = ServerSocket(0, BACKLOG, InetAddress.getByAddress(IPV4_LOOPBACK))
+        val v4 = bind(IPV4_LOOPBACK, port)
         serverSockets += v4
         acceptLoop(v4)
-        val port = v4.localPort
+        val boundPort = v4.localPort
         // A browser may try `localhost` as ::1 first. Listen there on the same port as well; failing
         // is fine because the browser falls back to IPv4.
-        runCatching { ServerSocket(port, BACKLOG, InetAddress.getByAddress(IPV6_LOOPBACK)) }
+        runCatching { bind(IPV6_LOOPBACK, boundPort) }
             .getOrNull()
             ?.let { v6 ->
                 serverSockets += v6
@@ -92,7 +105,24 @@ class LoopbackCallbackServer(
             stop()
             if (timedOut) onFailure(LoopbackFailure.TimedOut)
         }
-        port
+        boundPort
+    }
+
+    /**
+     * SO_REUSEADDR is set explicitly: a fixed port that just served a callback still has that
+     * connection in TIME_WAIT, which would otherwise block the next attempt for about a minute. It
+     * never lets two listeners share a port, so a port held by another app still fails to bind.
+     */
+    private fun bind(address: ByteArray, port: Int): ServerSocket {
+        val socket = ServerSocket()
+        try {
+            socket.reuseAddress = true
+            socket.bind(InetSocketAddress(InetAddress.getByAddress(address), port), BACKLOG)
+        } catch (error: IOException) {
+            runCatching { socket.close() }
+            throw error
+        }
+        return socket
     }
 
     fun stop() {
@@ -125,7 +155,7 @@ class LoopbackCallbackServer(
                     respond(connection, "400 Bad Request", body = "bad request")
                     return
                 }
-                val parsed = parseCallback(target, expectedState)
+                val parsed = parseCallback(target, expectedState, callbackPath)
                 if (parsed != null) {
                     respond(
                         connection,
@@ -134,7 +164,7 @@ class LoopbackCallbackServer(
                     )
                     return@use parsed
                 }
-                val error = parseCallbackError(target, expectedState)
+                val error = parseCallbackError(target, expectedState, callbackPath)
                 if (error != null) {
                     // Same window-closing redirect, carrying the error instead of a code.
                     respond(
@@ -205,6 +235,9 @@ class LoopbackCallbackServer(
         const val SESSION_CALLBACK_SCHEME = "tokenwatch"
         const val SESSION_CALLBACK_HOST = "login-complete"
 
+        /** Callback path of the providers that take any loopback port (Claude, Grok). */
+        const val DEFAULT_CALLBACK_PATH = "/callback"
+
         /** Upper bound on the listener's life, so an abandoned login never leaks the port. */
         const val DEFAULT_LIFETIME_MILLIS = 600_000L
         private const val SHUTDOWN_DELAY_MILLIS = 1_000L
@@ -231,9 +264,13 @@ class LoopbackCallbackServer(
         }
 
         /** Code and state, only for the callback path with the expected state. */
-        fun parseCallback(target: String, expectedState: String): OAuthCallback? {
+        fun parseCallback(
+            target: String,
+            expectedState: String,
+            callbackPath: String = DEFAULT_CALLBACK_PATH,
+        ): OAuthCallback? {
             val url = "http://localhost$target".toHttpUrlOrNull() ?: return null
-            if (url.encodedPath != "/callback") return null
+            if (url.encodedPath != callbackPath) return null
             val code = url.queryParameter("code")?.takeIf(String::isNotEmpty) ?: return null
             val state = url.queryParameter("state") ?: return null
             if (state != expectedState) return null
@@ -247,9 +284,13 @@ class LoopbackCallbackServer(
          * to another attempt and is ignored. An error can only end the attempt, never complete it —
          * a code still requires the exact state ([parseCallback]).
          */
-        fun parseCallbackError(target: String, expectedState: String): String? {
+        fun parseCallbackError(
+            target: String,
+            expectedState: String,
+            callbackPath: String = DEFAULT_CALLBACK_PATH,
+        ): String? {
             val url = "http://localhost$target".toHttpUrlOrNull() ?: return null
-            if (url.encodedPath != "/callback") return null
+            if (url.encodedPath != callbackPath) return null
             if (!url.queryParameter("code").isNullOrEmpty()) return null
             val state = url.queryParameter("state")
             if (state != null && state != expectedState) return null

@@ -12,6 +12,22 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class LoginFailureCodeTest {
+    /**
+     * Codex moved from the WebView to the sign-in window, so its login events now say
+     * `oauth_browser` (iOS keeps `oauth`); no provider sends `oauth` from Android any more.
+     */
+    @Test
+    fun codexLoginsAreTaggedAsBrowserSignIn() {
+        assertEquals("oauth_browser", AgentProvider.CODEX.analyticsAuthKind)
+        assertEquals("oauth_browser", AnalyticsEvent.LoginStart(AgentProvider.CODEX).parameters["auth_kind"])
+        assertTrue(AgentProvider.entries.none { it.analyticsAuthKind == "oauth" })
+    }
+
+    @Test
+    fun portInUseCodeIsTransmittable() {
+        assertEquals(LoginFailureCode.LOOPBACK_PORT_IN_USE, LoginFailureCode.sanitized(LoginFailureCode.LOOPBACK_PORT_IN_USE))
+    }
+
     @Test
     fun classifiesOAuthFailures() {
         assertEquals("state_mismatch", LoginFailureCode.from(OAuthException.StateMismatch()))

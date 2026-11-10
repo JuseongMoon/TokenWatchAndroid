@@ -188,6 +188,86 @@ class BrowserLoginTest {
 
     // endregion
 
+    // region Fixed port and path (Codex: localhost:1455/auth/callback)
+
+    private fun freePort(): Int =
+        java.net.ServerSocket(0, 1, java.net.InetAddress.getByName("127.0.0.1")).use { it.localPort }
+
+    private fun fixedServer(
+        scope: CoroutineScope,
+        port: Int,
+        state: String,
+        onCode: (String) -> Unit = {},
+    ) = LoopbackCallbackServer(state, scope, port = port, callbackPath = "/auth/callback") { code, _ -> onCode(code) }
+
+    private fun callback(port: Int, path: String, state: String): Int = noRedirects.newCall(
+        Request.Builder().url("http://127.0.0.1:$port$path?code=fixed-code&state=$state").build(),
+    ).execute().use { it.code }
+
+    @Test fun aFixedPortListenerBindsThatPortAndTakesOnlyItsPath() {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        val port = freePort()
+        val delivered = CountDownLatch(1)
+        val server = fixedServer(scope, port, "fixed-state") { delivered.countDown() }
+        try {
+            assertEquals(port, runBlocking { server.start() })
+            assertEquals(404, callback(port, "/callback", "fixed-state"))
+            assertFalse(delivered.await(200, TimeUnit.MILLISECONDS))
+            assertEquals(302, callback(port, "/auth/callback", "fixed-state"))
+            assertTrue(delivered.await(2, TimeUnit.SECONDS))
+        } finally {
+            server.stop()
+            scope.cancel()
+        }
+    }
+
+    @Test fun aFixedPortHeldByAnotherListenerFailsToBind() {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        java.net.ServerSocket(0, 1, java.net.InetAddress.getByName("127.0.0.1")).use { other ->
+            val server = fixedServer(scope, other.localPort, "s")
+            try {
+                assertThrows(java.net.BindException::class.java) { runBlocking { server.start() } }
+            } finally {
+                server.stop()
+                scope.cancel()
+            }
+        }
+    }
+
+    /**
+     * A second sign-in right after the first (adding another account) binds the same port while the
+     * first callback's connection may still be in TIME_WAIT; SO_REUSEADDR keeps that from failing.
+     */
+    @Test fun aFixedPortCanBeTakenAgainRightAfterServingACallback() {
+        val port = freePort()
+        repeat(3) { round ->
+            val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+            val delivered = CountDownLatch(1)
+            val server = fixedServer(scope, port, "round-$round") { delivered.countDown() }
+            try {
+                assertEquals(port, runBlocking { server.start() })
+                assertEquals(302, callback(port, "/auth/callback", "round-$round"))
+                assertTrue(delivered.await(2, TimeUnit.SECONDS))
+            } finally {
+                server.stop()
+                scope.cancel()
+            }
+        }
+    }
+
+    @Test fun parsingFollowsTheGivenCallbackPath() {
+        val target = "/auth/callback?code=c&state=$fallback"
+        assertEquals(OAuthCallback("c", fallback), LoopbackCallbackServer.parseCallback(target, fallback, "/auth/callback"))
+        assertNull(LoopbackCallbackServer.parseCallback(target, fallback))
+        assertEquals(
+            "access_denied",
+            LoopbackCallbackServer.parseCallbackError("/auth/callback?error=access_denied", fallback, "/auth/callback"),
+        )
+        assertNull(LoopbackCallbackServer.parseCallbackError("/callback?error=access_denied", fallback, "/auth/callback"))
+    }
+
+    // endregion
+
     // region A5: error callbacks and the listener timeout
 
     @Test fun anErrorCallbackNeedsTheCallbackPathAndTheExpectedState() {
@@ -347,8 +427,14 @@ class BrowserLoginTest {
         val claude = ClaudeOAuthClient(NetworkTransport { error("unused") })
         val pkce = Pkce.create()
         assertEquals("http://localhost:54321/callback", claude.loopbackRedirectUri(54321))
-        // The paste fallback with its explicit console redirect equals the old default URL.
-        assertEquals(claude.authorizeUrl(pkce), claude.authorizeUrl(pkce, claude.manualCodeRedirect))
+        // The paste fallback signs in with the console code page as its redirect.
+        assertEquals(ClaudeOAuthClient.REDIRECT_URI, claude.manualCodeRedirect)
+        assertEquals(
+            ClaudeOAuthClient.REDIRECT_URI,
+            okhttp3.HttpUrl.Companion.run {
+                claude.authorizeUrl(pkce, claude.manualCodeRedirect).toHttpUrl().queryParameter("redirect_uri")
+            },
+        )
         assertTrue(claude.authorizeUrl(pkce, claude.loopbackRedirectUri(54321)).contains("redirect_uri=http"))
     }
 

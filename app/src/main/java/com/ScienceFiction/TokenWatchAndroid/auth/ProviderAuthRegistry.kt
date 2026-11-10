@@ -3,7 +3,6 @@ package com.ScienceFiction.TokenWatchAndroid.auth
 import com.ScienceFiction.TokenWatchAndroid.auth.device.CopilotDeviceFlow
 import com.ScienceFiction.TokenWatchAndroid.auth.device.CursorAuth
 import com.ScienceFiction.TokenWatchAndroid.auth.oauth.BrowserOAuthClient
-import com.ScienceFiction.TokenWatchAndroid.auth.oauth.OAuthCodeClient
 import com.ScienceFiction.TokenWatchAndroid.domain.AgentProvider
 import com.ScienceFiction.TokenWatchAndroid.domain.AuthKind
 import com.ScienceFiction.TokenWatchAndroid.network.providers.apikey.KimiUsageClient
@@ -28,26 +27,12 @@ class PollingLogin(
  */
 class ProviderAuthRegistry(
     private val claudeOAuth: BrowserOAuthClient,
-    private val codexOAuth: OAuthCodeClient,
+    private val codexOAuth: BrowserOAuthClient,
     private val grokOAuth: BrowserOAuthClient,
     private val copilotDeviceFlow: CopilotDeviceFlow,
     private val cursorAuth: CursorAuth,
     private val kimi: KimiUsageClient,
 ) {
-    /** WebView login with an intercepted callback (`OAUTH_CODE`). */
-    fun oauthClient(provider: AgentProvider): OAuthCodeClient {
-        require(provider.authKind == AuthKind.OAUTH_CODE) {
-            "OAuth code flow is unavailable for ${provider.wireId}"
-        }
-        return when (provider) {
-            AgentProvider.CODEX -> codexOAuth
-            AgentProvider.CLAUDE, AgentProvider.COPILOT, AgentProvider.GROK, AgentProvider.CURSOR,
-            AgentProvider.KIMI, AgentProvider.OPENROUTER, AgentProvider.DEEPSEEK, AgentProvider.POE,
-            AgentProvider.ELEVENLABS,
-            -> error("OAuth registry mismatch for ${provider.wireId}")
-        }
-    }
-
     /** In-app sign-in window with a loopback callback (`OAUTH_BROWSER`). */
     fun browserClient(provider: AgentProvider): BrowserOAuthClient {
         require(provider.authKind == AuthKind.OAUTH_BROWSER) {
@@ -56,7 +41,8 @@ class ProviderAuthRegistry(
         return when (provider) {
             AgentProvider.CLAUDE -> claudeOAuth
             AgentProvider.GROK -> grokOAuth
-            AgentProvider.CODEX, AgentProvider.COPILOT, AgentProvider.CURSOR, AgentProvider.KIMI,
+            AgentProvider.CODEX -> codexOAuth
+            AgentProvider.COPILOT, AgentProvider.CURSOR, AgentProvider.KIMI,
             AgentProvider.OPENROUTER, AgentProvider.DEEPSEEK, AgentProvider.POE, AgentProvider.ELEVENLABS,
             -> error("Browser sign-in registry mismatch for ${provider.wireId}")
         }

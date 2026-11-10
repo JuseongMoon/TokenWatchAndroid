@@ -25,6 +25,7 @@ import com.ScienceFiction.TokenWatchAndroid.network.core.UsageException
 import com.ScienceFiction.TokenWatchAndroid.network.orchestration.UsageGateway
 import com.ScienceFiction.TokenWatchAndroid.network.providers.apikey.KimiKeyException
 import java.io.IOException
+import java.net.BindException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -35,7 +36,10 @@ internal data class PollingLoginInfo(val userCode: String?, val verificationUrl:
 internal sealed interface AddAgentPhase {
     data object PickProvider : AddAgentPhase
 
-    /** `OAUTH_BROWSER`: in-app sign-in window with a loopback callback, or the pasted-code fallback. */
+    /**
+     * `OAUTH_BROWSER` (Claude, Grok, Codex): in-app sign-in window with a loopback callback, or the
+     * pasted-code fallback.
+     */
     data class BrowserLogin(
         val provider: AgentProvider,
         val pkce: Pkce,
@@ -48,8 +52,6 @@ internal sealed interface AddAgentPhase {
         val inlineError: String? = null,
     ) : AddAgentPhase
 
-    /** `OAUTH_CODE`: WebView login with an intercepted callback. */
-    data class OAuthLogin(val provider: AgentProvider, val pkce: Pkce) : AddAgentPhase
     data class ApiKey(val provider: AgentProvider) : AddAgentPhase
 
     /** `OAUTH_DEVICE_FLOW`: approval page in an in-app tab while the app polls. */
@@ -131,7 +133,6 @@ internal class AddAgentFlowViewModel : ViewModel() {
         resetFlow()
         phase = when (provider.authKind) {
             AuthKind.OAUTH_BROWSER -> AddAgentPhase.BrowserLogin(provider, Pkce.create())
-            AuthKind.OAUTH_CODE -> AddAgentPhase.OAuthLogin(provider, Pkce.create())
             AuthKind.API_KEY -> AddAgentPhase.ApiKey(provider)
             AuthKind.OAUTH_DEVICE_FLOW -> AddAgentPhase.DeviceFlow(provider)
         }
@@ -161,6 +162,8 @@ internal class AddAgentFlowViewModel : ViewModel() {
         val server = LoopbackCallbackServer(
             expectedState = current.pkce.state,
             parentScope = viewModelScope,
+            port = client.loopbackPort ?: 0,
+            callbackPath = client.loopbackCallbackPath,
             lifetimeMillis = loopbackLifetimeMillis,
             onFailure = { failure ->
                 viewModelScope.launch { receiveLoopbackFailure(attempt, failure, loc) }
@@ -172,7 +175,20 @@ internal class AddAgentFlowViewModel : ViewModel() {
             server.start()
         } catch (error: IOException) {
             server.stop()
-            if (attempt == browserAttempt) failBrowserSession(current.provider, providerAuth, loc, "loopback_listen")
+            if (attempt == browserAttempt) {
+                if (error is BindException && client.loopbackPort != null) {
+                    // The registered port is held by another app (another sign-in still waiting,
+                    // for example); there is no other port to fall back to.
+                    stopBrowserAttempt()
+                    phase = AddAgentPhase.Failed(
+                        loc.browserPortInUse,
+                        LoginStage.BROWSER_WAIT,
+                        LoginFailureCode.LOOPBACK_PORT_IN_USE,
+                    )
+                } else {
+                    failBrowserSession(current.provider, providerAuth, loc, "loopback_listen")
+                }
+            }
             return null
         }
         // Dismissed or restarted while the listener was coming up: drop this attempt.
@@ -425,35 +441,6 @@ internal class AddAgentFlowViewModel : ViewModel() {
 
     // endregion
 
-    // region WebView login (OAUTH_CODE)
-
-    fun exchangeOAuth(
-        callback: OAuthCallback,
-        providerAuth: ProviderAuthRegistry,
-        loc: L10n,
-        onAddAgent: suspend (AgentProvider, OAuthTokens) -> Unit,
-    ) {
-        val current = phase as? AddAgentPhase.OAuthLogin ?: return
-        phase = AddAgentPhase.Authenticating
-        flowJob = viewModelScope.launch {
-            val tokens = try {
-                providerAuth.oauthClient(current.provider).exchange(callback, current.pkce)
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (error: Throwable) {
-                phase = AddAgentPhase.Failed(
-                    authErrorMessage(error, loc),
-                    LoginStage.EXCHANGE,
-                    LoginFailureCode.from(error),
-                )
-                return@launch
-            }
-            addTokens(current.provider, tokens, loc, onAddAgent)
-        }
-    }
-
-    // endregion
-
     // region Polling login (OAUTH_DEVICE_FLOW)
 
     private fun startPollingLogin(
@@ -510,10 +497,6 @@ internal class AddAgentFlowViewModel : ViewModel() {
     /** The app went to the background (another app, the home screen, or a sign-in tab). */
     fun onAppStopped() {
         foregroundSignal.onBackground()
-    }
-
-    fun fail(message: String) {
-        if (phase != AddAgentPhase.Completed) phase = AddAgentPhase.Failed(message)
     }
 
     /**

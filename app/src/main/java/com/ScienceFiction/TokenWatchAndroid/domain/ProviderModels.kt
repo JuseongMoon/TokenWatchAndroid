@@ -2,13 +2,11 @@ package com.ScienceFiction.TokenWatchAndroid.domain
 
 /** How a provider obtains credentials from the user. The add screen routes on this value. */
 enum class AuthKind {
-    /** In-app WebView login whose OAuth callback redirect is intercepted (Codex). */
-    OAUTH_CODE,
-
     /**
      * In-app sign-in window (Auth Tab, falling back to a Custom Tab) that returns the code to a
-     * one-shot loopback listener (Claude, Grok). Unlike a WebView it runs on the browser engine, so
-     * popup-based social sign-in such as Google works. Claude also offers a paste-the-code fallback.
+     * one-shot loopback listener (Claude, Grok, Codex). Unlike a WebView it runs on the browser
+     * engine, so popup-based social sign-in such as Google works and identity providers that refuse
+     * embedded browsers do not. Claude also offers a paste-the-code fallback.
      */
     OAUTH_BROWSER,
 
@@ -83,7 +81,7 @@ enum class AgentProvider(
         atlassian("status.claude.com"),
     ),
     CODEX(
-        "codex", "Codex", "[X]", TerminalColorKey.CYAN, AuthKind.OAUTH_CODE,
+        "codex", "Codex", "[X]", TerminalColorKey.CYAN, AuthKind.OAUTH_BROWSER,
         UsageCategory.SUBSCRIPTION, null, "https://status.openai.com",
         atlassian("status.openai.com"),
     ),

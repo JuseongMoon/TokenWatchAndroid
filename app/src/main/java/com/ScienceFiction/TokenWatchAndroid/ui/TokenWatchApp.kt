@@ -347,7 +347,6 @@ private fun TokenWatchAppContent(
                     analytics.log(AnalyticsEvent.LoginFail(phase.provider, LoginStage.CODE_ENTRY, "code_parse"))
                 }
             }
-            is AddAgentPhase.OAuthLogin -> started(phase.provider, LoginStage.AUTHORIZE)
             is AddAgentPhase.ApiKey -> started(phase.provider, LoginStage.API_KEY_ENTRY)
             is AddAgentPhase.DeviceFlow -> started(phase.provider, LoginStage.DEVICE_POLL)
             AddAgentPhase.Authenticating -> {
@@ -748,7 +747,7 @@ private fun TokenWatchAppContent(
 
     // Sits outside the route switch so it can also cover a pushed detail screen, matching iOS.
     // Held back on the add and settings routes: those are full screens here rather than sheets, and
-    // the add route hosts the OAuth WebView, where a modal scrim would block a login in progress.
+    // the add route hosts the sign-in flow, where a modal scrim would block a login in progress.
     val announcementAllowed = initialLoadFinished &&
         !container.underInstrumentation &&
         (route == ROUTE_MAIN || route.startsWith(ROUTE_DETAIL_PREFIX))

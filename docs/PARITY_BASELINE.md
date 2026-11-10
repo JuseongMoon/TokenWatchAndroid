@@ -63,12 +63,14 @@ Firebase Analytics runs against the Android app's own Firebase registration and
   expires. Kimi probes both regional hosts before a card exists and reads the new
   `usages.limit_*` shape before the legacy one. Plans carried by a usage response (Grok,
   Cursor) are stored on every fetch.
-- Four authentication families: WebView code capture (Codex), in-app sign-in window with a
-  loopback callback (Claude, Grok; Claude keeps a paste-the-code fallback), polling login with
-  the approval page in an in-app tab (Copilot with a code, Cursor without), and API keys. Pages
-  involved in signing in (approval, key issuance, code pages) open inside the app.
-- The loopback listener binds 127.0.0.1 and ::1 on one ephemeral port, accepts only the expected
-  state, answers `302` to `tokenwatch://login-complete`, and hands the code over only after that
+- Three authentication families on Android: in-app sign-in window with a loopback callback
+  (Claude, Grok, Codex; Claude keeps a paste-the-code fallback), polling login with the approval
+  page in an in-app tab (Copilot with a code, Cursor without), and API keys. Pages involved in
+  signing in (approval, key issuance, code pages) open inside the app. iOS still signs Codex in
+  through WebView code capture; see the platform-specific adaptations below.
+- The loopback listener binds 127.0.0.1 and ::1 on one port (an ephemeral one, or the port a
+  provider's redirect is registered on: Codex `localhost:1455/auth/callback`), accepts only the
+  callback path and the expected state, answers `302` to `tokenwatch://login-complete`, and hands the code over only after that
   response is written. A code exchange that fails before reaching the server is retried once,
   and the failure screen's RETRY repeats only the exchange; `invalid_grant` at exchange reads as
   an expired code rather than "log in again".
@@ -241,11 +243,13 @@ Firebase Analytics runs against the Android app's own Firebase registration and
 
 ## Platform-specific parity adaptations
 
-- OAuth callbacks are inspected both in WebView navigation callbacks and in
-  `shouldInterceptRequest`. Android does not invoke `shouldOverrideUrlLoading`
-  for POST requests, while the iOS `WKNavigationDelegate` sees the equivalent
-  form navigation. The request-stage interception is therefore required for
-  Claude login parity and must remain one-shot to preserve PKCE state handling.
+- Codex signs in through the in-app sign-in window (Auth Tab, or a Custom Tab) with the
+  loopback listener on its registered redirect `http://localhost:1455/auth/callback`, instead of
+  the iOS WebView. The embedded WebView was blocked for many users (Cloudflare's browser check,
+  identity providers that refuse embedded browsers). The authorize parameters, the token exchange
+  and refresh, and the stored credential are the same as before, so existing Codex accounts need
+  no migration. Android's login events therefore tag Codex `auth_kind=oauth_browser` where iOS
+  sends `oauth`. When another app holds port 1455 the attempt fails as `loopback_port_in_use`.
 - Android keeps the screen-awake flag through `ON_PAUSE` and clears it only at
   `ON_STOP`, matching the iOS rule that preserves the flag while inactive and
   clears it only after entering the background.

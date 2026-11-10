@@ -1,7 +1,6 @@
 package com.ScienceFiction.TokenWatchAndroid.auth
 
 import com.ScienceFiction.TokenWatchAndroid.auth.oauth.BrowserOAuthClient
-import com.ScienceFiction.TokenWatchAndroid.auth.oauth.OAuthCodeClient
 import com.ScienceFiction.TokenWatchAndroid.auth.oauth.OAuthException
 import com.ScienceFiction.TokenWatchAndroid.domain.AgentProvider
 import java.time.Instant
@@ -28,7 +27,7 @@ fun interface TokenRefresher {
  */
 class ProviderTokenRefresher(
     private val claude: BrowserOAuthClient,
-    private val codex: OAuthCodeClient,
+    private val codex: BrowserOAuthClient,
     private val grok: BrowserOAuthClient,
 ) : TokenRefresher {
     override suspend fun refresh(provider: AgentProvider, tokens: OAuthTokens): OAuthTokens =

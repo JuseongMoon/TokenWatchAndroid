@@ -21,9 +21,7 @@ class ClaudeOAuthClient(
     private val transport: NetworkTransport,
     private val now: () -> Instant = Instant::now,
     private val tokenUrl: String = TOKEN_URL,
-) : OAuthCodeClient, BrowserOAuthClient {
-    override fun authorizeUrl(pkce: Pkce): String = authorizeUrl(pkce, REDIRECT_URI)
-
+) : BrowserOAuthClient {
     override fun loopbackRedirectUri(port: Int): String = "http://localhost:$port/callback"
 
     override fun authorizeUrl(pkce: Pkce, redirect: String): String = AUTHORIZE_URL.toHttpUrl().newBuilder()
@@ -39,11 +37,6 @@ class ClaudeOAuthClient(
         .toString()
 
     override val manualCodeRedirect: String = REDIRECT_URI
-
-    override fun parseCallback(url: String): OAuthCallback? = parseConsoleCallback(url)
-
-    override suspend fun exchange(callback: OAuthCallback, pkce: Pkce): OAuthTokens =
-        exchange(callback.code, callback.state, pkce, REDIRECT_URI)
 
     override suspend fun exchange(code: String, state: String, pkce: Pkce, redirect: String): OAuthTokens {
         if (state != pkce.state) throw OAuthException.StateMismatch()

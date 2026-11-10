@@ -291,10 +291,12 @@ sealed class AnalyticsEvent(
     )
 }
 
-/** The `auth_kind` parameter value, matching iOS `authKindTag`. */
+/**
+ * The `auth_kind` parameter value, matching iOS `authKindTag`. iOS still signs Codex in through a
+ * WebView and sends `oauth` for it; Android's Codex uses the sign-in window and sends `oauth_browser`.
+ */
 val AgentProvider.analyticsAuthKind: String
     get() = when (authKind) {
-        AuthKind.OAUTH_CODE -> "oauth"
         AuthKind.OAUTH_BROWSER -> "oauth_browser"
         AuthKind.OAUTH_DEVICE_FLOW -> "device"
         AuthKind.API_KEY -> "api_key"

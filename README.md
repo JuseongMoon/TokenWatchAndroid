@@ -9,7 +9,7 @@
 
 - 공식 API 또는 검증된 엔드포인트를 사용하는 10개 서비스
   (Claude, Codex, Copilot, Grok, Cursor, Kimi, OpenRouter, DeepSeek, Poe, ElevenLabs)
-- 앱 안 로그인 창(Auth Tab) + 루프백 콜백, WebView OAuth, 폴링 로그인, API key 인증
+- 앱 안 로그인 창(Auth Tab) + 루프백 콜백, 폴링 로그인, API key 인증
 - 같은 계정으로 다시 로그인하면 카드를 늘리지 않고 토큰만 교체
 - 로그인 없이 전체 UI를 둘러보는 격리된 데모 모드
 - 업무시간에만 진행하는 주간 게이지 현재시각 마커

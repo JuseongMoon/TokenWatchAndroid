@@ -23,20 +23,21 @@ sealed class OAuthException(message: String, cause: Throwable? = null) : Excepti
     class CodeExpired : OAuthException("The code expired or was already used")
 }
 
-/** OAuth code flow completed inside a WebView whose callback redirect is intercepted (Codex). */
-interface OAuthCodeClient {
-    fun authorizeUrl(pkce: Pkce): String
-    fun parseCallback(url: String): OAuthCallback?
-    suspend fun exchange(callback: OAuthCallback, pkce: Pkce): OAuthTokens
-    suspend fun refresh(tokens: OAuthTokens): OAuthTokens
-}
-
 /**
  * OAuth code flow completed in the in-app sign-in window: the authorization server redirects to a
- * loopback address the app is listening on (Claude, Grok). Matches iOS `ProviderAuth`'s
+ * loopback address the app is listening on (Claude, Grok, Codex). Matches iOS `ProviderAuth`'s
  * `loopbackRedirectURI` / `authorizeURL(redirect:)` / `manualCodeRedirect` / `exchange(redirect:)`.
  */
 interface BrowserOAuthClient {
+    /**
+     * The port the redirect is registered on, or null when any port works and a fresh ephemeral one
+     * is bound per attempt. Codex's client accepts only `localhost:1455`.
+     */
+    val loopbackPort: Int? get() = null
+
+    /** The redirect's path, which the loopback listener matches exactly. */
+    val loopbackCallbackPath: String get() = LoopbackCallbackServer.DEFAULT_CALLBACK_PATH
+
     fun loopbackRedirectUri(port: Int): String
     fun authorizeUrl(pkce: Pkce, redirect: String): String
 

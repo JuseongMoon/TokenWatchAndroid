@@ -12,10 +12,12 @@ import java.time.Instant
 import java.util.Base64
 import java.util.UUID
 import kotlinx.coroutines.runBlocking
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Request
 import okio.Buffer
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -32,26 +34,101 @@ class OAuthCodeClientsTest {
     fun authorizeUrlsAndCallbacksCarryPkce() {
         val transport = FakeTransport("{}")
         val claude = ClaudeOAuthClient(transport)
-        val codex = CodexOAuthClient(transport)
 
-        assertTrue(claude.authorizeUrl(pkce).contains("code_challenge=${pkce.challenge}"))
-        assertTrue(codex.authorizeUrl(pkce).contains("codex_cli_simplified_flow=true"))
+        assertTrue(
+            claude.authorizeUrl(pkce, ClaudeOAuthClient.REDIRECT_URI).contains("code_challenge=${pkce.challenge}"),
+        )
         assertEquals(
             OAuthCallback("abc", pkce.state),
-            claude.parseCallback("${ClaudeOAuthClient.CALLBACK_PREFIX}?code=abc&state=${pkce.state}"),
-        )
-        assertEquals(
-            OAuthCallback("xyz", pkce.state),
-            codex.parseCallback("${CodexOAuthClient.CALLBACK_PREFIX}?code=xyz&state=${pkce.state}"),
+            ClaudeOAuthClient.parseConsoleCallback("${ClaudeOAuthClient.CALLBACK_PREFIX}?code=abc&state=${pkce.state}"),
         )
     }
 
-    @Test(expected = OAuthException.StateMismatch::class)
-    fun exchangeRejectsMismatchedStateBeforeNetwork(): Unit = runBlocking {
-        ClaudeOAuthClient(FakeTransport("{}"))
-            .exchange(OAuthCallback("code", "wrong"), pkce)
-        Unit
+    @Test
+    fun exchangeRejectsMismatchedStateBeforeNetwork() {
+        listOf<BrowserOAuthClient>(
+            ClaudeOAuthClient(FakeTransport("{}")),
+            CodexOAuthClient(FakeTransport("{}")),
+        ).forEach { client ->
+            assertThrows(OAuthException.StateMismatch::class.java) {
+                runBlocking { client.exchange("code", "wrong", pkce, "http://localhost:1/callback") }
+            }
+        }
     }
+
+    // region Codex sign-in window
+
+    /** OpenAI accepts only the registered redirect, so the listener and both requests must use it. */
+    @Test
+    fun codexLoopbackIsTheRegisteredRedirect() {
+        val codex = CodexOAuthClient(FakeTransport("{}"))
+
+        assertEquals(1455, codex.loopbackPort)
+        assertEquals("/auth/callback", codex.loopbackCallbackPath)
+        assertEquals(CodexOAuthClient.REDIRECT_URI, codex.loopbackRedirectUri(codex.loopbackPort))
+        assertEquals("http://localhost:1455/auth/callback", CodexOAuthClient.REDIRECT_URI)
+        // No paste-the-code fallback: the code only ever arrives at the loopback address.
+        assertNull(codex.manualCodeRedirect)
+    }
+
+    /** The authorize request keeps every parameter of the WebView flow it replaces. */
+    @Test
+    fun codexAuthorizeUrlKeepsTheCliParameters() {
+        val codex = CodexOAuthClient(FakeTransport("{}"))
+        val url = codex.authorizeUrl(pkce, codex.loopbackRedirectUri(codex.loopbackPort)).toHttpUrl()
+
+        assertEquals("https://auth.openai.com/oauth/authorize", url.newBuilder().query(null).build().toString())
+        assertEquals("code", url.queryParameter("response_type"))
+        assertEquals(CodexOAuthClient.CLIENT_ID, url.queryParameter("client_id"))
+        assertEquals("http://localhost:1455/auth/callback", url.queryParameter("redirect_uri"))
+        assertEquals("openid profile email offline_access", url.queryParameter("scope"))
+        assertEquals(pkce.challenge, url.queryParameter("code_challenge"))
+        assertEquals("S256", url.queryParameter("code_challenge_method"))
+        assertEquals("true", url.queryParameter("id_token_add_organizations"))
+        assertEquals("true", url.queryParameter("codex_cli_simplified_flow"))
+        assertEquals(pkce.state, url.queryParameter("state"))
+        assertEquals(9, url.querySize)
+    }
+
+    @Test
+    fun codexExchangeSendsTheSameRedirect() = runBlocking {
+        val transport = FakeTransport("""{"access_token":"access","refresh_token":"refresh","expires_in":60}""")
+        CodexOAuthClient(transport, now = { now })
+            .exchange("the-code", pkce.state, pkce, CodexOAuthClient.REDIRECT_URI)
+
+        val form = transport.lastRequest.bodyText().split('&').associate {
+            java.net.URLDecoder.decode(it.substringBefore('='), "UTF-8") to
+                java.net.URLDecoder.decode(it.substringAfter('='), "UTF-8")
+        }
+        assertEquals(
+            mapOf(
+                "grant_type" to "authorization_code",
+                "code" to "the-code",
+                "redirect_uri" to "http://localhost:1455/auth/callback",
+                "client_id" to CodexOAuthClient.CLIENT_ID,
+                "code_verifier" to "verifier",
+            ),
+            form,
+        )
+        assertEquals("application/x-www-form-urlencoded", transport.lastRequest.body?.contentType().toString())
+    }
+
+    /** Like Claude and Grok, an exchange that never reached the server is sent once more. */
+    @Test
+    fun codexExchangeRetriesATransportFailureOnce() = runBlocking {
+        var calls = 0
+        val transport = NetworkTransport {
+            calls += 1
+            if (calls == 1) throw java.net.SocketException("connection reset")
+            NetworkResponse(200, emptyMap(), """{"access_token":"access"}""".toByteArray())
+        }
+        val tokens = CodexOAuthClient(transport).exchange("code", pkce.state, pkce, CodexOAuthClient.REDIRECT_URI)
+
+        assertEquals("access", tokens.accessToken)
+        assertEquals(2, calls)
+    }
+
+    // endregion
 
     @Test
     fun claudeExchangeMapsAccountAndFormBody() = runBlocking {
@@ -59,7 +136,7 @@ class OAuthCodeClientsTest {
             """{"access_token":"access","refresh_token":"refresh","expires_in":3600,"account":{"email_address":"a@example.com"},"organization":{"name":"pro"}}""",
         )
         val tokens = ClaudeOAuthClient(transport, now = { now })
-            .exchange(OAuthCallback("code", pkce.state), pkce)
+            .exchange("code", pkce.state, pkce, ClaudeOAuthClient.REDIRECT_URI)
 
         assertEquals("access", tokens.accessToken)
         assertEquals("refresh", tokens.refreshToken)
@@ -79,7 +156,7 @@ class OAuthCodeClientsTest {
             """{"access_token":"access","refresh_token":"refresh","id_token":"$idToken","expires_in":7200}""",
         )
         val tokens = CodexOAuthClient(transport, now = { now })
-            .exchange(OAuthCallback("code", pkce.state), pkce)
+            .exchange("code", pkce.state, pkce, CodexOAuthClient.REDIRECT_URI)
 
         assertEquals("codex@example.com", tokens.accountEmail)
         assertEquals("Chatgpt Plus", tokens.plan)
@@ -113,7 +190,7 @@ class OAuthCodeClientsTest {
     @Test
     fun invalidGrantIsClassifiedAsPermanentRefreshRevocation() {
         val tokens = OAuthTokens("old", refreshToken = "revoked")
-        listOf<OAuthCodeClient>(
+        listOf<BrowserOAuthClient>(
             ClaudeOAuthClient(FakeTransport("""{"error":"invalid_grant"}""", 400)),
             CodexOAuthClient(FakeTransport("""{"error":"invalid_grant"}""", 401)),
         ).forEach { client ->
@@ -206,7 +283,7 @@ class OAuthCodeClientsTest {
         assertThrows(OAuthException.ExchangeFailed::class.java) {
             runBlocking {
                 CodexOAuthClient(FakeTransport("""{"error":"refresh_token_expired"}""", 400))
-                    .exchange(OAuthCallback("code", pkce.state), pkce)
+                    .exchange("code", pkce.state, pkce, CodexOAuthClient.REDIRECT_URI)
             }
         }
     }
