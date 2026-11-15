@@ -21,6 +21,19 @@ enum class LoginStage(val wireId: String) {
     KEYSTORE("keystore"),
 }
 
+/**
+ * login_abandon `elapsed` (D020, same buckets as iOS): under 10 s, 10 s to 60 s inclusive, over 60 s.
+ * A negative span (the wall clock was set back) counts as the shortest bucket.
+ */
+fun loginElapsedBucket(elapsedMillis: Long): String = when {
+    elapsedMillis < 10_000 -> "lt10s"
+    elapsedMillis <= 60_000 -> "10_60s"
+    else -> "gt60s"
+}
+
+/** login_abandon `attempt` (D020): `1`, `2`, or `3` for three and more. */
+fun loginAttemptBucket(attempt: Int): String = attempt.coerceIn(1, 3).toString()
+
 /** Why a usage fetch failed, bucketed so no raw error text is ever transmitted. */
 enum class FetchErrorReason(val wireId: String) {
     AUTH("auth"),
@@ -158,10 +171,21 @@ sealed class AnalyticsEvent(
         ),
     )
 
-    class LoginAbandon(provider: AgentProvider, stage: LoginStage) : AnalyticsEvent(
-        "login_abandon",
-        mapOf("provider" to provider.wireId, "stage" to stage.wireId),
-    )
+    /**
+     * D020: [elapsedMillis] is wall-clock time since this attempt's login_start, background time
+     * included; [attempt] counts this provider's login_start events since its last login_success.
+     * Both leave the device bucketed only. No auth_kind: the stage already tells the methods apart.
+     */
+    class LoginAbandon(provider: AgentProvider, stage: LoginStage, elapsedMillis: Long, attempt: Int) :
+        AnalyticsEvent(
+            "login_abandon",
+            mapOf(
+                "provider" to provider.wireId,
+                "stage" to stage.wireId,
+                "elapsed" to loginElapsedBucket(elapsedMillis),
+                "attempt" to loginAttemptBucket(attempt),
+            ),
+        )
 
     class ActivationComplete(provider: AgentProvider) :
         AnalyticsEvent("activation_complete", mapOf("provider" to provider.wireId))

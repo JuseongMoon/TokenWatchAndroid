@@ -46,6 +46,14 @@ Firebase Analytics runs against the Android app's own Firebase registration and
   shared classification table; the report carries no identifier, account data or raw error text and
   is gated by the same PRIVACY opt-out, demo check and debug rule as analytics. Android classifies
   the exchange/refresh/device/API-key failures from the exception, matching what iOS sends.
+- `login_abandon` diagnostics (D020, iOS not yet settled): the event adds `elapsed` (`lt10s` under
+  10 s, `10_60s` from 10 s to 60 s inclusive, `gt60s` over 60 s, wall-clock time since that
+  attempt's `login_start`, background time included) and `attempt` (`1`, `2`, `3` for three and
+  more: that provider's `login_start` count since its last `login_success`, also reset when the
+  activity finishes or the app process restarts). No `auth_kind`, since the stage already tells the methods apart. Android keeps
+  the funnel state in the activity-retained add-agent view model, so an activity recreated
+  mid-login (rotation, dark mode, language) no longer logs a second `login_start` or loses the
+  failure that follows.
 - "hide unused graphs" split (iOS `6171f42`): a heading with two checkboxes. `percentage (0%)`
   keeps the single-toggle era key and `hide_unused` event, so existing choices carry over;
   `credit (never used)` hides credit gauges whose provider-supplied total is untouched (e.g.

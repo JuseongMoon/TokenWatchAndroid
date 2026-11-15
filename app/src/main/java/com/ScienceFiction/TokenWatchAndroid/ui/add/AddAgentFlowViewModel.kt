@@ -5,6 +5,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.ScienceFiction.TokenWatchAndroid.analytics.AnalyticsEvent
 import com.ScienceFiction.TokenWatchAndroid.analytics.LoginFailureCode
 import com.ScienceFiction.TokenWatchAndroid.analytics.LoginStage
 import com.ScienceFiction.TokenWatchAndroid.auth.ForegroundSignal
@@ -28,6 +29,9 @@ import java.io.IOException
 import java.net.BindException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 
 /** Approval page details of a polling login, without its poller. */
@@ -78,10 +82,35 @@ internal sealed interface AddAgentPhase {
     data object Completed : AddAgentPhase
 }
 
-/** Activity-retained owner for login state and in-flight authentication work. */
-internal class AddAgentFlowViewModel : ViewModel() {
-    var phase: AddAgentPhase by mutableStateOf(AddAgentPhase.PickProvider)
-        private set
+/**
+ * Activity-retained owner for login state and in-flight authentication work.
+ *
+ * [clock] is the wall clock behind login_abandon `elapsed`, replaced only by tests.
+ */
+internal class AddAgentFlowViewModel(clock: () -> Long = System::currentTimeMillis) : ViewModel() {
+    private val funnel = LoginFunnel(clock)
+
+    /** Funnel events not yet logged; buffered here so a recreated screen picks up where it left off. */
+    private val funnelEvents = Channel<AnalyticsEvent>(Channel.UNLIMITED)
+
+    /**
+     * login_start, login_fail and login_abandon, each emitted once as the phase changes. The screen
+     * logs them; login_success stays with the code that stores the agent.
+     */
+    val analyticsEvents: Flow<AnalyticsEvent> = funnelEvents.receiveAsFlow()
+
+    private var phaseState: AddAgentPhase by mutableStateOf(AddAgentPhase.PickProvider)
+
+    var phase: AddAgentPhase
+        get() = phaseState
+        private set(value) {
+            // Tests deliver loopback results on other threads; in the app everything runs on main.
+            synchronized(funnel) {
+                val previous = phaseState
+                phaseState = value
+                funnel.transition(previous, value).forEach { funnelEvents.trySend(it) }
+            }
+        }
 
     var apiKeyText: String by mutableStateOf("")
         private set
@@ -529,6 +558,10 @@ internal class AddAgentFlowViewModel : ViewModel() {
         resetFlow()
         phase = AddAgentPhase.PickProvider
     }
+
+    /** Takes the funnel events not yet collected (tests only). */
+    internal fun drainAnalyticsEvents(): List<AnalyticsEvent> =
+        generateSequence { funnelEvents.tryReceive().getOrNull() }.toList()
 
     override fun onCleared() {
         stopBrowserAttempt()

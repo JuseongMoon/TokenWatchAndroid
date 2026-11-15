@@ -49,7 +49,6 @@ import com.ScienceFiction.TokenWatchAndroid.tokenWatchContainer
 import com.ScienceFiction.TokenWatchAndroid.analytics.AnalyticsEvent
 import com.ScienceFiction.TokenWatchAndroid.analytics.StoreReviewSource
 import com.ScienceFiction.TokenWatchAndroid.analytics.AnalyticsService
-import com.ScienceFiction.TokenWatchAndroid.analytics.LoginStage
 import com.ScienceFiction.TokenWatchAndroid.domain.AgentProvider
 import com.ScienceFiction.TokenWatchAndroid.domain.WorkHoursSchedule
 import com.ScienceFiction.TokenWatchAndroid.analytics.RefreshSource
@@ -60,7 +59,6 @@ import com.ScienceFiction.TokenWatchAndroid.analytics.ScreenName
 import com.ScienceFiction.TokenWatchAndroid.ui.components.AnnouncementDialog
 import com.ScienceFiction.TokenWatchAndroid.ui.components.LocalMonsterUi
 import com.ScienceFiction.TokenWatchAndroid.ui.components.MonsterUi
-import com.ScienceFiction.TokenWatchAndroid.ui.add.AddAgentPhase
 import com.ScienceFiction.TokenWatchAndroid.ui.add.AddAgentScreen
 import com.ScienceFiction.TokenWatchAndroid.ui.add.AddAgentFlowViewModel
 import com.ScienceFiction.TokenWatchAndroid.ui.screens.AnnouncementDetailScreen
@@ -327,47 +325,10 @@ private fun TokenWatchAppContent(
         if (!previous.analyticsEnabled && settings.analyticsEnabled) changed("analytics", "on")
     }
 
-    // The Failed phase carries no provider, so the last one seen is remembered to attribute a
-    // failure or an abandoned flow. Cleared once the funnel ends, which is also what keeps a phase
-    // that merely updates in place (a code arriving, a window closing) from logging a second start.
-    var loginProvider by remember { mutableStateOf<AgentProvider?>(null) }
-    var loginStage by remember { mutableStateOf(LoginStage.AUTHORIZE) }
-    // A failure that kept its code can be retried as an exchange; that retry is the same attempt.
-    var retryProvider by remember { mutableStateOf<AgentProvider?>(null) }
-    LaunchedEffect(addAgentFlow.phase) {
-        fun started(provider: AgentProvider, stage: LoginStage) {
-            if (loginProvider == null) analytics.log(AnalyticsEvent.LoginStart(provider))
-            loginProvider = provider
-            loginStage = stage
-        }
-        when (val phase = addAgentFlow.phase) {
-            is AddAgentPhase.BrowserLogin -> {
-                started(phase.provider, if (phase.manualEntry) LoginStage.CODE_ENTRY else LoginStage.BROWSER_WAIT)
-                if (phase.inlineError != null) {
-                    analytics.log(AnalyticsEvent.LoginFail(phase.provider, LoginStage.CODE_ENTRY, "code_parse"))
-                }
-            }
-            is AddAgentPhase.ApiKey -> started(phase.provider, LoginStage.API_KEY_ENTRY)
-            is AddAgentPhase.DeviceFlow -> started(phase.provider, LoginStage.DEVICE_POLL)
-            AddAgentPhase.Authenticating -> {
-                if (loginProvider == null) loginProvider = retryProvider
-                retryProvider = null
-                if (loginStage != LoginStage.API_KEY_ENTRY) loginStage = LoginStage.EXCHANGE
-            }
-            is AddAgentPhase.Failed -> {
-                loginProvider?.let {
-                    // The message is deliberately not forwarded: it can carry provider error text.
-                    val stage = phase.stage ?: loginStage
-                    analytics.log(AnalyticsEvent.LoginFail(it, stage, phase.code ?: stage.wireId))
-                }
-                retryProvider = loginProvider.takeIf { phase.canRetryExchange }
-                loginProvider = null
-            }
-            AddAgentPhase.Completed, AddAgentPhase.PickProvider -> {
-                loginProvider = null
-                retryProvider = null
-            }
-        }
+    // The funnel state lives in the view model so an activity recreated mid-login does not log a
+    // second login_start or lose the failure that follows; the screen only forwards its events.
+    LaunchedEffect(addAgentFlow) {
+        addAgentFlow.analyticsEvents.collect { analytics.log(it) }
     }
 
     LaunchedEffect(route, selectedAgent) {
@@ -554,10 +515,7 @@ private fun TokenWatchAppContent(
                     }
                 },
                 onDismiss = {
-                    loginProvider?.let {
-                        analytics.log(AnalyticsEvent.LoginAbandon(it, loginStage))
-                        loginProvider = null
-                    }
+                    // Returning to the provider list with an attempt open is what logs login_abandon.
                     addAgentFlow.cancelAndReset()
                     route = ROUTE_MAIN
                 },
