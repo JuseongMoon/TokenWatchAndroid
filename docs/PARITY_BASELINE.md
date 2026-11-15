@@ -23,6 +23,9 @@ network errors and poll again on return to the foreground, network failures show
 message, and OpenRouter key rejections explained (the balance needs a management key).
 `a9867ee` only adds an iOS DEBUG launch argument, `5e62173` only extends the iOS privacy manifest and
 `ec0169e` only raises the iOS build number, so none of them has an Android counterpart.
+It also mirrors iOS `dd8e282` on `dev` (D019, D020): Codex signs in through the sign-in window and
+the loopback listener on its registered port 1455 on both platforms, and `login_abandon` carries
+`elapsed` and `attempt`, both described below.
 Uncommitted iOS working-tree changes are deliberately not part of this baseline.
 
 Firebase Analytics runs against the Android app's own Firebase registration and
@@ -46,14 +49,15 @@ Firebase Analytics runs against the Android app's own Firebase registration and
   shared classification table; the report carries no identifier, account data or raw error text and
   is gated by the same PRIVACY opt-out, demo check and debug rule as analytics. Android classifies
   the exchange/refresh/device/API-key failures from the exception, matching what iOS sends.
-- `login_abandon` diagnostics (D020, iOS not yet settled): the event adds `elapsed` (`lt10s` under
+- `login_abandon` diagnostics (D020, iOS `dd8e282`): the event adds `elapsed` (`lt10s` under
   10 s, `10_60s` from 10 s to 60 s inclusive, `gt60s` over 60 s, wall-clock time since that
   attempt's `login_start`, background time included) and `attempt` (`1`, `2`, `3` for three and
-  more: that provider's `login_start` count since its last `login_success`, also reset when the
-  activity finishes or the app process restarts). No `auth_kind`, since the stage already tells the methods apart. Android keeps
-  the funnel state in the activity-retained add-agent view model, so an activity recreated
-  mid-login (rotation, dark mode, language) no longer logs a second `login_start` or loses the
-  failure that follows.
+  more: that provider's `login_start` count since its last `login_success`). No `auth_kind`, since
+  the stage already tells the methods apart. The start times and counts are process-wide and never
+  stored, like the iOS `LoginFunnelTracker` singleton: Android keeps them in the app container, so
+  only an app restart starts them over. The funnel's provider and stage live in the
+  activity-retained add-agent view model, so an activity recreated mid-login (rotation, dark mode,
+  language) no longer logs a second `login_start` or loses the failure that follows.
 - "hide unused graphs" split (iOS `6171f42`): a heading with two checkboxes. `percentage (0%)`
   keeps the single-toggle era key and `hide_unused` event, so existing choices carry over;
   `credit (never used)` hides credit gauges whose provider-supplied total is untouched (e.g.
@@ -74,12 +78,17 @@ Firebase Analytics runs against the Android app's own Firebase registration and
 - Three authentication families on Android: in-app sign-in window with a loopback callback
   (Claude, Grok, Codex; Claude keeps a paste-the-code fallback), polling login with the approval
   page in an in-app tab (Copilot with a code, Cursor without), and API keys. Pages involved in
-  signing in (approval, key issuance, code pages) open inside the app. iOS still signs Codex in
-  through WebView code capture; see the platform-specific adaptations below.
+  signing in (approval, key issuance, code pages) open inside the app. Codex moved off the
+  embedded WebView (Android 2.0.3, iOS `dd8e282`), which many users found blocked (Cloudflare's
+  browser check, identity providers that refuse embedded browsers); its authorize parameters,
+  token exchange, refresh and stored credential are unchanged, so existing Codex accounts need no
+  migration, and its login events are tagged `auth_kind=oauth_browser` on both platforms.
 - The loopback listener binds 127.0.0.1 and ::1 on one port (an ephemeral one, or the port a
   provider's redirect is registered on: Codex `localhost:1455/auth/callback`), accepts only the
   callback path and the expected state, answers `302` to `tokenwatch://login-complete`, and hands the code over only after that
-  response is written. A code exchange that fails before reaching the server is retried once,
+  response is written. ::1 is best-effort on an ephemeral port. On a fixed port, another app
+  holding either address ends the attempt as `loopback_port_in_use`, since `localhost` resolving to
+  ::1 would hand that app the callback; a device without an IPv6 loopback listens on IPv4 alone. A code exchange that fails before reaching the server is retried once,
   and the failure screen's RETRY repeats only the exchange; `invalid_grant` at exchange reads as
   an expired code rather than "log in again".
 - Signing in again with an account that already has a card replaces that card's token instead
@@ -251,13 +260,6 @@ Firebase Analytics runs against the Android app's own Firebase registration and
 
 ## Platform-specific parity adaptations
 
-- Codex signs in through the in-app sign-in window (Auth Tab, or a Custom Tab) with the
-  loopback listener on its registered redirect `http://localhost:1455/auth/callback`, instead of
-  the iOS WebView. The embedded WebView was blocked for many users (Cloudflare's browser check,
-  identity providers that refuse embedded browsers). The authorize parameters, the token exchange
-  and refresh, and the stored credential are the same as before, so existing Codex accounts need
-  no migration. Android's login events therefore tag Codex `auth_kind=oauth_browser` where iOS
-  sends `oauth`. When another app holds port 1455 the attempt fails as `loopback_port_in_use`.
 - Android keeps the screen-awake flag through `ON_PAUSE` and clears it only at
   `ON_STOP`, matching the iOS rule that preserves the flag while inactive and
   clears it only after entering the background.

@@ -3,6 +3,7 @@ package com.ScienceFiction.TokenWatchAndroid.auth.oauth
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.io.InputStream
+import java.net.BindException
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.ServerSocket
@@ -81,23 +82,36 @@ class LoopbackCallbackServer(
     private val delivered = AtomicBoolean(false)
     private val stopped = AtomicBoolean(false)
 
+    /** The IPv6 loopback address; replaced only by tests, to stand in for a device without one. */
+    internal var ipv6Loopback: ByteArray = IPV6_LOOPBACK
+
     /**
      * Binds the loopback port ([port], or an ephemeral one) and returns it. Throws an [IOException]
-     * when the port cannot be bound; nothing is left listening then.
+     * when the port cannot be bound; nothing is left listening then. A fixed port held by another app
+     * on either address throws a [BindException].
      */
     suspend fun start(): Int = withContext(Dispatchers.IO) {
         val v4 = bind(IPV4_LOOPBACK, port)
-        serverSockets += v4
-        acceptLoop(v4)
         val boundPort = v4.localPort
-        // A browser may try `localhost` as ::1 first. Listen there on the same port as well; failing
-        // is fine because the browser falls back to IPv4.
-        runCatching { bind(IPV6_LOOPBACK, boundPort) }
-            .getOrNull()
-            ?.let { v6 ->
-                serverSockets += v6
-                acceptLoop(v6)
+        // A browser may try `localhost` as ::1 first, so listen there on the same port as well.
+        val v6 = try {
+            bind(ipv6Loopback, boundPort)
+        } catch (error: IOException) {
+            // An ephemeral port is best-effort here: the browser falls back to IPv4. A fixed port is
+            // not, matching iOS: with another app on its ::1 side, `localhost` resolving to ::1
+            // would hand that app the callback. Java reports "in use" and "no such address" as the
+            // same BindException, so a fresh ::1 port tells them apart: if ::1 works at all, the
+            // fixed port is taken; if not, the device has no IPv6 loopback and IPv4 alone is used.
+            if (port != 0 && ipv6LoopbackWorks()) {
+                runCatching { v4.close() }
+                throw BindException("IPv6 loopback port $boundPort is in use").apply { initCause(error) }
             }
+            null
+        }
+        listOfNotNull(v4, v6).forEach { server ->
+            serverSockets += server
+            acceptLoop(server)
+        }
         scope.launch {
             delay(lifetimeMillis)
             // Claim the one terminal result first so a callback racing the deadline cannot also land.
@@ -124,6 +138,8 @@ class LoopbackCallbackServer(
         }
         return socket
     }
+
+    private fun ipv6LoopbackWorks(): Boolean = runCatching { bind(ipv6Loopback, 0).close() }.isSuccess
 
     fun stop() {
         if (!stopped.compareAndSet(false, true)) return

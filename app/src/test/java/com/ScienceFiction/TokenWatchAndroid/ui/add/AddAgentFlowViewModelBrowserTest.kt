@@ -305,6 +305,28 @@ class AddAgentFlowViewModelBrowserTest {
         }
     }
 
+    /** Another app on the ::1 side of 1455 alone is enough: `localhost` may resolve there. */
+    @Test fun codexWithOnlyTheIpv6SideOfItsPortHeldFailsWithAPortInUseCode() {
+        assumeTrue("port 1455 is in use on this machine", portIsFree(1455))
+        val holder = runCatching {
+            java.net.ServerSocket(1455, 1, java.net.InetAddress.getByName("::1"))
+        }.getOrNull()
+        assumeTrue("no IPv6 loopback on this machine", holder != null)
+        try {
+            viewModel.selectProvider(AgentProvider.CODEX, providerAuth, loc, onAddAgent)
+            val url = runBlocking { viewModel.beginBrowserLogin(providerAuth, loc, onAddAgent) }
+
+            assertNull(url)
+            val failed = viewModel.phase as AddAgentPhase.Failed
+            assertEquals(LoginStage.BROWSER_WAIT, failed.stage)
+            assertEquals("loopback_port_in_use", failed.code)
+            // Nothing was left on the IPv4 side either.
+            assertTrue(portIsFree(1455))
+        } finally {
+            holder?.close()
+        }
+    }
+
     // endregion
 
     @Test fun aSuccessfulCallbackStillCompletesAndItsTimeoutNeverFires() {

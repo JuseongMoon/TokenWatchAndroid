@@ -6,6 +6,7 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.ScienceFiction.TokenWatchAndroid.analytics.AnalyticsEvent
+import com.ScienceFiction.TokenWatchAndroid.analytics.LoginAttemptTracker
 import com.ScienceFiction.TokenWatchAndroid.analytics.LoginFailureCode
 import com.ScienceFiction.TokenWatchAndroid.analytics.LoginStage
 import com.ScienceFiction.TokenWatchAndroid.auth.ForegroundSignal
@@ -85,10 +86,13 @@ internal sealed interface AddAgentPhase {
 /**
  * Activity-retained owner for login state and in-flight authentication work.
  *
- * [clock] is the wall clock behind login_abandon `elapsed`, replaced only by tests.
+ * [loginAttempts] is the app container's process-wide tracker behind login_abandon `elapsed` and
+ * `attempt`; the default gives tests a private one.
  */
-internal class AddAgentFlowViewModel(clock: () -> Long = System::currentTimeMillis) : ViewModel() {
-    private val funnel = LoginFunnel(clock)
+internal class AddAgentFlowViewModel(
+    loginAttempts: LoginAttemptTracker = LoginAttemptTracker(),
+) : ViewModel() {
+    private val funnel = LoginFunnel(loginAttempts)
 
     /** Funnel events not yet logged; buffered here so a recreated screen picks up where it left off. */
     private val funnelEvents = Channel<AnalyticsEvent>(Channel.UNLIMITED)

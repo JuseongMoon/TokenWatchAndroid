@@ -8,6 +8,7 @@ import com.ScienceFiction.TokenWatchAndroid.account.FirebaseAccountAuth
 import com.ScienceFiction.TokenWatchAndroid.account.PlayerProfileClient
 import com.ScienceFiction.TokenWatchAndroid.account.UnavailableAccountAuth
 import com.ScienceFiction.TokenWatchAndroid.analytics.AnalyticsService
+import com.ScienceFiction.TokenWatchAndroid.analytics.LoginAttemptTracker
 import com.ScienceFiction.TokenWatchAndroid.analytics.fetchOutcomeEvent
 import com.ScienceFiction.TokenWatchAndroid.domain.AgentProvider
 import com.ScienceFiction.TokenWatchAndroid.auth.AndroidCredentialVault
@@ -152,6 +153,9 @@ class TokenWatchContainer(context: Context) : Closeable {
 
     /** Review prompt counters. One cold start is recorded as the graph is built (see below). */
     val reviewPromptRepository = ReviewPromptRepository(applicationContext)
+
+    /** login_abandon `attempt`/`elapsed` (D020): process-wide like iOS, so only a restart resets it. */
+    val loginAttempts = LoginAttemptTracker()
 
     /** Demo state is read lazily so sample agents never surface as real provider activity. */
     val analytics = AnalyticsService(

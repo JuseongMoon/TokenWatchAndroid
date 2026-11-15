@@ -96,7 +96,7 @@ fun TokenWatchApp(
     onNotificationHandled: () -> Unit = {},
 ) {
     val container = LocalContext.current.tokenWatchContainer()
-    val addAgentFlow: AddAgentFlowViewModel = viewModel()
+    val addAgentFlow: AddAgentFlowViewModel = viewModel { AddAgentFlowViewModel(container.loginAttempts) }
     TokenWatchApp(container, addAgentFlow, notificationAgentId, onNotificationHandled)
 }
 

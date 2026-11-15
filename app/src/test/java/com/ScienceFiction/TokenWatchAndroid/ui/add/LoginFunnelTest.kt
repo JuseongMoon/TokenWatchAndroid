@@ -1,6 +1,7 @@
 package com.ScienceFiction.TokenWatchAndroid.ui.add
 
 import com.ScienceFiction.TokenWatchAndroid.analytics.AnalyticsEvent
+import com.ScienceFiction.TokenWatchAndroid.analytics.LoginAttemptTracker
 import com.ScienceFiction.TokenWatchAndroid.analytics.LoginStage
 import com.ScienceFiction.TokenWatchAndroid.analytics.loginAttemptBucket
 import com.ScienceFiction.TokenWatchAndroid.analytics.loginElapsedBucket
@@ -12,7 +13,7 @@ import org.junit.Test
 /** D020: the login funnel events, login_abandon's `elapsed` and `attempt`, and their boundaries. */
 class LoginFunnelTest {
     private var now = 1_000_000L
-    private val funnel = LoginFunnel { now }
+    private val funnel = LoginFunnel(LoginAttemptTracker { now })
     private var phase: AddAgentPhase = AddAgentPhase.PickProvider
     private val logged = mutableListOf<AnalyticsEvent>()
 

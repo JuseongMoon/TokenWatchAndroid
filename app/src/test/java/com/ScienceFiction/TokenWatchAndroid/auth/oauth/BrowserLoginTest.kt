@@ -22,6 +22,7 @@ import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
 import org.junit.Test
 
 /**
@@ -252,6 +253,75 @@ class BrowserLoginTest {
                 server.stop()
                 scope.cancel()
             }
+        }
+    }
+
+    private fun ipv6LoopbackAvailable(): Boolean = runCatching {
+        java.net.ServerSocket(0, 1, java.net.InetAddress.getByName("::1")).close()
+    }.isSuccess
+
+    /** A port free on ::1 and on 127.0.0.1, held on ::1 only by the returned socket. */
+    private fun holdIpv6OnlyPort(): java.net.ServerSocket {
+        repeat(20) {
+            val held = java.net.ServerSocket(0, 1, java.net.InetAddress.getByName("::1"))
+            val v4Free = runCatching {
+                java.net.ServerSocket(held.localPort, 1, java.net.InetAddress.getByName("127.0.0.1")).close()
+            }.isSuccess
+            if (v4Free) return held
+            held.close()
+        }
+        error("no port free on both loopback addresses")
+    }
+
+    /**
+     * Matching iOS: with another app on the ::1 side of a fixed port, `localhost` resolving to ::1
+     * would deliver the callback to that app, so the attempt cannot go ahead on IPv4 alone.
+     */
+    @Test fun aFixedPortHeldOnlyOnIpv6FailsToBindAndLeavesNothingListening() {
+        assumeTrue("no IPv6 loopback on this machine", ipv6LoopbackAvailable())
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        holdIpv6OnlyPort().use { other ->
+            val port = other.localPort
+            val server = fixedServer(scope, port, "s")
+            try {
+                assertThrows(java.net.BindException::class.java) { runBlocking { server.start() } }
+                // The IPv4 side bound first was released again.
+                java.net.ServerSocket(port, 1, java.net.InetAddress.getByName("127.0.0.1")).close()
+            } finally {
+                server.stop()
+                scope.cancel()
+            }
+        }
+    }
+
+    /** A device without an IPv6 loopback is not a held port: the fixed port works on IPv4. */
+    @Test fun aFixedPortOnADeviceWithoutIpv6LoopbackListensOnIpv4() {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        val port = freePort()
+        val delivered = CountDownLatch(1)
+        val server = fixedServer(scope, port, "no-v6") { delivered.countDown() }
+        // A documentation-range address no interface has, so binding it fails like a missing ::1.
+        server.ipv6Loopback = java.net.InetAddress.getByName("2001:db8::1").address
+        try {
+            assertEquals(port, runBlocking { server.start() })
+            assertEquals(302, callback(port, "/auth/callback", "no-v6"))
+            assertTrue(delivered.await(2, TimeUnit.SECONDS))
+        } finally {
+            server.stop()
+            scope.cancel()
+        }
+    }
+
+    /** An ephemeral port (Claude, Grok) stays best-effort on IPv6. */
+    @Test fun anEphemeralPortWithoutIpv6LoopbackStillStarts() {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        val server = LoopbackCallbackServer("eph", scope) { _, _ -> }
+        server.ipv6Loopback = java.net.InetAddress.getByName("2001:db8::1").address
+        try {
+            assertTrue(runBlocking { server.start() } > 0)
+        } finally {
+            server.stop()
+            scope.cancel()
         }
     }
 

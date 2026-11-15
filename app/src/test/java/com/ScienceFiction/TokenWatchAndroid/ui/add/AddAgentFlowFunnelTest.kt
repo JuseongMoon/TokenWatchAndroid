@@ -1,6 +1,7 @@
 package com.ScienceFiction.TokenWatchAndroid.ui.add
 
 import com.ScienceFiction.TokenWatchAndroid.analytics.AnalyticsEvent
+import com.ScienceFiction.TokenWatchAndroid.analytics.LoginAttemptTracker
 import com.ScienceFiction.TokenWatchAndroid.auth.OAuthTokens
 import com.ScienceFiction.TokenWatchAndroid.auth.ProviderAuthRegistry
 import com.ScienceFiction.TokenWatchAndroid.auth.device.CopilotDeviceFlow
@@ -54,11 +55,13 @@ class AddAgentFlowFunnelTest {
         kimi = KimiUsageClient(tokenEndpoint),
     )
     private val noRedirects = OkHttpClient.Builder().followRedirects(false).build()
+    /** The app container's tracker: one per process. */
+    private val loginAttempts = LoginAttemptTracker { now }
     private lateinit var viewModel: AddAgentFlowViewModel
 
     @Before fun setUp() {
         Dispatchers.setMain(Dispatchers.Unconfined)
-        viewModel = AddAgentFlowViewModel(clock = { now })
+        viewModel = AddAgentFlowViewModel(loginAttempts)
     }
 
     @After fun tearDown() {
@@ -158,6 +161,31 @@ class AddAgentFlowFunnelTest {
             .filter { it.eventName == "login_abandon" }
             .map { it.parameters["attempt"] }
         assertEquals(listOf("1", "2", "3", "3"), attempts)
+    }
+
+    /**
+     * Like iOS, attempts are counted per process: a view model cleared with its activity (and a
+     * new one for the activity that comes back) keeps counting; only a new process starts over.
+     */
+    @Test fun attemptsOutliveTheViewModelAndStartOverWithTheProcess() {
+        viewModel.selectProvider(AgentProvider.DEEPSEEK, providerAuth, loc, onAddAgent)
+        viewModel.cancelAndReset()
+
+        val next = AddAgentFlowViewModel(loginAttempts)
+        next.selectProvider(AgentProvider.DEEPSEEK, providerAuth, loc, onAddAgent)
+        now += 61_000
+        next.cancelAndReset()
+        val abandon = next.drainAnalyticsEvents().single { it.eventName == "login_abandon" }
+        assertEquals("2", abandon.parameters["attempt"])
+        assertEquals("gt60s", abandon.parameters["elapsed"])
+
+        val restarted = AddAgentFlowViewModel(LoginAttemptTracker { now })
+        restarted.selectProvider(AgentProvider.DEEPSEEK, providerAuth, loc, onAddAgent)
+        restarted.cancelAndReset()
+        assertEquals(
+            "1",
+            restarted.drainAnalyticsEvents().single { it.eventName == "login_abandon" }.parameters["attempt"],
+        )
     }
 
     @Test fun funnelEventsAreTheOnlyLoginEventsTheViewModelEmits() {
