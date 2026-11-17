@@ -1,5 +1,6 @@
 package com.ScienceFiction.TokenWatchAndroid.network.orchestration
 
+import com.ScienceFiction.TokenWatchAndroid.auth.CredentialUnavailableException
 import com.ScienceFiction.TokenWatchAndroid.auth.TokenStore
 import com.ScienceFiction.TokenWatchAndroid.auth.oauth.OAuthException
 import com.ScienceFiction.TokenWatchAndroid.domain.AgentProvider
@@ -135,6 +136,7 @@ class UsageGateway(
             is UsageException.Http -> l10n.errHttp(error.statusCode)
             is UsageException.Decode -> l10n.errDecode(error.message.orEmpty())
             is UsageException.NoWindows -> l10n.errNoWindows
+            is CredentialUnavailableException -> l10n.errCredentialUnavailable
             is OAuthException.NotAuthenticated -> l10n.errNotAuthenticated
             is OAuthException.RefreshRevoked -> l10n.errAuthExpired
             is OAuthException.RefreshFailed -> l10n.errTokenRefresh(error.detailAfterPrefix())

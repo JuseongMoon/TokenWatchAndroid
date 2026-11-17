@@ -1,6 +1,7 @@
 package com.ScienceFiction.TokenWatchAndroid.auth.oauth
 
 import com.ScienceFiction.TokenWatchAndroid.auth.Jwt
+import com.ScienceFiction.TokenWatchAndroid.analytics.LoginFailureCode
 import com.ScienceFiction.TokenWatchAndroid.auth.OAuthTokens
 import com.ScienceFiction.TokenWatchAndroid.auth.Pkce
 import com.ScienceFiction.TokenWatchAndroid.network.core.NetworkTransport
@@ -92,11 +93,12 @@ class CodexOAuthClient(
         if (response.statusCode !in 200..299) {
             val responseBody = response.bodyText()
             val detail = "HTTP ${response.statusCode}: $responseBody"
-            if (exchange) throw OAuthException.ExchangeFailed(detail)
+            val failure = LoginFailureCode.http(response.statusCode, responseBody)
+            if (exchange) throw OAuthException.ExchangeFailed(detail, failure)
             if (isPermanentRefreshFailure(response.statusCode, responseBody)) {
                 throw OAuthException.RefreshRevoked()
             }
-            throw OAuthException.RefreshFailed(detail)
+            throw OAuthException.RefreshFailed(detail, failure)
         }
         val json = JsonMap.decode(response.bodyText())
             ?: throw stageError(exchange, "Invalid JSON response")
@@ -116,8 +118,12 @@ class CodexOAuthClient(
         )
     }
 
-    private fun stageError(exchange: Boolean, detail: String): OAuthException =
-        if (exchange) OAuthException.ExchangeFailed(detail) else OAuthException.RefreshFailed(detail)
+    /** A 2xx answer that could not be read. */
+    private fun stageError(exchange: Boolean, detail: String): OAuthException = if (exchange) {
+        OAuthException.ExchangeFailed(detail, LoginFailureCode.PARSE)
+    } else {
+        OAuthException.RefreshFailed(detail, LoginFailureCode.PARSE)
+    }
 
     companion object {
         /** Codes that are unrecoverable whatever the HTTP status (official Codex CLI classifier). */

@@ -1,5 +1,6 @@
 package com.ScienceFiction.TokenWatchAndroid.auth.oauth
 
+import com.ScienceFiction.TokenWatchAndroid.analytics.LoginFailureCode
 import com.ScienceFiction.TokenWatchAndroid.auth.OAuthTokens
 import com.ScienceFiction.TokenWatchAndroid.auth.Pkce
 import com.ScienceFiction.TokenWatchAndroid.network.core.NetworkTransport
@@ -76,12 +77,13 @@ class ClaudeOAuthClient(
             val responseBody = response.bodyText()
             val detail = "HTTP ${response.statusCode}: $responseBody"
             val invalidGrant = response.statusCode in listOf(400, 401) && "invalid_grant" in responseBody
+            val failure = LoginFailureCode.http(response.statusCode, responseBody)
             if (exchange) {
                 // At the exchange stage invalid_grant means the code expired or was already used.
-                throw if (invalidGrant) OAuthException.CodeExpired() else OAuthException.ExchangeFailed(detail)
+                throw if (invalidGrant) OAuthException.CodeExpired() else OAuthException.ExchangeFailed(detail, failure)
             }
             if (invalidGrant) throw OAuthException.RefreshRevoked()
-            throw OAuthException.RefreshFailed(detail)
+            throw OAuthException.RefreshFailed(detail, failure)
         }
         val json = JsonMap.decode(response.bodyText())
             ?: throw stageError(exchange, "Invalid JSON response")
@@ -104,8 +106,12 @@ class ClaudeOAuthClient(
         )
     }
 
-    private fun stageError(exchange: Boolean, detail: String): OAuthException =
-        if (exchange) OAuthException.ExchangeFailed(detail) else OAuthException.RefreshFailed(detail)
+    /** A 2xx answer that could not be read. */
+    private fun stageError(exchange: Boolean, detail: String): OAuthException = if (exchange) {
+        OAuthException.ExchangeFailed(detail, LoginFailureCode.PARSE)
+    } else {
+        OAuthException.RefreshFailed(detail, LoginFailureCode.PARSE)
+    }
 
     companion object {
         const val CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"

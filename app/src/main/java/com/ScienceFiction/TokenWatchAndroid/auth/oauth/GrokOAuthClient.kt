@@ -1,5 +1,6 @@
 package com.ScienceFiction.TokenWatchAndroid.auth.oauth
 
+import com.ScienceFiction.TokenWatchAndroid.analytics.LoginFailureCode
 import com.ScienceFiction.TokenWatchAndroid.auth.Jwt
 import com.ScienceFiction.TokenWatchAndroid.auth.OAuthTokens
 import com.ScienceFiction.TokenWatchAndroid.auth.Pkce
@@ -63,7 +64,7 @@ class GrokOAuthClient(
             // invalid_grant at the exchange stage means the code expired or was reused.
             throw OAuthException.CodeExpired()
         } catch (failed: OAuthException.RefreshFailed) {
-            throw OAuthException.ExchangeFailed(failed.detail)
+            throw OAuthException.ExchangeFailed(failed.detail, failed.failureCode)
         }
     }
 
@@ -107,9 +108,10 @@ class GrokOAuthClient(
          * updated from the usage response.
          */
         fun tokens(json: String, previous: OAuthTokens?, now: Instant = Instant.now()): OAuthTokens {
-            val map = JsonMap.decode(json) ?: throw OAuthException.RefreshFailed("Invalid JSON response")
+            val map = JsonMap.decode(json)
+                ?: throw OAuthException.RefreshFailed("Invalid JSON response", LoginFailureCode.PARSE)
             val accessToken = map.string("access_token")
-                ?: throw OAuthException.RefreshFailed("empty access_token")
+                ?: throw OAuthException.RefreshFailed("empty access_token", LoginFailureCode.PARSE)
             val idToken = map.string("id_token") ?: previous?.idToken
             return OAuthTokens(
                 accessToken = accessToken,
@@ -127,7 +129,7 @@ class GrokOAuthClient(
             if ((status == 400 || status == 401) && "invalid_grant" in body) {
                 OAuthException.RefreshRevoked()
             } else {
-                OAuthException.RefreshFailed("HTTP $status: $body")
+                OAuthException.RefreshFailed("HTTP $status: $body", LoginFailureCode.http(status, body))
             }
 
         /**

@@ -74,9 +74,9 @@ import kotlinx.coroutines.launch
  * Add-agent flow (terminal style): pick a provider → sign in → exchange → add. The sign-in UI
  * follows the provider's auth kind, as on iOS `AddAgentSheet`:
  * - `OAUTH_BROWSER` (Claude, Grok, Codex): in-app sign-in window + loopback callback; Claude also
- *   has a paste-the-code fallback. (iOS still signs Codex in through a WebView.)
+ *   has a paste-the-code fallback and a notice above its sign-in button.
  * - `OAUTH_DEVICE_FLOW` (Copilot, Cursor): approval page in an in-app tab while polling.
- * - `API_KEY` (the rest): paste a key.
+ * - `API_KEY` (the rest): a one-line guide to the key, then paste it.
  */
 @Composable
 internal fun AddAgentScreen(
@@ -153,8 +153,10 @@ internal fun AddAgentScreen(
             is AddAgentPhase.ApiKey -> ApiKeyEntry(
                 provider = current.provider,
                 key = flowState.apiKeyText,
-                hint = loc.apiKeyHint(current.provider),
+                guide = loc.apiKeyGuide(current.provider),
+                pasteLabel = loc.apiKeyPaste,
                 onKeyChange = flowState::updateApiKey,
+                onPaste = { flowState.pasteApiKey { pasteFromClipboard(context) } },
                 // Key pages need a signed-in account, so they open in the app rather than outside it.
                 onOpenKeyPage = { url -> InAppBrowser.open(context, url) },
                 onAdd = { flowState.submitApiKey(providerAuth, loc, onAddAgent) },
@@ -317,6 +319,17 @@ private fun BrowserLoginContent(
         PromptLine("login to ${phase.provider.displayName.lowercase()}")
         if (!phase.manualEntry) {
             Text(loc.browserSheetIntro(phase.provider.displayName), color = Term.Foreground, style = terminalStyle(13))
+            // What the next screen asks for and what the connection is used for, before the button.
+            loc.signInNotice(phase.provider)?.let { notice ->
+                TerminalBox(
+                    title = "NOTE",
+                    titleColor = Term.Cyan,
+                    borderColor = Term.Dim.copy(alpha = 0.5f),
+                    contentPadding = 12.dp,
+                ) {
+                    Text(notice, color = Term.Dim, style = terminalStyle(12))
+                }
+            }
             if (phase.isPresenting) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     TerminalSpinner(size = 12.sp)
@@ -379,12 +392,18 @@ private fun BrowserLoginContent(
     }
 }
 
+/**
+ * API key entry: a one-line guide to where the key is made comes first, then the masked field with
+ * an explicit paste button (the clipboard is read only when it is tapped).
+ */
 @Composable
 private fun ApiKeyEntry(
     provider: AgentProvider,
     key: String,
-    hint: String?,
+    guide: String?,
+    pasteLabel: String,
     onKeyChange: (String) -> Unit,
+    onPaste: () -> Unit,
     onOpenKeyPage: (String) -> Unit,
     onAdd: () -> Unit,
 ) {
@@ -397,14 +416,17 @@ private fun ApiKeyEntry(
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         PromptLine("paste your ${provider.displayName.lowercase()} api key")
-        TerminalTextField(
-            value = key,
-            onValueChange = onKeyChange,
-            placeholder = "api key…",
-            secret = true,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        hint?.let { Text(it, color = Term.Dim, style = terminalStyle(12)) }
+        guide?.let { Text(it, color = Term.Foreground, style = terminalStyle(13)) }
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+            TerminalTextField(
+                value = key,
+                onValueChange = onKeyChange,
+                placeholder = "api key…",
+                secret = true,
+                modifier = Modifier.weight(1f),
+            )
+            PlainClickText(text = pasteLabel, color = Term.Green, onClick = onPaste)
+        }
         provider.apiKeyUrl?.let { url ->
             PlainClickText(
                 text = "> [ get api key ↗ ]",

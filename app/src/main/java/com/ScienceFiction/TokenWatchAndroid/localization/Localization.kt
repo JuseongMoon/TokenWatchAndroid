@@ -275,6 +275,12 @@ data class L10n(val lang: Lang) {
     fun errTokenExchange(message: String) = choose("토큰 교환 실패: $message", "Token exchange failed: $message")
     fun errTokenRefresh(message: String) = choose("토큰 갱신 실패: $message", "Token refresh failed: $message")
     val errNotAuthenticated get() = choose("로그인이 필요합니다.", "Login required.")
+
+    /** A stored credential this device could not read or write just now (D021). No retry is promised. */
+    val errCredentialUnavailable get() = choose(
+        "기기 보안 저장소를 잠시 읽지 못했습니다. 잠시 후 다시 시도해 주세요.",
+        "Couldn't read this device's secure storage just now. Please try again in a moment.",
+    )
     val errNetwork get() = choose(
         "네트워크에 연결할 수 없습니다. 인터넷 연결을 확인한 뒤 다시 시도해 주세요.",
         "Couldn't reach the network. Check your internet connection and try again.",
@@ -297,22 +303,40 @@ data class L10n(val lang: Lang) {
         "That API key isn't valid. Please check it and try again.",
     )
 
-    /** One extra line under the API key field for a provider, or null. */
-    fun apiKeyHint(provider: AgentProvider): String? = when (provider) {
+    /**
+     * First line of the API key screen, above the field (D021): where to create which key, before
+     * anything is typed. Byte-for-byte the iOS `apiKeyGuide`; it also absorbed the old hints under
+     * the field, so nothing is said twice. Null for providers that do not sign in with a key.
+     */
+    fun apiKeyGuide(provider: AgentProvider): String? = when (provider) {
         AgentProvider.KIMI -> choose(
-            "Kimi Code 콘솔에서 이 앱 전용 키를 새로 만들어 붙여넣으세요. 키로 쿼터를 사용할 수도 있습니다.",
-            "Create a new key just for this app in the Kimi Code console. A key can also spend your quota.",
+            "Kimi Code 콘솔에서 이 앱 전용 API 키를 새로 만들어 붙여넣으세요. 이 키로 쿼터를 사용할 수도 있습니다.",
+            "Create a new API key just for this app in the Kimi Code console and paste it here. A key can also spend your quota.",
         )
         // GET /api/v1/credits (the account-wide balance) accepts only a management key.
         AgentProvider.OPENROUTER -> choose(
-            "계정 전체 크레딧 잔액은 관리 키(Management key)로만 조회됩니다. OpenRouter 설정 → Management Keys에서 만든 키를 붙여넣으세요. 일반 API 키로는 잔액을 볼 수 없습니다.",
-            "The account-wide credit balance can only be read with a management key. Paste a key created under OpenRouter Settings → Management Keys; a regular API key cannot read the balance.",
+            "일반 API 키가 아니라 관리 키(Management Key)가 필요합니다. OpenRouter 설정 > Management Keys에서 만든 키를 붙여넣으세요.",
+            "This needs a Management Key, not a regular API key. Paste a key created under Settings > Management Keys in OpenRouter.",
+        )
+        AgentProvider.DEEPSEEK -> choose(
+            "DeepSeek 플랫폼의 API keys 페이지에서 키를 만들어 붙여넣으세요.",
+            "Create a key on the DeepSeek Platform's API keys page and paste it here.",
+        )
+        AgentProvider.POE -> choose(
+            "Poe의 API key 페이지에서 키를 복사해 붙여넣으세요.",
+            "Copy your key from Poe's API key page and paste it here.",
+        )
+        AgentProvider.ELEVENLABS -> choose(
+            "ElevenLabs 설정의 API Keys에서 키를 만들어 붙여넣으세요.",
+            "Create a key under API Keys in your ElevenLabs settings and paste it here.",
         )
         AgentProvider.CLAUDE, AgentProvider.CODEX, AgentProvider.COPILOT, AgentProvider.GROK,
-        AgentProvider.CURSOR, AgentProvider.DEEPSEEK, AgentProvider.POE,
-        AgentProvider.ELEVENLABS,
+        AgentProvider.CURSOR,
         -> null
     }
+
+    /** Pastes the clipboard into the API key field; the clipboard is read only on this tap. */
+    val apiKeyPaste get() = choose("[ 붙여넣기 ]", "[ paste ]")
     val errStateMismatch get() = choose(
         "로그인 응답 검증에 실패했습니다(state 불일치). 다시 시도해 주세요.",
         "Login response failed verification (state mismatch). Please try again.",
@@ -337,6 +361,19 @@ data class L10n(val lang: Lang) {
 
     /** Signature at the notice's bottom-right, in front of the slime. */
     val addAgentNoticeSignature get() = choose("토큰워치 팀", "TokenWatch team")
+
+    /**
+     * Above Claude's sign-in button (D021): what the next screen asks for and what the connection
+     * is used for. Kept byte-for-byte identical to iOS.
+     */
+    val claudeSignInNotice get() = choose(
+        "다음 화면에서 Anthropic 로그인과 권한 동의를 진행합니다. TokenWatch는 이 연결을 계정 이메일·조직 이름 표시와 남은 사용량·리셋 시간 조회에만 쓰며, 메시지를 보내지 않습니다. 로그인 토큰은 이 기기의 보안 저장소에만 저장되고 개발자 서버로 보내지 않습니다.",
+        "Next, you'll sign in to Anthropic and review the permission request. TokenWatch uses this connection only to show your account email and organization name and to read your remaining usage and reset times. It never sends messages. Your sign-in token is stored only in this device's secure storage and is never sent to our servers.",
+    )
+
+    /** The notice above a provider's sign-in button, or null. Only Claude has one (D021). */
+    fun signInNotice(provider: AgentProvider): String? =
+        if (provider == AgentProvider.CLAUDE) claudeSignInNotice else null
 
     fun browserSheetIntro(provider: String) = choose(
         "$provider 계정으로 로그인하고 연결을 승인하세요. 로그인 창은 앱 안에서 열리고, 승인하면 자동으로 닫힙니다.",

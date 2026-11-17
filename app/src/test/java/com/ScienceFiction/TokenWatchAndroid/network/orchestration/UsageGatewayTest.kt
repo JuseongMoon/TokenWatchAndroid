@@ -1,5 +1,8 @@
 package com.ScienceFiction.TokenWatchAndroid.network.orchestration
 
+import com.ScienceFiction.TokenWatchAndroid.analytics.FetchErrorReason
+import com.ScienceFiction.TokenWatchAndroid.analytics.toFetchErrorReason
+import com.ScienceFiction.TokenWatchAndroid.auth.CredentialUnavailableException
 import com.ScienceFiction.TokenWatchAndroid.auth.CredentialVault
 import com.ScienceFiction.TokenWatchAndroid.auth.OAuthTokens
 import com.ScienceFiction.TokenWatchAndroid.auth.TokenRefresher
@@ -183,7 +186,8 @@ class UsageGatewayTest {
     @Test
     fun openRouterAsksForAManagementKeyWhereTheKeyIsEntered() {
         for (lang in Lang.entries) {
-            assertTrue(L10n(lang).apiKeyHint(AgentProvider.OPENROUTER)!!.contains("Management Key"))
+            // Before anything is typed: the screen's first line names the key it needs.
+            assertTrue(L10n(lang).apiKeyGuide(AgentProvider.OPENROUTER)!!.contains("Management Key"))
         }
         assertEquals("https://openrouter.ai/settings/management-keys", AgentProvider.OPENROUTER.apiKeyUrl)
     }
@@ -370,6 +374,29 @@ class UsageGatewayTest {
         assertEquals(2, outcomes.size)
         assertTrue(outcomes[0] is UsageException.Http)
         assertNull(outcomes[1])
+    }
+
+    /** D021: secure storage that cannot be read right now is not "log in again", and is not deleted. */
+    @Test
+    fun anUnreadableCredentialShowsTheSecureStorageMessageAndIsReportedAsCredential() = runBlocking {
+        val id = UUID.randomUUID()
+        val vault = object : CredentialVault {
+            override fun save(agentId: UUID, tokens: OAuthTokens) = error("nothing is written")
+            override fun load(agentId: UUID): OAuthTokens? =
+                throw CredentialUnavailableException(CredentialUnavailableException.Reason.KEYSTORE_UNAVAILABLE)
+            override fun delete(agentId: UUID) = error("nothing is deleted")
+        }
+        val store = TokenStore(vault, TokenRefresher { _, _ -> error("not refreshed") }, now = { now })
+        val outcomes = mutableListOf<Throwable?>()
+        val client = ProviderUsageClient { error("no request without a credential") }
+
+        val snapshot = gateway(client, store, RateLimitGate(now = { now }), onFetchOutcome = { _, _, error ->
+            outcomes += error
+        }).fetchSnapshot(AgentProvider.CLAUDE, id)
+
+        assertEquals("Couldn't read this device's secure storage just now. Please try again in a moment.", snapshot.error)
+        assertEquals(l10n.errCredentialUnavailable, snapshot.error)
+        assertEquals(FetchErrorReason.CREDENTIAL, outcomes.single()!!.toFetchErrorReason())
     }
 
     private fun gateway(

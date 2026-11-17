@@ -1,5 +1,6 @@
 package com.ScienceFiction.TokenWatchAndroid.store
 
+import com.ScienceFiction.TokenWatchAndroid.auth.CredentialUnavailableException
 import com.ScienceFiction.TokenWatchAndroid.auth.CredentialVault
 import com.ScienceFiction.TokenWatchAndroid.auth.OAuthTokens
 import com.ScienceFiction.TokenWatchAndroid.auth.TokenRefresher
@@ -28,6 +29,7 @@ import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -282,6 +284,68 @@ class AgentStoreReloginTest {
         store.close()
     }
 
+    /**
+     * D021: a card whose credential cannot be read right now may be this very account. Treating it
+     * as "no account" would add a duplicate card, so the sign-in fails instead and nothing changes.
+     */
+    @Test
+    fun `copilot sign-in while an existing card cannot be read adds no duplicate card`() = runBlocking {
+        val existing = Agent(AgentProvider.COPILOT, accountLabel = "github")
+        val vault = MemoryVault()
+        val tokenStore = TokenStore(vault, TokenRefresher { _, _ -> error("unused") })
+        tokenStore.save(existing.id, OAuthTokens.session("old-token", accountId = "1001"))
+        vault.unreadable += existing.id
+        val store = store(listOf(existing), tokenStore)
+        store.awaitInitialLoad()
+
+        val error = assertThrows(CredentialUnavailableException::class.java) {
+            runBlocking { store.addAgent(AgentProvider.COPILOT, OAuthTokens.session("new-token", accountId = "1001")) }
+        }
+
+        assertEquals(CredentialUnavailableException.Reason.KEYSTORE_UNAVAILABLE, error.reason)
+        assertEquals(listOf(existing), store.agents.value)
+        vault.unreadable.clear()
+        assertEquals("old-token", tokenStore.tokens(existing.id)?.accessToken)
+        store.close()
+    }
+
+    @Test
+    fun `a readable copilot card that matches is replaced even when another cannot be read`() = runBlocking {
+        val unreadable = Agent(AgentProvider.COPILOT, accountLabel = "first")
+        val matching = Agent(AgentProvider.COPILOT, accountLabel = "second")
+        val vault = MemoryVault()
+        val tokenStore = TokenStore(vault, TokenRefresher { _, _ -> error("unused") })
+        tokenStore.save(unreadable.id, OAuthTokens.session("first-token", accountId = "2002"))
+        tokenStore.save(matching.id, OAuthTokens.session("second-token", accountId = "1001"))
+        vault.unreadable += unreadable.id
+        val store = store(listOf(unreadable, matching), tokenStore)
+        store.awaitInitialLoad()
+
+        val result = store.addAgent(AgentProvider.COPILOT, OAuthTokens.session("new-token", accountId = "1001"))
+
+        assertTrue(result.replacedExisting)
+        assertEquals(matching.id, result.agent.id)
+        assertEquals(2, store.agents.value.size)
+        store.close()
+    }
+
+    /** The detail screen asks for account details; an unreadable credential shows as unknown. */
+    @Test
+    fun `account details of an unreadable credential are unknown rather than a crash`() = runBlocking {
+        val agent = Agent(AgentProvider.CLAUDE, accountLabel = "me@example.com")
+        val vault = MemoryVault()
+        val tokenStore = TokenStore(vault, TokenRefresher { _, _ -> error("unused") })
+        tokenStore.save(agent.id, OAuthTokens("access", accountEmail = "me@example.com", plan = "Org"))
+        vault.unreadable += agent.id
+        val store = store(listOf(agent), tokenStore)
+        store.awaitInitialLoad()
+
+        assertNull(store.accountInfo(agent))
+        vault.unreadable.clear()
+        assertEquals("Org", store.accountInfo(agent)?.plan)
+        store.close()
+    }
+
     // endregion
 
     private fun store(
@@ -349,11 +413,19 @@ class AgentStoreReloginTest {
     private class MemoryVault : CredentialVault {
         private val values = mutableMapOf<UUID, OAuthTokens>()
 
+        /** Accounts whose stored credential cannot be read right now. */
+        val unreadable: MutableSet<UUID> = java.util.Collections.synchronizedSet(mutableSetOf())
+
         @Synchronized override fun save(agentId: UUID, tokens: OAuthTokens) {
             values[agentId] = tokens
         }
 
-        @Synchronized override fun load(agentId: UUID): OAuthTokens? = values[agentId]
+        @Synchronized override fun load(agentId: UUID): OAuthTokens? {
+            if (agentId in unreadable) {
+                throw CredentialUnavailableException(CredentialUnavailableException.Reason.KEYSTORE_UNAVAILABLE)
+            }
+            return values[agentId]
+        }
 
         @Synchronized override fun delete(agentId: UUID) {
             values.remove(agentId)

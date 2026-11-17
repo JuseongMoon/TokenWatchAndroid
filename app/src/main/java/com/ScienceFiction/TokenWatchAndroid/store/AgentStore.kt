@@ -1,5 +1,6 @@
 package com.ScienceFiction.TokenWatchAndroid.store
 
+import com.ScienceFiction.TokenWatchAndroid.auth.CredentialUnavailableException
 import com.ScienceFiction.TokenWatchAndroid.auth.OAuthTokens
 import com.ScienceFiction.TokenWatchAndroid.auth.TokenStore
 import com.ScienceFiction.TokenWatchAndroid.data.AgentRepository
@@ -370,12 +371,25 @@ class AgentStore(
      * Cards that already store an id are compared directly. A legacy card (saved without an id)
      * is matched only when its own stored token still proves the same id; a card whose token no
      * longer works is never merged on a guess, and the sign-in becomes a new card instead.
+     *
+     * A card whose credential cannot be read right now ([CredentialUnavailableException]) is not
+     * "no account": it may be this very account. Unless another card already matches, the sign-in
+     * fails with that exception rather than adding a duplicate card.
      */
     private suspend fun findCopilotAccount(tokens: OAuthTokens): Agent? {
         val accountId = tokens.accountId ?: return null
+        var unreadable: CredentialUnavailableException? = null
         val candidates = _agents.value.filter { it.provider == AgentProvider.COPILOT }
-            .mapNotNull { agent -> storedTokensOrNull(agent.id)?.let { agent to it } }
+            .mapNotNull { agent ->
+                try {
+                    storedTokensOrNull(agent.id)?.let { agent to it }
+                } catch (unavailable: CredentialUnavailableException) {
+                    unreadable = unavailable
+                    null
+                }
+            }
         candidates.firstOrNull { (_, stored) -> stored.accountId == accountId }?.let { return it.first }
+        unreadable?.let { throw it }
         for ((agent, stored) in candidates) {
             if (stored.accountId != null) continue
             val resolved = try {
@@ -390,7 +404,19 @@ class AgentStore(
         return null
     }
 
+    /** Null when no credential is stored or it cannot be used; [CredentialUnavailableException] passes. */
     private suspend fun storedTokensOrNull(agentId: UUID): OAuthTokens? = try {
+        dependencies.loadTokens(agentId)
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (unavailable: CredentialUnavailableException) {
+        throw unavailable
+    } catch (_: Exception) {
+        null
+    }
+
+    /** For display only: a credential that cannot be read right now shows as unknown. */
+    private suspend fun storedAccountTokens(agentId: UUID): OAuthTokens? = try {
         dependencies.loadTokens(agentId)
     } catch (cancelled: CancellationException) {
         throw cancelled
@@ -489,7 +515,7 @@ class AgentStore(
 
     suspend fun accountInfo(agent: Agent): AccountInfo? = if (_isDemo.value) {
         DemoData.accountInfo(agent, now())
-    } else dependencies.loadTokens(agent.id)?.let {
+    } else storedAccountTokens(agent.id)?.let {
         AccountInfo(
             email = it.accountEmail,
             plan = it.plan,

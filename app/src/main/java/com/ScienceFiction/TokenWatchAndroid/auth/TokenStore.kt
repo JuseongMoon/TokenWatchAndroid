@@ -52,6 +52,11 @@ class ProviderTokenRefresher(
  * write share one critical section. A superseded refresh hands its caller the current credential
  * instead of the stale one, so a late response can never overwrite or invalidate a newer sign-in.
  * Plan-only updates ([updatePlan]) keep the generation: they do not replace the credential.
+ *
+ * A rotated credential the vault would not take is not dropped: the refresh fails with
+ * [CredentialUnavailableException] (reason `NOT_SAVED`), and the credential stays in [unsaved],
+ * which every later access reads first and tries to write again. Its old refresh token is already
+ * spent, so the copy in memory is the only one that still works.
  */
 class TokenStore(
     private val vault: CredentialVault,
@@ -65,6 +70,9 @@ class TokenStore(
     /** Guarded by [mutex]. Missing means generation 0. */
     private val generations = mutableMapOf<UUID, Long>()
 
+    /** Guarded by [mutex]. Rotated credentials of the current generation not yet in the vault. */
+    private val unsaved = mutableMapOf<UUID, OAuthTokens>()
+
     /**
      * Stores a newly signed-in credential and starts a new generation. A refresh still running for
      * the previous credential is detached rather than cancelled: it finishes, but cannot persist,
@@ -72,6 +80,7 @@ class TokenStore(
      */
     suspend fun save(agentId: UUID, tokens: OAuthTokens) = exclusive {
         saveToVault(agentId, tokens)
+        unsaved.remove(agentId)
         advanceGeneration(agentId)
         refreshTasks.remove(agentId)
         Unit
@@ -85,6 +94,7 @@ class TokenStore(
         // A late refresh response sees the advanced generation and cannot recreate the credential.
         val task = exclusive {
             advanceGeneration(agentId)
+            unsaved.remove(agentId)
             deleteFromVault(agentId)
             refreshTasks.remove(agentId)
         }
@@ -139,9 +149,10 @@ class TokenStore(
                 if (generationOf(agentId) != generation) return@exclusive true
                 // Clear only the refresh token that was actually rejected; anything else in the
                 // vault (an unrelated write) is left untouched.
-                loadFromVault(agentId)
+                // Best effort: if this read or write fails, the next refresh is simply rejected again.
+                bestEffort { loadFromVault(agentId) }
                     ?.takeIf { it.refreshToken == current.refreshToken }
-                    ?.let { saveWithRetry(agentId, it.copy(refreshToken = null)) }
+                    ?.let { bestEffort { saveToVault(agentId, it.copy(refreshToken = null)) } }
                 false
             }
             if (superseded) return currentCredential(agentId)
@@ -149,7 +160,7 @@ class TokenStore(
         }
         val persisted = exclusive {
             if (generationOf(agentId) != generation) return@exclusive false
-            saveWithRetry(agentId, rotated)
+            persistRotated(agentId, rotated)
             true
         }
         return if (persisted) rotated else currentCredential(agentId)
@@ -159,22 +170,37 @@ class TokenStore(
     private suspend fun currentCredential(agentId: UUID): OAuthTokens =
         exclusive { loadFromVault(agentId) } ?: throw OAuthException.NotAuthenticated()
 
-    /** Must run inside [exclusive] so the generation check and the write cannot be separated. */
-    private suspend fun saveWithRetry(agentId: UUID, tokens: OAuthTokens) {
+    /**
+     * Writes a rotated credential, retrying once. If both writes fail it is kept in [unsaved] and
+     * the failure is reported to the caller. Must run inside [exclusive] so the generation check and
+     * the write cannot be separated.
+     */
+    private suspend fun persistRotated(agentId: UUID, tokens: OAuthTokens) {
         try {
             saveToVault(agentId, tokens)
         } catch (cancelled: CancellationException) {
+            unsaved[agentId] = tokens
             throw cancelled
         } catch (_: Exception) {
-            // Losing a rotated token is unrecoverable, so retry the encrypted write once.
             try {
                 saveToVault(agentId, tokens)
             } catch (cancelled: CancellationException) {
+                unsaved[agentId] = tokens
                 throw cancelled
-            } catch (_: Exception) {
-                // The current in-memory request may still succeed; a later call will require login.
+            } catch (error: Exception) {
+                unsaved[agentId] = tokens
+                throw CredentialUnavailableException(CredentialUnavailableException.Reason.NOT_SAVED, error)
             }
         }
+        unsaved.remove(agentId)
+    }
+
+    private suspend fun <T> bestEffort(block: suspend () -> T): T? = try {
+        block()
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (_: Exception) {
+        null
     }
 
     private fun generationOf(agentId: UUID): Long = generations[agentId] ?: 0L
@@ -183,8 +209,25 @@ class TokenStore(
         generations[agentId] = generationOf(agentId) + 1
     }
 
-    private suspend fun loadFromVault(agentId: UUID): OAuthTokens? =
-        withContext(Dispatchers.IO) { vault.load(agentId) }
+    /**
+     * The current credential. A rotated one still waiting in [unsaved] is written first; until
+     * that succeeds every access fails with `NOT_SAVED`, and the copy stays in memory. Must run
+     * inside [exclusive].
+     */
+    private suspend fun loadFromVault(agentId: UUID): OAuthTokens? {
+        unsaved[agentId]?.let { pending ->
+            try {
+                saveToVault(agentId, pending)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                throw CredentialUnavailableException(CredentialUnavailableException.Reason.NOT_SAVED, error)
+            }
+            unsaved.remove(agentId)
+            return pending
+        }
+        return withContext(Dispatchers.IO) { vault.load(agentId) }
+    }
 
     private suspend fun saveToVault(agentId: UUID, tokens: OAuthTokens) =
         withContext(Dispatchers.IO) { vault.save(agentId, tokens) }

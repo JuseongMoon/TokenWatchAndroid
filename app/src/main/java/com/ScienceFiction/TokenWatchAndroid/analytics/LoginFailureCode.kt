@@ -33,6 +33,7 @@ import java.net.UnknownHostException
  */
 object LoginFailureCode {
     const val OTHER = "other"
+    const val PARSE = "parse"
     const val LOOPBACK_PORT_IN_USE = "loopback_port_in_use"
 
     /** Classifies an exception caught anywhere in the sign-in flow. */

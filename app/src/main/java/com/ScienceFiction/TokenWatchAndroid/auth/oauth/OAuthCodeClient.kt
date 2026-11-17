@@ -8,10 +8,19 @@ import kotlinx.coroutines.delay
 
 data class OAuthCallback(val code: String, val state: String)
 
+/**
+ * [OAuthException.ExchangeFailed] and [OAuthException.RefreshFailed] carry [failureCode], the
+ * [com.ScienceFiction.TokenWatchAndroid.analytics.LoginFailureCode] value of what the token request
+ * ran into (`http_<status>`, an OAuth error such as `invalid_client`, or `parse`), as iOS
+ * `OAuthError` does. Failures are classified by that cause, not by their text: a 429 or a 5xx is the
+ * provider's trouble, not a credential the user has to replace. Null when the cause is unknown.
+ */
 sealed class OAuthException(message: String, cause: Throwable? = null) : Exception(message, cause) {
     class StateMismatch : OAuthException("OAuth callback state did not match the request")
-    class ExchangeFailed(val detail: String) : OAuthException("Token exchange failed: $detail")
-    class RefreshFailed(val detail: String) : OAuthException("Token refresh failed: $detail")
+    class ExchangeFailed(val detail: String, val failureCode: String? = null) :
+        OAuthException("Token exchange failed: $detail")
+    class RefreshFailed(val detail: String, val failureCode: String? = null) :
+        OAuthException("Token refresh failed: $detail")
     class RefreshRevoked : OAuthException("Authentication expired. Please log in again.")
     class NotAuthenticated : OAuthException("Login required")
 

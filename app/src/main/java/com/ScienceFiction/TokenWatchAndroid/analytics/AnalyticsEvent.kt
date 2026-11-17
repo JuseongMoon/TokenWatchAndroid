@@ -1,6 +1,8 @@
 package com.ScienceFiction.TokenWatchAndroid.analytics
 
 import com.ScienceFiction.TokenWatchAndroid.account.AccountFailStage
+import com.ScienceFiction.TokenWatchAndroid.auth.CredentialUnavailableException
+import com.ScienceFiction.TokenWatchAndroid.auth.oauth.OAuthException
 import com.ScienceFiction.TokenWatchAndroid.domain.Announcement
 import com.ScienceFiction.TokenWatchAndroid.domain.account.AccountMethod
 import com.ScienceFiction.TokenWatchAndroid.domain.AgentProvider
@@ -43,17 +45,50 @@ enum class FetchErrorReason(val wireId: String) {
     NETWORK("network"),
     PARSE("parse"),
     EMPTY("empty"),
+
+    /** The stored credential could not be read or written on this device (D021). */
+    CREDENTIAL("credential"),
     OTHER("other"),
 }
 
-/** Buckets a fetch failure. Raw messages never leave the device, only this classification. */
+/**
+ * Buckets a fetch failure. Raw messages never leave the device, only this classification.
+ *
+ * A token request is bucketed by its cause (D021): only a rejected credential is `auth`, while a
+ * provider that is throttling or failing keeps its own bucket, so an outage is not read as users
+ * having to sign in again.
+ */
 fun Throwable.toFetchErrorReason(): FetchErrorReason = when (this) {
     is UsageException.Unauthorized -> FetchErrorReason.AUTH
     is UsageException.RateLimited -> FetchErrorReason.RATE_LIMIT
     is UsageException.Http -> if (statusCode in 400..499) FetchErrorReason.HTTP_4XX else FetchErrorReason.HTTP_5XX
     is UsageException.Decode -> FetchErrorReason.PARSE
     is UsageException.NoWindows -> FetchErrorReason.EMPTY
+    is CredentialUnavailableException -> FetchErrorReason.CREDENTIAL
+    is OAuthException.NotAuthenticated, is OAuthException.RefreshRevoked -> FetchErrorReason.AUTH
+    is OAuthException.RefreshFailed -> tokenFailureReason(failureCode)
+    is OAuthException.ExchangeFailed -> tokenFailureReason(failureCode)
     is IOException -> FetchErrorReason.NETWORK
+    else -> FetchErrorReason.OTHER
+}
+
+/**
+ * A token request's [LoginFailureCode] to a fetch reason, the same table as iOS
+ * `FetchErrorReason(tokenFailureCode:)`. The OAuth errors `LoginFailureCode.http` names instead of
+ * a status (`invalid_grant`, `invalid_client`, `redirect_mismatch`) are token endpoint rejections.
+ * 400/401 is a rejection, 429 throttling, 5xx an outage; no code, 0 or 3xx is `other`.
+ */
+internal fun tokenFailureReason(code: String?): FetchErrorReason = when {
+    code == "invalid_grant" || code == "invalid_client" || code == "redirect_mismatch" -> FetchErrorReason.AUTH
+    code == LoginFailureCode.PARSE -> FetchErrorReason.PARSE
+    code != null && code.startsWith("http_") -> when (val status = code.removePrefix("http_").toIntOrNull()) {
+        400, 401 -> FetchErrorReason.AUTH
+        429 -> FetchErrorReason.RATE_LIMIT
+        null -> FetchErrorReason.OTHER
+        in 500..599 -> FetchErrorReason.HTTP_5XX
+        in 400..499 -> FetchErrorReason.HTTP_4XX
+        else -> FetchErrorReason.OTHER
+    }
     else -> FetchErrorReason.OTHER
 }
 

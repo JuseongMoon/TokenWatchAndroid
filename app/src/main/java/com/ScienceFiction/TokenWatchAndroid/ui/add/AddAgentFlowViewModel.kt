@@ -9,6 +9,7 @@ import com.ScienceFiction.TokenWatchAndroid.analytics.AnalyticsEvent
 import com.ScienceFiction.TokenWatchAndroid.analytics.LoginAttemptTracker
 import com.ScienceFiction.TokenWatchAndroid.analytics.LoginFailureCode
 import com.ScienceFiction.TokenWatchAndroid.analytics.LoginStage
+import com.ScienceFiction.TokenWatchAndroid.auth.CredentialUnavailableException
 import com.ScienceFiction.TokenWatchAndroid.auth.ForegroundSignal
 import com.ScienceFiction.TokenWatchAndroid.auth.OAuthTokens
 import com.ScienceFiction.TokenWatchAndroid.auth.Pkce
@@ -444,6 +445,16 @@ internal class AddAgentFlowViewModel(
         if (phase is AddAgentPhase.ApiKey) apiKeyText = value
     }
 
+    /**
+     * The paste button next to the API key field. [readClipboard] runs here, on that tap only:
+     * nothing reads the clipboard on its own when the screen opens. Surrounding whitespace (a
+     * copied trailing newline) is dropped; an empty clipboard leaves the field as it is.
+     */
+    fun pasteApiKey(readClipboard: () -> String?) {
+        if (phase !is AddAgentPhase.ApiKey) return
+        readClipboard()?.trim()?.takeIf(String::isNotEmpty)?.let { apiKeyText = it }
+    }
+
     fun submitApiKey(
         providerAuth: ProviderAuthRegistry,
         loc: L10n,
@@ -605,6 +616,7 @@ internal class AddAgentFlowViewModel(
 }
 
 internal fun authErrorMessage(error: Throwable, loc: L10n): String = when (error) {
+    is CredentialUnavailableException -> loc.errCredentialUnavailable
     is OAuthException.NotAuthenticated -> loc.errNotAuthenticated
     is OAuthException.ExchangeFailed -> loc.errTokenExchange(error.detail)
     is OAuthException.RefreshFailed -> loc.errTokenRefresh(error.detail)

@@ -26,6 +26,9 @@ message, and OpenRouter key rejections explained (the balance needs a management
 It also mirrors iOS `dd8e282` on `dev` (D019, D020): Codex signs in through the sign-in window and
 the loopback listener on its registered port 1455 on both platforms, and `login_abandon` carries
 `elapsed` and `attempt`, both described below.
+It also mirrors iOS `b313f3d` on `dev` (D021, first pass): the notice above Claude's sign-in
+button, the API key guides and paste button, token failures classified by cause, and `credential`
+for secure storage that cannot be read right now, described below.
 Uncommitted iOS working-tree changes are deliberately not part of this baseline.
 
 Firebase Analytics runs against the Android app's own Firebase registration and
@@ -58,6 +61,19 @@ Firebase Analytics runs against the Android app's own Firebase registration and
   only an app restart starts them over. The funnel's provider and stage live in the
   activity-retained add-agent view model, so an activity recreated mid-login (rotation, dark mode,
   language) no longer logs a second `login_start` or loses the failure that follows.
+- Add-agent guidance (D021, iOS `b313f3d`): Claude's sign-in screen shows a notice above its
+  sign-in button saying what the next screen asks for and what the connection is used for. Each API
+  key screen opens with a one-line guide to where its key is made (OpenRouter: a Management Key,
+  said before anything is typed), which replaces the hints that used to sit under the field. Both
+  are the iOS strings byte for byte. A paste button next to the masked field reads the clipboard
+  only when tapped, and the field is still cleared on submit.
+- Token failures by cause (D021, iOS `b313f3d`): `usage_fetch_error.reason` for a failed token
+  request follows its `LoginFailureCode`. Signed out, revoked, 400/401, or an OAuth rejection named
+  in the body (`invalid_grant`, `invalid_client`, `redirect_mismatch`) is `auth`; 429 `rate_limit`;
+  5xx `http_5xx`; any other 4xx `http_4xx`; an unreadable 2xx `parse`; no code, 0 or 3xx `other`.
+  A provider outage or throttling therefore no longer reads as users having to sign in again.
+  Secure storage that cannot be read right now is `credential`, and its card message does not ask
+  the user to sign in again.
 - "hide unused graphs" split (iOS `6171f42`): a heading with two checkboxes. `percentage (0%)`
   keeps the single-toggle era key and `hide_unused` event, so existing choices carry over;
   `credit (never used)` hides credit gauges whose provider-supplied total is untouched (e.g.
@@ -293,8 +309,14 @@ Firebase Analytics runs against the Android app's own Firebase registration and
 - `SFSafariViewController` maps to Custom Tabs. Android cannot close a Custom Tab from the app, so
   when a polling login completes under an open approval tab the app brings itself to the front
   (best effort; newer Android versions may block it, and the user closes the tab).
-- The paste fallback uses an explicit `[ paste ]` button instead of iOS `PasteButton`; Android shows
-  its own clipboard notice on that tap.
+- The paste fallback and the API key field use an explicit `[ paste ]` button instead of iOS
+  `PasteButton`; the clipboard is read on that tap only, and Android shows its own clipboard notice.
+- `credential` (D021) on Android: the vault deletes a stored credential only when it is damaged (it
+  does not parse, its tag fails under the existing key, or it is not a credential). A missing
+  Keystore key, a keystore error or an unknown format version keeps it, and reading never creates a
+  key. A rotated refresh token the vault would not take is reported as `credential` and kept in
+  memory until a later access writes it. iOS reports `credential` when data protection keeps the
+  Keychain from being read.
 - App account sign-in: Apple runs Firebase's web OAuth flow in a browser tab instead of the native
   sheet. That flow cannot request an empty scope, so Apple's consent page asks for name and email
   where iOS requests neither. Google uses Credential Manager's "Sign in with Google" option; a
