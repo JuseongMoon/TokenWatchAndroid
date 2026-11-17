@@ -133,6 +133,18 @@ enum class ScreenName(val wireId: String, val screenClass: String) {
     MONSTER_CONSENT("monster_consent", "MonsterConsentScreen"),
 }
 
+/** How the add-agent screen was reached: `screen_view(add_agent)`'s `source` (D022, as on iOS). */
+enum class AddAgentSource(val wireId: String) {
+    /** The connect button of the first screen with no account. */
+    EMPTY_STATE("empty_state"),
+
+    /** The connect button shown during demo mode; demo mode ends first. */
+    DEMO("demo"),
+
+    /** Any other way in: the add button under the account list. */
+    LIST("list"),
+}
+
 enum class DemoSource(val wireId: String) {
     EMPTY_LIST("empty_list"),
     SETTINGS("settings"),
@@ -235,7 +247,12 @@ sealed class AnalyticsEvent(
 
     data object DemoEnd : AnalyticsEvent("demo_end", emptyMap(), isProviderScoped = false)
 
-    class ScreenView(screen: ScreenName, provider: AgentProvider? = null) : AnalyticsEvent(
+    /** [source] is sent only with the add-agent screen: how it was reached. */
+    class ScreenView(
+        screen: ScreenName,
+        provider: AgentProvider? = null,
+        source: AddAgentSource? = null,
+    ) : AnalyticsEvent(
         "screen_view",
         buildMap {
             put("screen_name", screen.wireId)
@@ -243,6 +260,7 @@ sealed class AnalyticsEvent(
             // past the 100-character limit and drops the event, which bit the iOS build once.
             put("screen_class", screen.screenClass)
             provider?.let { put("provider", it.wireId) }
+            source?.let { put("source", it.wireId) }
         },
         isProviderScoped = false,
     )

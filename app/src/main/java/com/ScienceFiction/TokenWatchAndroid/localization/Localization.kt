@@ -48,6 +48,18 @@ data class L10n(val lang: Lang) {
     val a11yMoveDown get() = choose("아래로 이동", "Move down")
     val demoHint get() = choose("계정 없이 표본 데이터로 앱을 둘러봅니다.", "Explore the app with sample data — no account needed.")
     val demoBanner get() = choose("표본 데이터입니다. 실제 사용량이 아닙니다.", "Sample data — not your real usage.")
+
+    /** The first screen with no account, above its connect button (D022, iOS `emptyStateMessage`). */
+    val emptyStateMessage get() = choose(
+        "아직 연결한 계정이 없습니다. 쓰고 있는 AI 서비스를 연결하면 남은 사용량이 여기에 표시됩니다.",
+        "No accounts connected yet. Connect the AI services you use to see your remaining usage here.",
+    )
+
+    /** Above the card list during demo mode (D022, iOS `demoConnectMessage`). */
+    val demoConnectMessage get() = choose(
+        "데모 화면입니다. 내 계정을 연결하면 실제 사용량이 표시됩니다.",
+        "This is a demo. Connect your own account to see your real usage.",
+    )
     val a11yRunDemo get() = choose("데모 실행", "Run demo")
     val a11yExitDemo get() = choose("데모 종료", "Exit demo")
 

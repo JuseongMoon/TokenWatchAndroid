@@ -31,6 +31,8 @@ button, the API key guides and paste button, token failures classified by cause,
 for secure storage that cannot be read right now, described below.
 It also mirrors iOS `c564aa0` on `dev` (D021, second pass): fetch error and recovery events compare
 each result with the outcome kept on the device, described below.
+It also mirrors iOS `586c045` on `dev` (D022): the first screen with no account leads with
+connecting one, and demo mode offers a way straight to connecting, described below.
 Uncommitted iOS working-tree changes are deliberately not part of this baseline.
 
 Firebase Analytics runs against the Android app's own Firebase registration and
@@ -69,6 +71,14 @@ Firebase Analytics runs against the Android app's own Firebase registration and
   said before anything is typed), which replaces the hints that used to sit under the field. Both
   are the iOS strings byte for byte. A paste button next to the masked field reads the clipboard
   only when tapped, and the field is still cleared on submit.
+- First-run entry (D022, iOS `586c045`): with no account and outside demo mode, the main screen
+  shows a one-line explanation, a full-width `[ + ADD AGENT ]`, the on-device storage note, and a
+  smaller `[ ▶ RUN DEMO ]` with its hint; the add button under the list appears once an account
+  exists. During demo mode a box above the cards offers `[ + ADD MY AGENT ]`, which goes through
+  the usual demo exit (`demo_end`, demo mode off) and then opens the add-agent screen; the existing
+  exit button stays. The texts are the iOS strings byte for byte. The add-agent `screen_view`
+  carries `source` (`empty_state`, `demo`, `list`); other screen views are unchanged. Android has no
+  store screenshot mode, so the demo box has nothing to hide for.
 - Fetch outcome transitions (D021, iOS `c564aa0`): `usage_fetch_error` and `usage_fetch_recover`
   compare each result with the account's last outcome kept on the device (`ok`, an error reason, or
   `paused`), so a new process does not count the same error again. None or `ok` to an error, or an

@@ -49,6 +49,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.ScienceFiction.TokenWatchAndroid.analytics.AddAgentSource
 import com.ScienceFiction.TokenWatchAndroid.data.AppSettings
 import com.ScienceFiction.TokenWatchAndroid.domain.Agent
 import com.ScienceFiction.TokenWatchAndroid.domain.AgentProvider
@@ -85,7 +86,8 @@ fun MainScreen(
     unreadAnnouncements: Int = 0,
     onSettings: () -> Unit,
     onAnnouncements: () -> Unit,
-    onAddAgent: () -> Unit,
+    /** Opens the add-agent screen; the argument is how it was reached (analytics). */
+    onAddAgent: (AddAgentSource) -> Unit,
     onOpenAgent: (Agent) -> Unit,
     onMoveUp: (Agent) -> Unit,
     onMoveDown: (Agent) -> Unit,
@@ -94,6 +96,8 @@ fun MainScreen(
     onRefreshAll: () -> Unit,
     onEnterDemo: () -> Unit = {},
     onExitDemo: () -> Unit = {},
+    /** Demo mode's connect button: ends demo mode, then opens the add-agent screen. */
+    onConnectFromDemo: () -> Unit = {},
     /** The guild sign (V2), left of the announcements button; null while the app account is unavailable. */
     guildSign: (@Composable () -> Unit)? = null,
     modifier: Modifier = Modifier,
@@ -131,8 +135,16 @@ fun MainScreen(
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
-                if (agents.isEmpty()) {
-                    item(key = "empty-hint") { EmptyAgentHint() }
+                if (isDemo) {
+                    item(key = "demo-connect") { DemoConnectBox(loc, onConnect = onConnectFromDemo) }
+                } else if (agents.isEmpty()) {
+                    item(key = "empty-state") {
+                        EmptyAgentState(
+                            loc = loc,
+                            onAddAgent = { onAddAgent(AddAgentSource.EMPTY_STATE) },
+                            onEnterDemo = onEnterDemo,
+                        )
+                    }
                 }
 
                 itemsIndexed(
@@ -168,14 +180,14 @@ fun MainScreen(
                                 modifier = Modifier.fillMaxWidth(),
                             )
                         }
-                    } else {
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            TerminalButton("[ + ADD AGENT ]", color = Term.Green, dashedBorder = true, onClick = onAddAgent)
-                            if (agents.isEmpty()) {
-                                TerminalButton("[ ▶ RUN DEMO ]", color = Term.Yellow, dashedBorder = true, onClick = onEnterDemo)
-                                Text(loc.demoHint, color = Term.Dim, style = terminalTextStyle(11.sp))
-                            }
-                        }
+                    } else if (agents.isNotEmpty()) {
+                        // With no account yet, the first screen above carries the connect button.
+                        TerminalButton(
+                            "[ + ADD AGENT ]",
+                            color = Term.Green,
+                            dashedBorder = true,
+                            onClick = { onAddAgent(AddAgentSource.LIST) },
+                        )
                     }
                 }
             }
@@ -486,24 +498,64 @@ private fun ReorderArrow(
     }
 }
 
+/**
+ * The first screen with no account, outside demo mode (D022, as on iOS): connecting an account is the
+ * main action, and the demo is a small secondary way in below it.
+ */
 @Composable
-private fun EmptyAgentHint() {
+private fun EmptyAgentState(loc: L10n, onAddAgent: () -> Unit, onEnterDemo: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 20.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(text = "$ tap", color = Term.Dim, style = terminalTextStyle(12.sp))
-            Text(text = "[+ ADD AGENT]", color = Term.Green, style = terminalTextStyle(12.sp))
-            Text(text = "below to login", color = Term.Dim, style = terminalTextStyle(12.sp))
-        }
+        Text(text = loc.emptyStateMessage, color = Term.Foreground, style = terminalTextStyle(13.sp))
+        TerminalButton("[ + ADD AGENT ]", color = Term.Green, onClick = onAddAgent, modifier = Modifier.fillMaxWidth())
         Text(
             text = "  tokens are stored only on this device",
             color = Term.Dim.copy(alpha = 0.7f),
             style = terminalTextStyle(12.sp),
         )
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 10.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            val interactionSource = remember { MutableInteractionSource() }
+            Text(
+                text = "[ ▶ RUN DEMO ]",
+                color = Term.Yellow,
+                style = terminalTextStyle(12.sp, FontWeight.SemiBold),
+                modifier = Modifier
+                    .clickable(
+                        interactionSource = interactionSource,
+                        indication = null,
+                        role = Role.Button,
+                        onClick = onEnterDemo,
+                    )
+                    .padding(vertical = 6.dp, horizontal = 10.dp),
+            )
+            Text(
+                text = loc.demoHint,
+                color = Term.Dim,
+                style = terminalTextStyle(11.sp),
+                textAlign = TextAlign.Center,
+            )
+        }
+    }
+}
+
+/** Above the cards during demo mode (D022): connect your own account, which ends demo mode first. */
+@Composable
+private fun DemoConnectBox(loc: L10n, onConnect: () -> Unit) {
+    TerminalBox(borderColor = Term.Yellow.copy(alpha = 0.5f), contentPadding = 12.dp) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(text = loc.demoConnectMessage, color = Term.Foreground, style = terminalTextStyle(12.sp))
+            TerminalButton("[ + ADD MY AGENT ]", color = Term.Green, onClick = onConnect, modifier = Modifier.fillMaxWidth())
+        }
     }
 }
 

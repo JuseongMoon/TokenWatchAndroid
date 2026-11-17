@@ -46,6 +46,7 @@ import com.ScienceFiction.TokenWatchAndroid.domain.ServiceHealth
 import com.ScienceFiction.TokenWatchAndroid.localization.L10n
 import com.ScienceFiction.TokenWatchAndroid.store.AccountInfo
 import com.ScienceFiction.TokenWatchAndroid.tokenWatchContainer
+import com.ScienceFiction.TokenWatchAndroid.analytics.AddAgentSource
 import com.ScienceFiction.TokenWatchAndroid.analytics.AnalyticsEvent
 import com.ScienceFiction.TokenWatchAndroid.analytics.StoreReviewSource
 import com.ScienceFiction.TokenWatchAndroid.analytics.AnalyticsService
@@ -154,6 +155,13 @@ private fun TokenWatchAppContent(
     val loc = remember(settings.language) { L10n(settings.language.resolved()) }
 
     var route by rememberSaveable { mutableStateOf(ROUTE_MAIN) }
+
+    /** How the add-agent screen was reached, set right before it opens: its screen_view's source. */
+    var addSource by rememberSaveable { mutableStateOf(AddAgentSource.LIST) }
+    fun openAdd(source: AddAgentSource) {
+        addSource = source
+        route = ROUTE_ADD
+    }
     // Where the PLAYER and consent screens return to (they open from settings and from the guild).
     var playerReturnRoute by rememberSaveable { mutableStateOf(ROUTE_SETTINGS) }
     var consentReturnRoute by rememberSaveable { mutableStateOf(ROUTE_MAIN) }
@@ -343,7 +351,8 @@ private fun TokenWatchAppContent(
             route == ROUTE_MONSTER_CONSENT -> ScreenName.MONSTER_CONSENT
             else -> null
         } ?: return@LaunchedEffect
-        analytics.log(AnalyticsEvent.ScreenView(screen, selectedAgent?.provider))
+        val source = addSource.takeIf { screen == ScreenName.ADD_AGENT }
+        analytics.log(AnalyticsEvent.ScreenView(screen, selectedAgent?.provider, source))
     }
 
     val selectedAnnouncement = route
@@ -437,7 +446,7 @@ private fun TokenWatchAppContent(
                 unreadAnnouncements = unreadIds.size,
                 onSettings = { route = ROUTE_SETTINGS },
                 onAnnouncements = { route = ROUTE_ANNOUNCEMENTS },
-                onAddAgent = { route = ROUTE_ADD },
+                onAddAgent = ::openAdd,
                 onOpenAgent = { agent -> route = "$ROUTE_DETAIL_PREFIX${agent.id}" },
                 onMoveUp = { agent -> scope.launch { store.moveUp(agent) } },
                 onMoveDown = { agent -> scope.launch { store.moveDown(agent) } },
@@ -467,8 +476,18 @@ private fun TokenWatchAppContent(
                     scope.launch { store.enterDemo(); store.startAutoRefresh(settings.refreshInterval) }
                 },
                 onExitDemo = {
-                    analytics.log(AnalyticsEvent.DemoEnd)
-                    scope.launch { store.exitDemo(); store.startAutoRefresh(settings.refreshInterval) }
+                    scope.launch {
+                        leaveDemo(analytics::log) { store.exitDemo(); store.startAutoRefresh(settings.refreshInterval) }
+                    }
+                },
+                onConnectFromDemo = {
+                    scope.launch {
+                        connectFromDemo(
+                            log = analytics::log,
+                            exitDemo = { store.exitDemo(); store.startAutoRefresh(settings.refreshInterval) },
+                            openAdd = ::openAdd,
+                        )
+                    }
                 },
                 guildSign = if (accountState != AccountState.Unavailable) {
                     {
@@ -809,6 +828,25 @@ private fun AccountInfo?.toDetailUiState(): DetailAccountUiState = DetailAccount
     canRefresh = this?.canRefresh ?: true,
     expiresAt = this?.expiresAt,
 )
+
+/** The usual way out of demo mode: `demo_end`, then demo mode off. */
+internal suspend fun leaveDemo(log: (AnalyticsEvent) -> Unit, exitDemo: suspend () -> Unit) {
+    log(AnalyticsEvent.DemoEnd)
+    exitDemo()
+}
+
+/**
+ * Demo mode's connect button (D022, iOS `connectFromDemo`): the usual demo exit, then the add-agent
+ * screen. It opens only once demo mode is off, so its screen_view is never taken for a demo event.
+ */
+internal suspend fun connectFromDemo(
+    log: (AnalyticsEvent) -> Unit,
+    exitDemo: suspend () -> Unit,
+    openAdd: (AddAgentSource) -> Unit,
+) {
+    leaveDemo(log, exitDemo)
+    openAdd(AddAgentSource.DEMO)
+}
 
 /** Applies only fields changed by a settings event, preserving other concurrent taps. */
 internal fun mergeSettingsChange(
