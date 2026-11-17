@@ -616,7 +616,7 @@ internal class AddAgentFlowViewModel(
 }
 
 internal fun authErrorMessage(error: Throwable, loc: L10n): String = when (error) {
-    is CredentialUnavailableException -> loc.errCredentialUnavailable
+    is CredentialUnavailableException -> loc.errCredential(error.reason)
     is OAuthException.NotAuthenticated -> loc.errNotAuthenticated
     is OAuthException.ExchangeFailed -> loc.errTokenExchange(error.detail)
     is OAuthException.RefreshFailed -> loc.errTokenRefresh(error.detail)

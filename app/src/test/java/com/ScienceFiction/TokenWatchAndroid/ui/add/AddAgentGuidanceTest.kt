@@ -1,5 +1,6 @@
 package com.ScienceFiction.TokenWatchAndroid.ui.add
 
+import com.ScienceFiction.TokenWatchAndroid.auth.CredentialUnavailableException
 import com.ScienceFiction.TokenWatchAndroid.auth.OAuthTokens
 import com.ScienceFiction.TokenWatchAndroid.auth.ProviderAuthRegistry
 import com.ScienceFiction.TokenWatchAndroid.auth.device.CopilotDeviceFlow
@@ -131,6 +132,23 @@ class AddAgentGuidanceTest {
         assertFalse(ko.errCredentialUnavailable.contains("로그인"))
         assertFalse(en.errCredentialUnavailable.lowercase().contains("sign in"))
         assertFalse(en.errCredentialUnavailable.lowercase().contains("log in"))
+    }
+
+    /** I003: a missing keystore key does not come back, so that one reason asks to sign in again. */
+    @Test fun aMissingKeyAsksToSignInAgainAndTheOtherReasonsDoNot() {
+        assertEquals("이 기기의 보안 저장소 키를 찾을 수 없어 다시 로그인해야 합니다.", ko.errCredentialKeyMissing)
+        assertEquals("This device's secure storage key is missing. Please sign in again.", en.errCredentialKeyMissing)
+        for (loc in listOf(ko, en)) {
+            for (reason in CredentialUnavailableException.Reason.entries) {
+                val expected = if (reason == CredentialUnavailableException.Reason.KEY_MISSING) {
+                    loc.errCredentialKeyMissing
+                } else {
+                    loc.errCredentialUnavailable
+                }
+                assertEquals("$reason", expected, loc.errCredential(reason))
+                assertEquals("$reason", expected, authErrorMessage(CredentialUnavailableException(reason), loc))
+            }
+        }
     }
 
     // endregion

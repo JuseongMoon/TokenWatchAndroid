@@ -136,7 +136,7 @@ class UsageGateway(
             is UsageException.Http -> l10n.errHttp(error.statusCode)
             is UsageException.Decode -> l10n.errDecode(error.message.orEmpty())
             is UsageException.NoWindows -> l10n.errNoWindows
-            is CredentialUnavailableException -> l10n.errCredentialUnavailable
+            is CredentialUnavailableException -> l10n.errCredential(error.reason)
             is OAuthException.NotAuthenticated -> l10n.errNotAuthenticated
             is OAuthException.RefreshRevoked -> l10n.errAuthExpired
             is OAuthException.RefreshFailed -> l10n.errTokenRefresh(error.detailAfterPrefix())

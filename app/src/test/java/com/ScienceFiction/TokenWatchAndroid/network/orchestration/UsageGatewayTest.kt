@@ -399,6 +399,39 @@ class UsageGatewayTest {
         assertEquals(FetchErrorReason.CREDENTIAL, outcomes.single()!!.toFetchErrorReason())
     }
 
+    /**
+     * I003: a missing keystore key does not come back, so only that reason asks to sign in again;
+     * every reason is still reported as `credential`.
+     */
+    @Test
+    fun onlyAMissingKeyAsksToSignInAgain() = runBlocking {
+        for (reason in CredentialUnavailableException.Reason.entries) {
+            val id = UUID.randomUUID()
+            val vault = object : CredentialVault {
+                override fun save(agentId: UUID, tokens: OAuthTokens) = error("nothing is written")
+                override fun load(agentId: UUID): OAuthTokens? = throw CredentialUnavailableException(reason)
+                override fun delete(agentId: UUID) = error("nothing is deleted")
+            }
+            val store = TokenStore(vault, TokenRefresher { _, _ -> error("not refreshed") }, now = { now })
+            val outcomes = mutableListOf<Throwable?>()
+
+            val snapshot = gateway(
+                ProviderUsageClient { error("no request without a credential") },
+                store,
+                RateLimitGate(now = { now }),
+                onFetchOutcome = { _, _, error -> outcomes += error },
+            ).fetchSnapshot(AgentProvider.CODEX, id)
+
+            val expected = if (reason == CredentialUnavailableException.Reason.KEY_MISSING) {
+                "This device's secure storage key is missing. Please sign in again."
+            } else {
+                "Couldn't read this device's secure storage just now. Please try again in a moment."
+            }
+            assertEquals("$reason", expected, snapshot.error)
+            assertEquals("$reason", FetchErrorReason.CREDENTIAL, outcomes.single()!!.toFetchErrorReason())
+        }
+    }
+
     private fun gateway(
         client: ProviderUsageClient,
         store: TokenStore,

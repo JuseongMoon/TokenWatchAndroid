@@ -1,5 +1,6 @@
 package com.ScienceFiction.TokenWatchAndroid.localization
 
+import com.ScienceFiction.TokenWatchAndroid.auth.CredentialUnavailableException
 import com.ScienceFiction.TokenWatchAndroid.domain.AgentProvider
 import com.ScienceFiction.TokenWatchAndroid.domain.ServiceHealth
 import com.ScienceFiction.TokenWatchAndroid.domain.UsageCategory
@@ -281,6 +282,16 @@ data class L10n(val lang: Lang) {
         "기기 보안 저장소를 잠시 읽지 못했습니다. 잠시 후 다시 시도해 주세요.",
         "Couldn't read this device's secure storage just now. Please try again in a moment.",
     )
+
+    /** The keystore key that sealed a credential is gone, which does not come back (I003). */
+    val errCredentialKeyMissing get() = choose(
+        "이 기기의 보안 저장소 키를 찾을 수 없어 다시 로그인해야 합니다.",
+        "This device's secure storage key is missing. Please sign in again.",
+    )
+
+    /** The card text for an unusable stored credential; only a missing key asks to sign in again. */
+    fun errCredential(reason: CredentialUnavailableException.Reason): String =
+        if (reason == CredentialUnavailableException.Reason.KEY_MISSING) errCredentialKeyMissing else errCredentialUnavailable
     val errNetwork get() = choose(
         "네트워크에 연결할 수 없습니다. 인터넷 연결을 확인한 뒤 다시 시도해 주세요.",
         "Couldn't reach the network. Check your internet connection and try again.",

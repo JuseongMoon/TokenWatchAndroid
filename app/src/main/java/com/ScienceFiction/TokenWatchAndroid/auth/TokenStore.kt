@@ -53,10 +53,11 @@ class ProviderTokenRefresher(
  * instead of the stale one, so a late response can never overwrite or invalidate a newer sign-in.
  * Plan-only updates ([updatePlan]) keep the generation: they do not replace the credential.
  *
- * A rotated credential the vault would not take is not dropped: the refresh fails with
- * [CredentialUnavailableException] (reason `NOT_SAVED`), and the credential stays in [unsaved],
- * which every later access reads first and tries to write again. Its old refresh token is already
- * spent, so the copy in memory is the only one that still works.
+ * A rotated credential the vault would not take is not dropped: it stays in [unsaved], which every
+ * later access reads first and tries to write again. Its old refresh token is already spent, so the
+ * copy in memory is the only one that still works, and requests keep using it while it is valid. A
+ * refresh is not sent while it is unsaved (that would rotate it again with nothing on disk); a
+ * request that needs one fails with [CredentialUnavailableException] (reason `NOT_SAVED`) instead.
  */
 class TokenStore(
     private val vault: CredentialVault,
@@ -104,7 +105,9 @@ class TokenStore(
     /** Updates only the cached account plan (live Codex lookup, or a plan in the usage response). */
     suspend fun updatePlan(agentId: UUID, plan: String) = exclusive {
         loadFromVault(agentId)?.let { stored ->
-            saveToVault(agentId, stored.copy(plan = plan))
+            val updated = stored.copy(plan = plan)
+            // An unsaved credential takes the plan in memory too, and is written whenever it can be.
+            if (agentId in unsaved) persistRotated(agentId, updated) else saveToVault(agentId, updated)
         }
     }
 
@@ -140,8 +143,13 @@ class TokenStore(
     }
 
     private suspend fun refreshAndPersist(agentId: UUID, provider: AgentProvider): OAuthTokens {
-        val (current, generation) = exclusive { loadFromVault(agentId) to generationOf(agentId) }
+        val (current, generation, held) = exclusive {
+            Triple(loadFromVault(agentId), generationOf(agentId), agentId in unsaved)
+        }
         if (current?.refreshToken == null) throw OAuthException.NotAuthenticated()
+        // The only working refresh token is still only in memory; rotating it again would leave
+        // nothing usable on disk either way, so the request fails until the vault takes it.
+        if (held) throw CredentialUnavailableException(CredentialUnavailableException.Reason.NOT_SAVED)
         val rotated = try {
             refresher.refresh(provider, current)
         } catch (revoked: OAuthException.RefreshRevoked) {
@@ -171,9 +179,9 @@ class TokenStore(
         exclusive { loadFromVault(agentId) } ?: throw OAuthException.NotAuthenticated()
 
     /**
-     * Writes a rotated credential, retrying once. If both writes fail it is kept in [unsaved] and
-     * the failure is reported to the caller. Must run inside [exclusive] so the generation check and
-     * the write cannot be separated.
+     * Writes a rotated credential, retrying once. If both writes fail it is kept in [unsaved] for
+     * later accesses to use and write; the caller still gets it. Must run inside [exclusive] so the
+     * generation check and the write cannot be separated.
      */
     private suspend fun persistRotated(agentId: UUID, tokens: OAuthTokens) {
         try {
@@ -187,9 +195,9 @@ class TokenStore(
             } catch (cancelled: CancellationException) {
                 unsaved[agentId] = tokens
                 throw cancelled
-            } catch (error: Exception) {
+            } catch (_: Exception) {
                 unsaved[agentId] = tokens
-                throw CredentialUnavailableException(CredentialUnavailableException.Reason.NOT_SAVED, error)
+                return
             }
         }
         unsaved.remove(agentId)
@@ -210,20 +218,13 @@ class TokenStore(
     }
 
     /**
-     * The current credential. A rotated one still waiting in [unsaved] is written first; until
-     * that succeeds every access fails with `NOT_SAVED`, and the copy stays in memory. Must run
-     * inside [exclusive].
+     * The current credential. A rotated one still waiting in [unsaved] is tried on the vault first
+     * and returned either way; it stays in memory until a write succeeds. Must run inside
+     * [exclusive].
      */
     private suspend fun loadFromVault(agentId: UUID): OAuthTokens? {
         unsaved[agentId]?.let { pending ->
-            try {
-                saveToVault(agentId, pending)
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (error: Exception) {
-                throw CredentialUnavailableException(CredentialUnavailableException.Reason.NOT_SAVED, error)
-            }
-            unsaved.remove(agentId)
+            if (bestEffort { saveToVault(agentId, pending) } != null) unsaved.remove(agentId)
             return pending
         }
         return withContext(Dispatchers.IO) { vault.load(agentId) }
