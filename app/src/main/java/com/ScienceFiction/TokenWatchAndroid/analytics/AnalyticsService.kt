@@ -48,6 +48,14 @@ class AnalyticsService(
     private val reportingAllowed: Boolean
         get() = collectionEnabled && !isDemo() && (!BuildConfig.DEBUG || BuildConfig.ANALYTICS_DEBUG)
 
+    /**
+     * Whether an event logged now would actually be sent: the SDK is configured, the debug gate
+     * allows it, the user has not opted out, and the app is not in demo mode. The fetch outcome
+     * ledger keeps no baseline while this is false (D021).
+     */
+    val isCollecting: Boolean
+        get() = isUsable && !isDemo()
+
     /** Applies the opt-out to the SDK as well, so nothing is buffered while it is off. */
     fun setCollectionEnabled(enabled: Boolean) {
         collectionEnabled = enabled

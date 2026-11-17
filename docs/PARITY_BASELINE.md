@@ -29,6 +29,8 @@ the loopback listener on its registered port 1455 on both platforms, and `login_
 It also mirrors iOS `b313f3d` on `dev` (D021, first pass): the notice above Claude's sign-in
 button, the API key guides and paste button, token failures classified by cause, and `credential`
 for secure storage that cannot be read right now, described below.
+It also mirrors iOS `c564aa0` on `dev` (D021, second pass): fetch error and recovery events compare
+each result with the outcome kept on the device, described below.
 Uncommitted iOS working-tree changes are deliberately not part of this baseline.
 
 Firebase Analytics runs against the Android app's own Firebase registration and
@@ -67,6 +69,18 @@ Firebase Analytics runs against the Android app's own Firebase registration and
   said before anything is typed), which replaces the hints that used to sit under the field. Both
   are the iOS strings byte for byte. A paste button next to the masked field reads the clipboard
   only when tapped, and the field is still cleared on submit.
+- Fetch outcome transitions (D021, iOS `c564aa0`): `usage_fetch_error` and `usage_fetch_recover`
+  compare each result with the account's last outcome kept on the device (`ok`, an error reason, or
+  `paused`), so a new process does not count the same error again. None or `ok` to an error, or an
+  error to another reason, is one error; an error to `ok` is one recovery; the same value, a first
+  success, or anything after `paused` sends nothing. A result is recorded only once the store has
+  accepted it, so a result discarded because the account was removed or signed in again meanwhile
+  is never counted; the check, the comparison and the write share one DataStore transaction, and the
+  event is sent after it. While analytics is not actually collecting (opt-out, debug gate,
+  unconfigured), a result only marks its account `paused`; entering demo mode marks every account
+  `paused` and nothing is recorded during demo mode; removing an account forgets it. A fetch held back
+  by the 429 backoff counts as `rate_limit`, as on iOS. Analytics bookkeeping never fails a fetch,
+  and an event may be lost if the process ends right after the write.
 - Token failures by cause (D021, iOS `b313f3d`): `usage_fetch_error.reason` for a failed token
   request follows its `LoginFailureCode`. Signed out, revoked, 400/401, or an OAuth rejection named
   in the body (`invalid_grant`, `invalid_client`, `redirect_mismatch`) is `auth`; 429 `rate_limit`;

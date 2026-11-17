@@ -1,5 +1,6 @@
 package com.ScienceFiction.TokenWatchAndroid.domain
 
+import com.ScienceFiction.TokenWatchAndroid.analytics.FetchErrorReason
 import java.time.Duration
 import java.time.Instant
 import java.time.ZoneId
@@ -119,4 +120,9 @@ data class AgentSnapshot(
     val planLabel: String?,
     val fetchedAt: Instant,
     val error: String?,
+    /**
+     * Why this fetch failed, bucketed for `usage_fetch_error` (iOS `errorReason`); set whenever
+     * [error] comes from a fetch. Null on success.
+     */
+    val errorReason: FetchErrorReason? = null,
 )

@@ -1,5 +1,7 @@
 package com.ScienceFiction.TokenWatchAndroid.store
 
+import com.ScienceFiction.TokenWatchAndroid.analytics.AnalyticsEvent
+import com.ScienceFiction.TokenWatchAndroid.analytics.FetchOutcomeLedger
 import com.ScienceFiction.TokenWatchAndroid.auth.CredentialUnavailableException
 import com.ScienceFiction.TokenWatchAndroid.auth.OAuthTokens
 import com.ScienceFiction.TokenWatchAndroid.auth.TokenStore
@@ -113,6 +115,21 @@ data class AgentStoreDependencies(
      * legacy cards saved before the id was recorded (Copilot). Null means "cannot tell".
      */
     val resolveAccountId: suspend (AgentProvider, OAuthTokens) -> String? = { _, _ -> null },
+    /**
+     * Records an accepted fetch result for analytics (D021). [isAccepted] must be evaluated inside
+     * the recorder's own transaction; collecting is whether analytics would send an event now.
+     */
+    val recordFetchOutcome: suspend (
+        agent: Agent,
+        snapshot: AgentSnapshot,
+        collecting: Boolean,
+        isAccepted: suspend () -> Boolean,
+    ) -> Unit = { _, _, _, _ -> },
+    /** Whether analytics would actually send an event now (configured, debug gate, not demo). */
+    val isAnalyticsCollecting: () -> Boolean = { true },
+    val forgetFetchOutcomes: suspend (List<UUID>) -> Unit = {},
+    /** Demo mode begins: every account's recorded baseline becomes unknown. */
+    val pauseFetchOutcomes: suspend (List<UUID>) -> Unit = {},
 )
 
 /**
@@ -140,6 +157,9 @@ class AgentStore(
         now: () -> Instant = Instant::now,
         sleeper: StoreSleeper = StoreSleeper.DEFAULT,
         resolveAccountId: suspend (AgentProvider, OAuthTokens) -> String? = { _, _ -> null },
+        fetchOutcomes: FetchOutcomeLedger? = null,
+        isAnalyticsCollecting: () -> Boolean = { true },
+        logEvent: (AnalyticsEvent) -> Unit = {},
     ) : this(
         parentScope = scope,
         dependencies = AgentStoreDependencies(
@@ -165,6 +185,13 @@ class AgentStore(
             },
             removeResetNotifications = { id -> resetNotificationManager.removePending(id) },
             resolveAccountId = resolveAccountId,
+            recordFetchOutcome = { agent, snapshot, collecting, isAccepted ->
+                fetchOutcomes?.record(agent.provider, agent.id, snapshot, collecting, isAccepted)
+                    ?.let(logEvent)
+            },
+            isAnalyticsCollecting = isAnalyticsCollecting,
+            forgetFetchOutcomes = { ids -> fetchOutcomes?.forget(ids) },
+            pauseFetchOutcomes = { ids -> fetchOutcomes?.pauseAll(ids) },
         ),
         now = now,
         sleeper = sleeper,
@@ -447,6 +474,7 @@ class AgentStore(
             pruneResetBaseline(agent.id)
             dependencies.deleteTokens(agent.id)
             dependencies.removeResetNotifications(agent.id)
+            updateFetchOutcomes { dependencies.forgetFetchOutcomes(listOf(agent.id)) }
         }
     }
 
@@ -560,6 +588,7 @@ class AgentStore(
             // Fetched with a credential a sign-in has since replaced: never publish it.
             val incoming = applyIncomingSnapshot(agent.id, fetched) { credentialEpochIs(agent.id, epoch) }
                 ?: return
+            recordFetchOutcome(agent, incoming, epoch)
 
             if (incoming.planLabel != null) {
                 enrichAccountLabel(agent.id, incoming.planLabel)
@@ -584,6 +613,38 @@ class AgentStore(
                 rerunWithNewCredential -> launchCredentialFollowUp(agent.id)
                 owedAfterCancel -> launchCancelledFollowUp(agent.id)
             }
+        }
+    }
+
+    /**
+     * Records an accepted result for analytics. The account's existence and credential generation
+     * are checked again inside the recorder's transaction, so a result discarded meanwhile (removed,
+     * or signed in again) is never counted. Analytics must never turn a fetch into a failure, so a
+     * recorder error is dropped here.
+     */
+    private suspend fun recordFetchOutcome(agent: Agent, snapshot: AgentSnapshot, epoch: Long) {
+        try {
+            awaitSettingsReady()
+            // The stored opt-out as well: the analytics gate may not have caught up with it yet.
+            val collecting = _settings.value.analyticsEnabled && dependencies.isAnalyticsCollecting()
+            dependencies.recordFetchOutcome(agent, snapshot, collecting) {
+                !_isDemo.value && _agents.value.any { it.id == agent.id } && credentialEpochIs(agent.id, epoch)
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            // The fetch result stands; at worst this transition is not reported.
+        }
+    }
+
+    /** Updates recorded outcomes on account removal and demo entry; never fails the caller. */
+    private suspend fun updateFetchOutcomes(block: suspend () -> Unit) {
+        try {
+            block()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            // A stale entry costs at most one missed or extra transition event.
         }
     }
 
@@ -655,6 +716,7 @@ class AgentStore(
                             planLabel = previous.planLabel,
                             fetchedAt = previous.fetchedAt,
                             error = promoted.error,
+                            errorReason = promoted.errorReason,
                         )
                     } else {
                         promoted
@@ -1012,6 +1074,8 @@ class AgentStore(
             _snapshots.value = DemoData.snapshots(now())
             _serviceStatus.value = DemoData.serviceStatus()
         }
+        // Nothing is recorded during demo mode; afterwards each account only re-takes its baseline.
+        updateFetchOutcomes { dependencies.pauseFetchOutcomes(backupAgents.map { it.id }) }
     }
 
     suspend fun exitDemo() {

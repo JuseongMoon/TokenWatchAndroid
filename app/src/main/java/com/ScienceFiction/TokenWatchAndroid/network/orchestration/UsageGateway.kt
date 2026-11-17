@@ -1,5 +1,7 @@
 package com.ScienceFiction.TokenWatchAndroid.network.orchestration
 
+import com.ScienceFiction.TokenWatchAndroid.analytics.FetchErrorReason
+import com.ScienceFiction.TokenWatchAndroid.analytics.toFetchErrorReason
 import com.ScienceFiction.TokenWatchAndroid.auth.CredentialUnavailableException
 import com.ScienceFiction.TokenWatchAndroid.auth.TokenStore
 import com.ScienceFiction.TokenWatchAndroid.auth.oauth.OAuthException
@@ -15,7 +17,13 @@ import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlin.math.max
 
-/** Token validation, one-shot 401 refresh, 429 gating, and last-good snapshot orchestration. */
+/**
+ * Token validation, one-shot 401 refresh, 429 gating, and last-good snapshot orchestration.
+ *
+ * A failed fetch comes back as a snapshot with [AgentSnapshot.errorReason] set. Nothing is logged
+ * here: the store records the outcome only once it has accepted the result (D021), so a result it
+ * discards (the account was removed, or signed in again meanwhile) is never counted.
+ */
 class UsageGateway(
     private val registry: ProviderUsageRegistry,
     private val tokenStore: TokenStore,
@@ -23,12 +31,6 @@ class UsageGateway(
     private val codexAccountClient: CodexAccountClient = CodexAccountClient(),
     private val localization: () -> L10n = { L10n(AppLanguage.SYSTEM.resolved()) },
     private val now: () -> Instant = Instant::now,
-    /**
-     * Called once per fetch with the failure, or null on success. Deliberately a Throwable rather
-     * than a classified reason: this layer should not need to know that analytics exists, so the
-     * bucketing lives with the caller that does.
-     */
-    private val onFetchOutcome: (AgentProvider, UUID, Throwable?) -> Unit = { _, _, _ -> },
 ) {
     suspend fun fetchSnapshot(
         provider: AgentProvider,
@@ -74,35 +76,37 @@ class UsageGateway(
                 error = null,
             ).also { snapshot ->
                 rateLimitGate.recordSuccess(agentId, snapshot)
-                onFetchOutcome(provider, agentId, null)
             }
         } catch (error: UsageException.RateLimited) {
-            onFetchOutcome(provider, agentId, error)
             rateLimitGate.recordRateLimit(agentId, error.retryAfter)
             val until = rateLimitGate.blocked(agentId) ?: now().plusSeconds(300)
             rateLimitedSnapshot(agentId, until)
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Throwable) {
-            onFetchOutcome(provider, agentId, error)
-            errorSnapshot(localizedMessage(error, localization(), provider))
+            errorSnapshot(localizedMessage(error, localization(), provider), error.toFetchErrorReason())
         }
     }
 
-    /** Keeps the last successful graph visible while clearly marking it as stale during backoff. */
+    /**
+     * Keeps the last successful graph visible while clearly marking it as stale during backoff. A
+     * fetch held back by the backoff counts as rate limited too, as on iOS.
+     */
     private suspend fun rateLimitedSnapshot(agentId: UUID, until: Instant): AgentSnapshot {
         val minutes = minutesUntil(until)
         val l10n = localization()
         return rateLimitGate.lastGood(agentId)?.copy(
             error = l10n.errRateLimitedRetryStale(minutes),
-        ) ?: errorSnapshot(l10n.errRateLimitedRetry(minutes))
+            errorReason = FetchErrorReason.RATE_LIMIT,
+        ) ?: errorSnapshot(l10n.errRateLimitedRetry(minutes), FetchErrorReason.RATE_LIMIT)
     }
 
-    private fun errorSnapshot(message: String) = AgentSnapshot(
+    private fun errorSnapshot(message: String, reason: FetchErrorReason) = AgentSnapshot(
         windows = emptyList(),
         planLabel = null,
         fetchedAt = now(),
         error = message,
+        errorReason = reason,
     )
 
     private fun minutesUntil(until: Instant): Int {

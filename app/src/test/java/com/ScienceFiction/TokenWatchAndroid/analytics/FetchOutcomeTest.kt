@@ -26,26 +26,34 @@ class FetchOutcomeTest {
         assertEquals(FetchErrorReason.OTHER, IllegalStateException("boom").toFetchErrorReason())
     }
 
+    /** D021: the comparison against the stored outcome (null: none, "ok", or a reason). */
     @Test
     fun onlyTransitionsAreReported() {
-        // First failure reports; further failures stay quiet so one broken provider cannot flood.
-        val first = fetchOutcomeEvent(provider, IOException("offline"), previouslyFailed = false)
-        assertTrue(first is AnalyticsEvent.UsageFetchError)
-        assertNull(fetchOutcomeEvent(provider, IOException("offline"), previouslyFailed = true))
+        val network = FetchErrorReason.NETWORK
+        val ok = FetchOutcomeLedger.OK
 
-        // Recovery closes the pair, and steady success stays quiet too.
-        val recovered = fetchOutcomeEvent(provider, null, previouslyFailed = true)
-        assertTrue(recovered is AnalyticsEvent.UsageFetchRecover)
-        assertNull(fetchOutcomeEvent(provider, null, previouslyFailed = false))
+        // None or ok, then an error: one error.
+        assertEquals("usage_fetch_error", fetchOutcomeEvent(provider, null, network)?.eventName)
+        assertEquals("usage_fetch_error", fetchOutcomeEvent(provider, ok, network)?.eventName)
+        // The same error again stays quiet, so one broken provider cannot flood.
+        assertNull(fetchOutcomeEvent(provider, "network", network))
+        // A different reason is a new error.
+        val changed = fetchOutcomeEvent(provider, "network", FetchErrorReason.HTTP_5XX)
+        assertEquals("http_5xx", changed?.parameters?.get("reason"))
+
+        // Recovery closes the pair; steady success, and a first success, stay quiet.
+        assertTrue(fetchOutcomeEvent(provider, "network", null) is AnalyticsEvent.UsageFetchRecover)
+        assertNull(fetchOutcomeEvent(provider, ok, null))
+        assertNull(fetchOutcomeEvent(provider, null, null))
+
+        // After "paused" (analytics was off, or demo mode) a result only sets the baseline.
+        assertNull(fetchOutcomeEvent(provider, FetchOutcomeLedger.PAUSED, network))
+        assertNull(fetchOutcomeEvent(provider, FetchOutcomeLedger.PAUSED, null))
     }
 
     @Test
     fun errorEventCarriesOnlyProviderAndBucket() {
-        val event = fetchOutcomeEvent(
-            provider,
-            UsageException.Http(500, "upstream said something identifying"),
-            previouslyFailed = false,
-        )!!
+        val event = fetchOutcomeEvent(provider, null, UsageException.Http(500, "upstream said something identifying").toFetchErrorReason())!!
         assertEquals(mapOf("provider" to "claude", "reason" to "http_5xx"), event.parameters)
         assertEquals("usage_fetch_error", event.eventName)
     }

@@ -9,7 +9,7 @@ import com.ScienceFiction.TokenWatchAndroid.account.PlayerProfileClient
 import com.ScienceFiction.TokenWatchAndroid.account.UnavailableAccountAuth
 import com.ScienceFiction.TokenWatchAndroid.analytics.AnalyticsService
 import com.ScienceFiction.TokenWatchAndroid.analytics.LoginAttemptTracker
-import com.ScienceFiction.TokenWatchAndroid.analytics.fetchOutcomeEvent
+import com.ScienceFiction.TokenWatchAndroid.analytics.FetchOutcomeLedger
 import com.ScienceFiction.TokenWatchAndroid.domain.AgentProvider
 import com.ScienceFiction.TokenWatchAndroid.auth.AndroidCredentialVault
 import com.ScienceFiction.TokenWatchAndroid.auth.ProviderAuthRegistry
@@ -50,9 +50,8 @@ import com.ScienceFiction.TokenWatchAndroid.store.AgentStore
 import com.ScienceFiction.TokenWatchAndroid.store.AnnouncementStore
 import com.google.firebase.FirebaseApp
 import java.io.Closeable
-import java.util.UUID
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -114,8 +113,10 @@ class TokenWatchContainer(context: Context) : Closeable {
         rateLimitGate = RateLimitGate(),
         codexAccountClient = CodexAccountClient(transport),
         localization = localeState::l10n,
-        onFetchOutcome = ::recordFetchOutcome,
     )
+
+    /** Last fetch outcome per account on disk, so error/recover events are true transitions (D021). */
+    private val fetchOutcomes = FetchOutcomeLedger(applicationContext)
     private val serviceStatusClient = ServiceStatusClient(transport)
     private val agentRepository = AgentRepository(applicationContext)
     private val settingsRepository = SettingsRepository(applicationContext)
@@ -133,6 +134,9 @@ class TokenWatchContainer(context: Context) : Closeable {
         resolveAccountId = { provider, tokens ->
             if (provider == AgentProvider.COPILOT) copilotDeviceFlow.accountId(tokens.accessToken) else null
         },
+        fetchOutcomes = fetchOutcomes,
+        isAnalyticsCollecting = { analytics.isCollecting },
+        logEvent = { event -> analytics.log(event) },
     )
 
     /**
@@ -158,7 +162,7 @@ class TokenWatchContainer(context: Context) : Closeable {
     val loginAttempts = LoginAttemptTracker()
 
     /** Demo state is read lazily so sample agents never surface as real provider activity. */
-    val analytics = AnalyticsService(
+    val analytics: AnalyticsService = AnalyticsService(
         context = applicationContext,
         isDemo = { agentStore.isDemo.value },
     )
@@ -265,17 +269,6 @@ class TokenWatchContainer(context: Context) : Closeable {
         )
     }
 
-    /**
-     * Last known outcome per agent. Only transitions are reported: a provider that keeps failing
-     * logs one error, not one per refresh, and the recovery is what closes the pair.
-     */
-    private val fetchHadError = ConcurrentHashMap<UUID, Boolean>()
-
-    private fun recordFetchOutcome(provider: AgentProvider, agentId: UUID, error: Throwable?) {
-        val previouslyFailed = fetchHadError.put(agentId, error != null) == true
-        fetchOutcomeEvent(provider, error, previouslyFailed)?.let(analytics::log)
-    }
-
     /** The process starting is the cold start the review policy counts. */
     private val reviewLaunchJob = scope.launch {
         reviewPromptRepository.recordLaunch(System.currentTimeMillis())
@@ -292,6 +285,13 @@ class TokenWatchContainer(context: Context) : Closeable {
         agentRepository.migrateUnsupportedProviders { id ->
             tokenStore.delete(id)
             resetNotificationManager.removePending(id)
+            try {
+                fetchOutcomes.forget(listOf(id))
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // An orphan entry is harmless: no account will ever report to it again.
+            }
         }
     }
 

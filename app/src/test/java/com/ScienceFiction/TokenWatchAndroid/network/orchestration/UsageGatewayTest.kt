@@ -1,7 +1,6 @@
 package com.ScienceFiction.TokenWatchAndroid.network.orchestration
 
 import com.ScienceFiction.TokenWatchAndroid.analytics.FetchErrorReason
-import com.ScienceFiction.TokenWatchAndroid.analytics.toFetchErrorReason
 import com.ScienceFiction.TokenWatchAndroid.auth.CredentialUnavailableException
 import com.ScienceFiction.TokenWatchAndroid.auth.CredentialVault
 import com.ScienceFiction.TokenWatchAndroid.auth.OAuthTokens
@@ -172,14 +171,12 @@ class UsageGatewayTest {
         status: Int,
         body: String,
         provider: AgentProvider = AgentProvider.OPENROUTER,
-        outcomes: MutableList<Throwable?> = mutableListOf(),
     ) = runBlocking {
         val id = UUID.randomUUID()
         gateway(
             openRouter(status, body),
             storeWithApiKey(id),
             RateLimitGate(now = { now }),
-            onFetchOutcome = { _, _, error -> outcomes += error },
         ).fetchSnapshot(provider, id)
     }
 
@@ -203,17 +200,15 @@ class UsageGatewayTest {
 
     @Test
     fun openRouter403ExplainsTheManagementKeyInsteadOfShowingABalance() {
-        val outcomes = mutableListOf<Throwable?>()
         val snapshot = openRouterSnapshot(
             403,
             """{"error":{"code":403,"message":"Only management keys can perform this operation"}}""",
-            outcomes = outcomes,
         )
 
         assertEquals(l10n.errOpenRouterKeyPermission, snapshot.error)
         assertTrue(snapshot.windows.isEmpty())
-        // The analytics input is unchanged: still an HTTP 403, so its bucket stays HTTP_4XX.
-        assertEquals(403, (outcomes.single() as UsageException.Http).statusCode)
+        // The analytics bucket is unchanged by the wording: still an HTTP 403.
+        assertEquals(FetchErrorReason.HTTP_4XX, snapshot.errorReason)
     }
 
     @Test
@@ -352,28 +347,43 @@ class UsageGatewayTest {
         assertEquals(1, planTransport.requests.size)
     }
 
+    /** The snapshot carries the bucketed reason; recording it is the store's job (D021). */
     @Test
-    fun fetchOutcomeIsReportedOncePerFetchWithTheRawFailure() = runBlocking {
+    fun aFailedFetchCarriesItsBucketedReasonAndASuccessNone() = runBlocking {
         val id = UUID.randomUUID()
-        val outcomes = mutableListOf<Throwable?>()
         var fail = true
         val client = ProviderUsageClient {
             if (fail) throw UsageException.Http(503, "upstream detail") else listOf(window())
         }
-        val gateway = gateway(
-            client = client,
-            store = storeWithApiKey(id),
-            gate = RateLimitGate(now = { now }),
-        ) { _, _, error -> outcomes += error }
+        val gateway = gateway(client = client, store = storeWithApiKey(id), gate = RateLimitGate(now = { now }))
 
-        gateway.fetchSnapshot(AgentProvider.OPENROUTER, id)
+        val failed = gateway.fetchSnapshot(AgentProvider.OPENROUTER, id)
         fail = false
-        gateway.fetchSnapshot(AgentProvider.OPENROUTER, id)
+        val recovered = gateway.fetchSnapshot(AgentProvider.OPENROUTER, id)
 
-        // One report per fetch, carrying the exception itself — classification belongs to the caller.
-        assertEquals(2, outcomes.size)
-        assertTrue(outcomes[0] is UsageException.Http)
-        assertNull(outcomes[1])
+        assertEquals(FetchErrorReason.HTTP_5XX, failed.errorReason)
+        assertTrue(failed.error!!.isNotEmpty())
+        assertNull(recovered.error)
+        assertNull(recovered.errorReason)
+    }
+
+    /** Throttled, and then held back by the backoff: both count as rate limited, as on iOS. */
+    @Test
+    fun aRateLimitedFetchAndOneHeldBackByTheBackoffAreBothRateLimit() = runBlocking {
+        val id = UUID.randomUUID()
+        var calls = 0
+        val client = ProviderUsageClient {
+            calls += 1
+            throw UsageException.RateLimited(null)
+        }
+        val gateway = gateway(client = client, store = storeWithApiKey(id), gate = RateLimitGate(now = { now }))
+
+        val throttled = gateway.fetchSnapshot(AgentProvider.OPENROUTER, id)
+        val heldBack = gateway.fetchSnapshot(AgentProvider.OPENROUTER, id)
+
+        assertEquals(1, calls)
+        assertEquals(FetchErrorReason.RATE_LIMIT, throttled.errorReason)
+        assertEquals(FetchErrorReason.RATE_LIMIT, heldBack.errorReason)
     }
 
     /** D021: secure storage that cannot be read right now is not "log in again", and is not deleted. */
@@ -387,16 +397,13 @@ class UsageGatewayTest {
             override fun delete(agentId: UUID) = error("nothing is deleted")
         }
         val store = TokenStore(vault, TokenRefresher { _, _ -> error("not refreshed") }, now = { now })
-        val outcomes = mutableListOf<Throwable?>()
         val client = ProviderUsageClient { error("no request without a credential") }
 
-        val snapshot = gateway(client, store, RateLimitGate(now = { now }), onFetchOutcome = { _, _, error ->
-            outcomes += error
-        }).fetchSnapshot(AgentProvider.CLAUDE, id)
+        val snapshot = gateway(client, store, RateLimitGate(now = { now })).fetchSnapshot(AgentProvider.CLAUDE, id)
 
         assertEquals("Couldn't read this device's secure storage just now. Please try again in a moment.", snapshot.error)
         assertEquals(l10n.errCredentialUnavailable, snapshot.error)
-        assertEquals(FetchErrorReason.CREDENTIAL, outcomes.single()!!.toFetchErrorReason())
+        assertEquals(FetchErrorReason.CREDENTIAL, snapshot.errorReason)
     }
 
     /**
@@ -413,13 +420,11 @@ class UsageGatewayTest {
                 override fun delete(agentId: UUID) = error("nothing is deleted")
             }
             val store = TokenStore(vault, TokenRefresher { _, _ -> error("not refreshed") }, now = { now })
-            val outcomes = mutableListOf<Throwable?>()
 
             val snapshot = gateway(
                 ProviderUsageClient { error("no request without a credential") },
                 store,
                 RateLimitGate(now = { now }),
-                onFetchOutcome = { _, _, error -> outcomes += error },
             ).fetchSnapshot(AgentProvider.CODEX, id)
 
             val expected = if (reason == CredentialUnavailableException.Reason.KEY_MISSING) {
@@ -428,7 +433,7 @@ class UsageGatewayTest {
                 "Couldn't read this device's secure storage just now. Please try again in a moment."
             }
             assertEquals("$reason", expected, snapshot.error)
-            assertEquals("$reason", FetchErrorReason.CREDENTIAL, outcomes.single()!!.toFetchErrorReason())
+            assertEquals("$reason", FetchErrorReason.CREDENTIAL, snapshot.errorReason)
         }
     }
 
@@ -439,7 +444,6 @@ class UsageGatewayTest {
         codexAccountClient: CodexAccountClient = CodexAccountClient(
             NetworkTransport { error("Codex plan lookup not expected") },
         ),
-        onFetchOutcome: (AgentProvider, UUID, Throwable?) -> Unit = { _, _, _ -> },
     ) = UsageGateway(
         registry = ProviderUsageRegistry(AgentProvider.entries.associateWith { client }),
         tokenStore = store,
@@ -447,7 +451,6 @@ class UsageGatewayTest {
         codexAccountClient = codexAccountClient,
         localization = { l10n },
         now = { now },
-        onFetchOutcome = onFetchOutcome,
     )
 
     private fun storeWithApiKey(id: UUID): TokenStore = TokenStore(

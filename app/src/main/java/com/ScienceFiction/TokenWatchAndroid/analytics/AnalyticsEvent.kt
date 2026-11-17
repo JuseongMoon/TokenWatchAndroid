@@ -93,21 +93,26 @@ internal fun tokenFailureReason(code: String?): FetchErrorReason = when {
 }
 
 /**
- * The event a fetch outcome should produce, or null when nothing changed.
+ * The event a fetch outcome should produce, or null when nothing changed (D021, the same rules as
+ * iOS `FetchOutcomeLedger.transition`).
  *
- * Only transitions are worth reporting: a provider that keeps failing should log one error rather
- * than one per refresh, and the recovery is what closes that pair. [previouslyFailed] is the caller's
- * memory of the last outcome for the same agent.
+ * Only transitions are reported: an account that keeps failing logs one error rather than one per
+ * refresh, a different reason counts as a new error, and the recovery closes the pair. [previous]
+ * is the stored outcome of the same account ([FetchOutcomeLedger.OK], a [FetchErrorReason.wireId],
+ * [FetchOutcomeLedger.PAUSED], or null when there is none); [failure] is this result's reason, or
+ * null on success. A result after [FetchOutcomeLedger.PAUSED] only sets the baseline, and a first
+ * success (nothing stored) is not a recovery.
  */
 fun fetchOutcomeEvent(
     provider: AgentProvider,
-    error: Throwable?,
-    previouslyFailed: Boolean,
-): AnalyticsEvent? = when {
-    error != null && !previouslyFailed ->
-        AnalyticsEvent.UsageFetchError(provider, error.toFetchErrorReason())
-    error == null && previouslyFailed -> AnalyticsEvent.UsageFetchRecover(provider)
-    else -> null
+    previous: String?,
+    failure: FetchErrorReason?,
+): AnalyticsEvent? {
+    val current = failure?.wireId ?: FetchOutcomeLedger.OK
+    if (previous == FetchOutcomeLedger.PAUSED || previous == current) return null
+    if (failure != null) return AnalyticsEvent.UsageFetchError(provider, failure)
+    if (previous == null || previous == FetchOutcomeLedger.OK) return null
+    return AnalyticsEvent.UsageFetchRecover(provider)
 }
 
 enum class ScreenName(val wireId: String, val screenClass: String) {
