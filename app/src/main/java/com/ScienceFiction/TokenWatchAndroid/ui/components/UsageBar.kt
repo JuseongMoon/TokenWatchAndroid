@@ -82,14 +82,12 @@ fun UsageBar(
             UsageStyle.CREDIT_GAUGE -> CreditGaugeValue(
                 window = window,
                 loc = loc,
-                gaugeCritterEnabled = gaugeCritterEnabled,
                 monsters = monsters,
             )
             UsageStyle.GAUGE -> GaugeValue(
                 window = window,
                 loc = loc,
                 now = currentNow,
-                gaugeCritterEnabled = gaugeCritterEnabled,
                 workHoursSchedule = workHoursSchedule,
                 monsters = monsters,
             )
@@ -140,7 +138,6 @@ private fun GaugeValue(
     window: UsageWindow,
     loc: L10n,
     now: Instant,
-    gaugeCritterEnabled: Boolean,
     workHoursSchedule: WorkHoursSchedule?,
     monsters: GaugeMonsters?,
 ) {
@@ -160,7 +157,6 @@ private fun GaugeValue(
             height = 14.dp,
             bracketSize = 13.sp,
             critterVariant = GaugeCritterVariant.from(window.kind),
-            gaugeCritterEnabled = gaugeCritterEnabled,
             usedContentDescription = loc::a11yUsed,
             monsters = monsters,
         )
@@ -177,8 +173,7 @@ private fun GaugeValue(
 private fun CreditGaugeValue(
     window: UsageWindow,
     loc: L10n,
-    gaugeCritterEnabled: Boolean,
-    /** Only random monsters reach a credit gauge (it has no reset, so no completion monster). */
+    /** Random monsters, and a depleted gauge's completion monster (`MonsterEligibility.creditCompletionWindow`). */
     monsters: GaugeMonsters?,
 ) {
     val statusColor = Term.statusColor(window.remainingPercent)
@@ -196,7 +191,6 @@ private fun CreditGaugeValue(
             height = 14.dp,
             bracketSize = 13.sp,
             critterVariant = GaugeCritterVariant.from(window.kind),
-            gaugeCritterEnabled = gaugeCritterEnabled,
             usedContentDescription = loc::a11yUsed,
             remainingContentDescription = loc::a11yRemaining,
             monsters = monsters,

@@ -123,8 +123,8 @@ class MonsterLogicTest {
         assertFalse(MonsterEligibility.isRandomCandidate(half, 50.0, now))
         // A window at 100% stays in the draw (the store skips it only while its completion monster lives).
         assertTrue(MonsterEligibility.isRandomCandidate(full, 0.0, now))
-        // A credit gauge never gets a completion monster, but it is a random candidate whatever its balance,
-        // usage or reset.
+        // A credit gauge never completes through a reset (a depleted one has the month's sure monster through
+        // creditCompletionWindow instead), and it is a random candidate whatever its balance, usage or reset.
         assertFalse(MonsterEligibility.isCompleted(credit, now))
         assertTrue(MonsterEligibility.isRandomCandidate(credit, 0.0, now))
         val emptyCredit = UsageWindow(

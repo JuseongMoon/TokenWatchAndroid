@@ -44,7 +44,7 @@ class GaugeMonsterMotionTest {
     private fun midX(tick: Long, start: Long, startX: Double = 38.0) =
         GaugeMonsterMotion.marchX(tick, start, startX, hop = 10.0, spriteWidth = 20.0, barWidth = 100.0)
 
-    @Test fun theMarchIsTheSlimeCritters() {
+    @Test fun theMarchIsGaugeCritterMathsHop() {
         for (t in 0 until 200) {
             assertEquals(
                 GaugeCritterMath.offsetX(t, cell * 4, cell * columns, bar),

@@ -118,7 +118,6 @@ class ScreenUiTest {
                     serviceHealth = ServiceHealth.UNKNOWN,
                     hideUnusedWindows = false,
                     hideUnusedCredits = false,
-                    gaugeCritterEnabled = false,
                     loc = loc,
                     showLogoutConfirmation = false,
                     onBack = {},

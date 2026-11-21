@@ -23,6 +23,8 @@ network errors and poll again on return to the foreground, network failures show
 message, and OpenRouter key rejections explained (the balance needs a management key).
 `a9867ee` only adds an iOS DEBUG launch argument, `5e62173` only extends the iOS privacy manifest and
 `ec0169e` only raises the iOS build number, so none of them has an Android counterpart.
+It also mirrors iOS `e356be2` and `50d53f7` on `dev` (D012): credit gauges carry monsters too,
+described under "Monster hunt and adventurer ranks" below.
 It also mirrors iOS `dd8e282` on `dev` (D019, D020): Codex signs in through the sign-in window and
 the loopback listener on its registered port 1455 on both platforms, and `login_abandon` carries
 `elapsed` and `attempt`, both described below.
@@ -33,6 +35,9 @@ It also mirrors iOS `c564aa0` on `dev` (D021, second pass): fetch error and reco
 each result with the outcome kept on the device, described below.
 It also mirrors iOS `586c045` on `dev` (D022): the first screen with no account leads with
 connecting one, and demo mode offers a way straight to connecting, described below.
+It also mirrors iOS `280e382` on `dev` (D023): a 100% bar no longer draws the decorative slime, so
+everything on a bar can be fought, and the detail screen draws no monster, described under
+"Monster hunt and adventurer ranks" below.
 Uncommitted iOS working-tree changes are deliberately not part of this baseline.
 
 Firebase Analytics runs against the Android app's own Firebase registration and
@@ -162,14 +167,14 @@ Firebase Analytics runs against the Android app's own Firebase registration and
 - Inline card-header service status (major blinks, total outage remains static,
   and all-maintenance uses text), remaining-balance accessibility text, and
   gauge-like heartbeat tracking for both subscription and credit gauges.
-- Eight-step gauge-slime entry/exit fades, an animated settings preview, and the
-  lighter slime shadow palette.
+- An animated settings preview and the lighter slime shadow palette. (The 100% gauge slime and
+  its eight-step fades were removed in D023.)
 - A vertically constrained settings screen whose heartbeat target marker (`[v]`)
   is visually distinct from on/off toggles (`[x]`).
 - Manual Codex detail refresh reads the current plan from `accounts/check`,
   persists plan changes, bypasses burst spacing, and refreshes account metadata.
-- Weekly gauges use the green slower slime, while session gauges use the faster
-  sky-blue slime; each spawn receives a small speed jitter.
+- Gauge monsters walk at the slower weekly pace on weekly gauges and at the faster session pace
+  on session gauges.
 - Terminal-styled account-aware logout confirmation is shared by detail and
   settings, and the loading spinner uses the six-frame four-lit-dot animation.
 - Hybrid reset notifications combine scheduled reset alarms with persisted
@@ -242,13 +247,17 @@ Firebase Analytics runs against the Android app's own Firebase registration and
   early. A gauge still showing a ghost from the last hour is picked only when no gauge is free, and the
   new monster then clears that ghost away: a bar shows one monster or ghost at a time. One seen for the
   first time only gets its first draw time. The schedule stays on the device per AI account whichever
-  app account is signed in. Credit gauges and balances never carry one. A slime drawn for a session
+  app account is signed in. Credit gauges carry monsters as well, whatever their balance (an account
+  at 0 included), the same way on both platforms (D012); balances never carry one. A slime drawn for a session
   window (the 5-hour kind) is the blue slime, its own species with 2 HP and 15 points, whenever the
   catalog has it released for this app version; it is never drawn by weight on its own and follows the
-  slime in the bestiary. The slime is always green and the blue slime always sky blue. Monsters march across the bar
-  like the slime critter and come back in from the left past the right edge: a completion monster sets
+  slime in the bestiary. The slime is always green and the blue slime always sky blue. Monsters hop across the bar
+  and come back in from the left past the right edge: a completion monster sets
   out from the left edge, a random one from the spot it appeared at, at a pace that differs slightly by
-  monster. The sword and the halo may rise above the bar but are cut at its ends with the body. The slime critter of a 100% bar steps aside while any monster is on it. Tapping anywhere on
+  monster. The sword and the halo may rise above the bar but are cut at its ends with the body. Nothing
+  else walks on a bar: the decorative slime of a 100% bar was removed (D023), so a 100% bar without
+  a monster shows only its fill. Monsters live on the list cards only; the detail screen draws none
+  and its gauge rows are not hit areas (D023). Tapping anywhere on
   the gauge row hits the monster, ahead of the card's detail tap; monsters with 2 HP or more show their
   HP as hearts after the first hit, and TalkBack offers an "attack" action. A defeat holds the sword
   briefly, plays the monster's own death animation, then the monster walks on in gray with a halo at

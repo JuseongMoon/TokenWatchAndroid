@@ -136,7 +136,7 @@ internal fun MonsterHpHearts(hp: Int, maxHp: Int, modifier: Modifier = Modifier)
 }
 
 /**
- * The monsters on a gauge bar. They march across like the slime critter: a completion monster in from the
+ * The monsters on a gauge bar. They hop across ([GaugeCritterMath]): a completion monster in from the
  * bar's left edge, a random one from the spot it appeared at. A hit drops a sword from above; the last hit holds the sword, plays the monster's
  * death animation, then a gray ghost with a halo walks at half speed — across the bar for a completion
  * monster, on from the spot of the defeat for a random one, coming back in from the left past the right edge
@@ -269,7 +269,7 @@ object GaugeMonsterMotion {
     /** A ghost walks at half the living speed. */
     const val GHOST_SPEED_FACTOR = 0.5
 
-    /** Where a completion monster rests with motion reduced (the slime critter's 60% bar spot sits close by). */
+    /** Where a completion monster rests with motion reduced. */
     const val COMPLETION_REST = 0.72
 
     enum class Look { LIVING, DEATH, GHOST }
@@ -294,7 +294,7 @@ object GaugeMonsterMotion {
         // A random monster's pace differs a little by key, so two of the same kind do not walk as one.
         val period = if (completion) tickMs.toDouble() else tickMs / MonsterDraw.marchSpeed(encounter.key)
         fun tickAt(ms: Long) = floor(ms / period).toLong()
-        // A completion monster marches like the slime critter; a random one sets out from its spot when it appeared.
+        // A completion monster marches in from the left edge; a random one sets out from its spot when it appeared.
         fun marchAt(ms: Long) = if (completion) {
             marchX(tickAt(ms), hop, width, barWidth)
         } else {
@@ -331,7 +331,7 @@ object GaugeMonsterMotion {
         return Pose(Look.GHOST, (tick % 2L).toInt(), x, sword = false, halo = true)
     }
 
-    /** The slime critter's march ([GaugeCritterMath.offsetX]) on a wall-clock tick, which outgrows an Int. */
+    /** The hop march of [GaugeCritterMath.offsetX] on a wall-clock tick, which outgrows an Int. */
     internal fun marchX(tick: Long, hop: Double, spriteWidth: Double, barWidth: Double): Double {
         if (hop <= 0.0 || barWidth <= 0.0) return -spriteWidth
         val hopsPerCross = ceil((barWidth + spriteWidth) / hop).toLong().coerceAtLeast(1L)

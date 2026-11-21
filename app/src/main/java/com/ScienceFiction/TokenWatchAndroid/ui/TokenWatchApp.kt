@@ -696,7 +696,6 @@ private fun TokenWatchAppContent(
                     serviceHealth = serviceStatus[selectedAgent.provider] ?: ServiceHealth.UNKNOWN,
                     hideUnusedWindows = settings.hideUnusedWindows,
                     hideUnusedCredits = settings.hideUnusedCredits,
-                    gaugeCritterEnabled = settings.gaugeCritter,
                     workHours = settings.workHours,
                     workHoursEnabled = settings.workHoursEnabled,
                     isDemo = isDemo,
@@ -765,7 +764,6 @@ private fun AgentDetailRoute(
     serviceHealth: ServiceHealth,
     hideUnusedWindows: Boolean,
     hideUnusedCredits: Boolean,
-    gaugeCritterEnabled: Boolean,
     workHours: String,
     workHoursEnabled: Boolean?,
     isDemo: Boolean,
@@ -794,7 +792,6 @@ private fun AgentDetailRoute(
         serviceHealth = serviceHealth,
         hideUnusedWindows = hideUnusedWindows,
         hideUnusedCredits = hideUnusedCredits,
-        gaugeCritterEnabled = gaugeCritterEnabled,
         workHoursSchedule = com.ScienceFiction.TokenWatchAndroid.domain.WorkHoursSchedule
             .active(workHours, workHoursEnabled),
         isDemo = isDemo,

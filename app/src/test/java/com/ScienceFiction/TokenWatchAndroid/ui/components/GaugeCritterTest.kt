@@ -31,15 +31,6 @@ class GaugeCritterTest {
     }
 
     @Test
-    fun framesAlternatePerTick() {
-        assertEquals(0, GaugeCritterMath.frameIndex(0))
-        assertEquals(1, GaugeCritterMath.frameIndex(1))
-        assertEquals(0, GaugeCritterMath.frameIndex(2))
-        assertEquals(1, GaugeCritterMath.frameIndex(3))
-        assertEquals(1, GaugeCritterMath.frameIndex(-3))
-    }
-
-    @Test
     fun startsFullyHiddenAtLeftEdge() {
         assertEquals(
             -20.0,
@@ -82,8 +73,7 @@ class GaugeCritterTest {
     }
 
     @Test
-    fun thresholdAndVariantTimingMatchIos() {
-        assertEquals(0.995, GaugeCritterMath.Threshold, 0.0)
+    fun variantTimingAndHopMatchIos() {
         assertEquals(285L, GaugeCritterVariant.WEEKLY.baseTickMillis)
         assertEquals(219L, GaugeCritterVariant.SESSION.baseTickMillis)
         assertTrue(
@@ -91,31 +81,6 @@ class GaugeCritterTest {
                 GaugeCritterVariant.SESSION.baseTickMillis > 1.3,
         )
         assertEquals(4, GaugeCritterMath.HopCells)
-        assertEquals(8, GaugeCritterMath.OpacitySteps)
-        assertEquals(600L, GaugeCritterMath.FadeDurationMillis)
-        assertTrue(0.994 < GaugeCritterMath.Threshold)
-        assertTrue(1.0 >= GaugeCritterMath.Threshold)
-    }
-
-    @Test
-    fun steppedOpacityQuantizesToEighthsAndClamps() {
-        assertEquals(0.0, GaugeCritterMath.steppedOpacity(-0.5), 0.0)
-        assertEquals(0.0, GaugeCritterMath.steppedOpacity(0.1), 0.0)
-        assertEquals(0.125, GaugeCritterMath.steppedOpacity(0.2), 0.0)
-        assertEquals(0.5, GaugeCritterMath.steppedOpacity(0.5), 0.0)
-        assertEquals(0.875, GaugeCritterMath.steppedOpacity(0.99), 0.0)
-        assertEquals(1.0, GaugeCritterMath.steppedOpacity(1.5), 0.0)
-    }
-
-    @Test
-    fun steppedOpacityWalksOnlyEightSteps() {
-        val levels = (0..100)
-            .map { GaugeCritterMath.steppedOpacity(it / 100.0) }
-            .toSet()
-
-        assertEquals(9, levels.size)
-        assertTrue(0.0 in levels)
-        assertTrue(1.0 in levels)
     }
 
     @Test

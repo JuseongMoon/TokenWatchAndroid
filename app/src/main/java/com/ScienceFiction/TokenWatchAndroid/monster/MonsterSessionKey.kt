@@ -92,7 +92,7 @@ object MonsterSessionKey {
 
 /** Whether a window can carry a monster. Usage figures never leave the device. */
 object MonsterEligibility {
-    /** Completion threshold — the same value as the gauge critter. */
+    /** Completion threshold: a gauge that rounds to 100%. */
     const val COMPLETION_THRESHOLD = 0.995
 
     /** A subscription gauge with a future reset (credit gauges and balances are excluded). */
@@ -132,9 +132,10 @@ object MonsterEligibility {
     /**
      * Random spawn candidates. A window at 100% is one too, so draws go on until the reset even when the
      * usage ran out early. The caller ([MonsterStore]) sifts out bars with a living monster or a ghost from the
-     * last hour. A credit gauge has no reset, so it never gets a completion monster, but it is a random
-     * candidate whatever its balance or usage (the minimum usage waits for the first use in a reset period,
-     * which a credit gauge does not have; an account at 0 is a candidate too).
+     * last hour. A credit gauge has no reset, so its only completion monster is the month's sure one of
+     * [creditCompletionWindow] once it runs out, and it is a random candidate whatever its balance or usage
+     * (the minimum usage waits for the first use in a reset period, which a credit gauge does not have; an
+     * account at 0 is a candidate too).
      */
     fun isRandomCandidate(window: UsageWindow, minUsedPercent: Double, now: Instant): Boolean {
         if (window.style == UsageStyle.CREDIT_GAUGE) return true

@@ -10,15 +10,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -34,20 +27,16 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ScienceFiction.TokenWatchAndroid.ui.theme.Term
 import com.ScienceFiction.TokenWatchAndroid.domain.WindowKind
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
 import kotlin.math.abs
 import kotlin.math.ceil
-import kotlin.math.max
 import kotlin.math.roundToInt
-import kotlin.random.Random
 
+/** The gauge monsters' pace by window: one tick of their hop march. */
 enum class GaugeCritterVariant(
-    val sprite: PixelSprite,
     val baseTickMillis: Long,
 ) {
-    WEEKLY(PixelSprite.Slime, 285L),
-    SESSION(PixelSprite.SlimeSky, 219L),
+    WEEKLY(285L),
+    SESSION(219L),
     ;
 
     companion object {
@@ -57,9 +46,10 @@ enum class GaugeCritterVariant(
 }
 
 /**
- * Continuous usage gauge: dotted track, solid fill, optional elapsed-time marker, and a hopping
- * slime when the consumed value rounds to 100%. Credit gauges keep [usedFraction] as consumption
- * but set [fillsRemaining] so the visible fill runs in the opposite direction.
+ * Continuous usage gauge: dotted track, solid fill, optional elapsed-time marker, and the window's
+ * monsters when it has any. Nothing else is drawn on the bar: whatever walks on it can be fought
+ * (D023). Credit gauges keep [usedFraction] as consumption but set [fillsRemaining] so the visible
+ * fill runs in the opposite direction.
  */
 @Composable
 fun TerminalGauge(
@@ -71,20 +61,20 @@ fun TerminalGauge(
     fillsRemaining: Boolean = false,
     height: Dp = 14.dp,
     bracketSize: TextUnit = 13.sp,
+    /** Sets the monsters' pace: session windows walk faster. */
     critterVariant: GaugeCritterVariant = GaugeCritterVariant.WEEKLY,
-    gaugeCritterEnabled: Boolean = true,
     reduceMotion: Boolean = !ValueAnimator.areAnimatorsEnabled(),
     usedContentDescription: (Int) -> String = { "$it% used" },
     remainingContentDescription: (Int) -> String = { "$it% left" },
-    /** This window's monsters (V2). Any monster on the bar replaces the slime critter's march. */
+    /**
+     * This window's monsters (V2). Null draws none: no monster UI, no monster on this window, or the
+     * "gauge monsters" setting off (the caller's [rememberGaugeMonsters] returns null then).
+     */
     monsters: GaugeMonsters? = null,
 ) {
     val used = usedFraction.coerceIn(0.0, 1.0)
     val fill = TerminalGaugeMath.fillFraction(used = used, fillsRemaining = fillsRemaining)
     val elapsed = elapsedFraction?.coerceIn(0.0, 1.0)
-    // A random monster can appear on a 100% bar too, so the critter steps aside for any monster.
-    val showCritter = gaugeCritterEnabled && used >= GaugeCritterMath.Threshold &&
-        monsters?.encounters.orEmpty().isEmpty()
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -119,13 +109,7 @@ fun TerminalGauge(
                 }
             }
 
-            AnimatedGaugeCritter(
-                visible = showCritter,
-                modifier = Modifier.fillMaxSize(),
-                reduceMotion = reduceMotion,
-                variant = critterVariant,
-            )
-            if (gaugeCritterEnabled && monsters != null) {
+            if (monsters != null) {
                 GaugeMonsterLayer(
                     monsters = monsters,
                     sessionWindow = critterVariant == GaugeCritterVariant.SESSION,
@@ -146,119 +130,12 @@ object TerminalGaugeMath {
     }
 }
 
-/** Keeps the stepped fade local to the slime overlay so usage-fill changes remain immediate. */
-@Composable
-private fun AnimatedGaugeCritter(
-    visible: Boolean,
-    modifier: Modifier = Modifier,
-    reduceMotion: Boolean,
-    variant: GaugeCritterVariant,
-) {
-    var rendered by remember { mutableStateOf(false) }
-    var opacityStep by remember { mutableIntStateOf(0) }
-
-    LaunchedEffect(visible, reduceMotion) {
-        if (reduceMotion) {
-            opacityStep = if (visible) GaugeCritterMath.OpacitySteps else 0
-            rendered = visible
-            return@LaunchedEffect
-        }
-
-        val stepDelay = GaugeCritterMath.FadeDurationMillis / GaugeCritterMath.OpacitySteps
-        if (visible) {
-            rendered = true
-            for (step in opacityStep..GaugeCritterMath.OpacitySteps) {
-                opacityStep = step
-                if (step < GaugeCritterMath.OpacitySteps) delay(stepDelay)
-            }
-        } else {
-            for (step in opacityStep downTo 0) {
-                opacityStep = step
-                if (step > 0) delay(stepDelay)
-            }
-            rendered = false
-        }
-    }
-
-    if (rendered) {
-        GaugeCritter(
-            modifier = modifier.alpha(
-                GaugeCritterMath.steppedOpacity(
-                    opacityStep.toDouble() / GaugeCritterMath.OpacitySteps,
-                ).toFloat(),
-            ),
-            reduceMotion = reduceMotion,
-            variant = variant,
-        )
-    }
-}
-
-/** Animated slime overlay. Animator scale 0 pins the landing frame at 60%. */
-@Composable
-fun GaugeCritter(
-    modifier: Modifier = Modifier,
-    variant: GaugeCritterVariant = GaugeCritterVariant.WEEKLY,
-    reduceMotion: Boolean = !ValueAnimator.areAnimatorsEnabled(),
-) {
-    val sprite = variant.sprite
-    val speedFactor = remember(variant) { Random.nextDouble(0.95, 1.05) }
-    val tickMillis = remember(variant, speedFactor) {
-        (variant.baseTickMillis / speedFactor).toLong().coerceAtLeast(1L)
-    }
-    var tick by remember(variant, reduceMotion) { mutableIntStateOf(0) }
-    LaunchedEffect(variant, reduceMotion, tickMillis) {
-        tick = 0
-        if (!reduceMotion) {
-            while (isActive) {
-                delay(tickMillis)
-                tick += 1
-            }
-        }
-    }
-
-    Canvas(
-        modifier = modifier
-            .clipToBounds()
-            .clearAndSetSemantics { },
-    ) {
-        val verticalInset = 2.dp.toPx()
-        val bottomInset = 1.dp.toPx()
-        val cell = max(0f, size.height - verticalInset) / sprite.rows
-        val spriteWidth = cell * sprite.columns
-        val x = if (reduceMotion) {
-            size.width * 0.6f
-        } else {
-            GaugeCritterMath.offsetX(
-                tick = tick,
-                hop = (cell * GaugeCritterMath.HopCells).toDouble(),
-                spriteWidth = spriteWidth.toDouble(),
-                barWidth = size.width.toDouble(),
-            ).toFloat()
-        }
-        val y = size.height - bottomInset - cell * sprite.rows
-        drawPixelSpriteFrame(
-            frame = sprite.frame(if (reduceMotion) 0 else GaugeCritterMath.frameIndex(tick)),
-            palette = sprite.palette,
-            cell = cell,
-            origin = Offset(x, y),
-        )
-    }
-}
-
-/** Pure iOS-compatible critter thresholds and hopping arithmetic. */
+/**
+ * Pure iOS-compatible hopping arithmetic: the march the gauge monsters walk ([GaugeMonsterMotion]
+ * builds on [offsetX] and [HopCells]).
+ */
 object GaugeCritterMath {
-    const val Threshold = 0.995
     const val HopCells = 4
-    const val OpacitySteps = 8
-    const val FadeDurationMillis = 600L
-
-    fun frameIndex(tick: Int): Int = (abs(tick.toLong()) % 2L).toInt()
-
-    /** Quantizes a clamped 0...1 animation progress to eighth-step opacity levels. */
-    fun steppedOpacity(progress: Double): Double {
-        val clamped = progress.coerceIn(0.0, 1.0)
-        return kotlin.math.floor(clamped * OpacitySteps) / OpacitySteps
-    }
 
     fun offsetX(
         tick: Int,

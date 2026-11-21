@@ -27,7 +27,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -43,10 +42,6 @@ import com.ScienceFiction.TokenWatchAndroid.localization.L10n
 import com.ScienceFiction.TokenWatchAndroid.localization.resetExactText
 import com.ScienceFiction.TokenWatchAndroid.localization.resetRemainingText
 import com.ScienceFiction.TokenWatchAndroid.ui.components.KvRow
-import com.ScienceFiction.TokenWatchAndroid.ui.components.MonsterHpHearts
-import com.ScienceFiction.TokenWatchAndroid.ui.components.monsterHitTarget
-import com.ScienceFiction.TokenWatchAndroid.ui.components.rememberGaugeMonsters
-import com.ScienceFiction.TokenWatchAndroid.ui.components.GaugeCritterVariant
 import com.ScienceFiction.TokenWatchAndroid.ui.components.TerminalBox
 import com.ScienceFiction.TokenWatchAndroid.ui.components.TerminalBlink
 import com.ScienceFiction.TokenWatchAndroid.ui.components.TerminalButton
@@ -79,7 +74,6 @@ fun DetailScreen(
     serviceHealth: ServiceHealth,
     hideUnusedWindows: Boolean,
     hideUnusedCredits: Boolean,
-    gaugeCritterEnabled: Boolean,
     workHoursSchedule: WorkHoursSchedule? = null,
     isDemo: Boolean = false,
     loc: L10n,
@@ -138,12 +132,10 @@ fun DetailScreen(
             ) {
                 AccountCard(agent = agent, snapshot = snapshot, account = account, loc = loc)
                 DetailUsageCard(
-                    agent = agent,
                     snapshot = snapshot,
                     isLoading = isLoading,
                     hideUnusedWindows = hideUnusedWindows,
                     hideUnusedCredits = hideUnusedCredits,
-                    gaugeCritterEnabled = gaugeCritterEnabled,
                     workHoursSchedule = workHoursSchedule,
                     loc = loc,
                     nowOverride = now,
@@ -232,14 +224,13 @@ private fun AccountCard(
     }
 }
 
+/** The detail screen's graphs. It draws no monsters: they live on the list cards only (D023). */
 @Composable
 private fun DetailUsageCard(
-    agent: Agent,
     snapshot: AgentSnapshot?,
     isLoading: Boolean,
     hideUnusedWindows: Boolean,
     hideUnusedCredits: Boolean,
-    gaugeCritterEnabled: Boolean,
     workHoursSchedule: WorkHoursSchedule?,
     loc: L10n,
     nowOverride: Instant?,
@@ -271,10 +262,8 @@ private fun DetailUsageCard(
                         windows.forEachIndexed { index, window ->
                             if (index > 0) TerminalDivider()
                             DetailUsageRow(
-                                agent = agent,
                                 window = window,
                                 loc = loc,
-                                gaugeCritterEnabled = gaugeCritterEnabled,
                                 workHoursSchedule = workHoursSchedule,
                                 now = now,
                                 onRequestResetPeak = onRequestResetPeak,
@@ -327,10 +316,8 @@ private fun UsageLegend(loc: L10n) {
 
 @Composable
 private fun DetailUsageRow(
-    agent: Agent,
     window: UsageWindow,
     loc: L10n,
-    gaugeCritterEnabled: Boolean,
     workHoursSchedule: WorkHoursSchedule?,
     now: Instant,
     onRequestResetPeak: (String) -> Unit,
@@ -338,11 +325,8 @@ private fun DetailUsageRow(
     when (window.style) {
         UsageStyle.BALANCE -> BalanceDetailRow(window = window, loc = loc, now = now)
         UsageStyle.CREDIT_GAUGE -> CreditGaugeDetailRow(
-            agent = agent,
             window = window,
             loc = loc,
-            now = now,
-            gaugeCritterEnabled = gaugeCritterEnabled,
             onRequestResetPeak = if (window.estimatedTotal) {
                 { onRequestResetPeak(window.label) }
             } else {
@@ -350,11 +334,9 @@ private fun DetailUsageRow(
             },
         )
         UsageStyle.GAUGE -> GaugeDetailRow(
-            agent = agent,
             window = window,
             loc = loc,
             now = now,
-            gaugeCritterEnabled = gaugeCritterEnabled,
             workHoursSchedule = workHoursSchedule,
         )
     }
@@ -362,20 +344,12 @@ private fun DetailUsageRow(
 
 @Composable
 private fun CreditGaugeDetailRow(
-    agent: Agent,
     window: UsageWindow,
     loc: L10n,
-    now: Instant,
-    gaugeCritterEnabled: Boolean,
     onRequestResetPeak: (() -> Unit)?,
 ) {
     val statusColor = Term.statusColor(window.remainingPercent)
-    // Random monsters only (a credit gauge has no reset); the whole row is the hit area while one lives on it.
-    val monsters = rememberGaugeMonsters(agent, window, gaugeCritterEnabled, now)
-    Column(
-        modifier = Modifier.monsterHitTarget(monsters, loc, LocalHapticFeedback.current),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -387,7 +361,6 @@ private fun CreditGaugeDetailRow(
                 style = terminalTextStyle(12.sp, FontWeight.SemiBold),
                 modifier = Modifier.weight(1f),
             )
-            monsters?.target?.let { MonsterHpHearts(hp = it.hp, maxHp = it.maxHp) }
             Text(
                 text = "${if (window.estimatedTotal) "~" else ""}${window.remainingPercent.roundToInt()}% left",
                 color = statusColor,
@@ -401,11 +374,8 @@ private fun CreditGaugeDetailRow(
             fillsRemaining = true,
             height = 20.dp,
             bracketSize = 15.sp,
-            critterVariant = GaugeCritterVariant.from(window.kind),
-            gaugeCritterEnabled = gaugeCritterEnabled,
             usedContentDescription = loc::a11yUsed,
             remainingContentDescription = loc::a11yRemaining,
-            monsters = monsters,
         )
         KvRow(
             key = "remaining",
@@ -464,21 +434,14 @@ private fun BalanceDetailRow(window: UsageWindow, loc: L10n, now: Instant) {
 
 @Composable
 private fun GaugeDetailRow(
-    agent: Agent,
     window: UsageWindow,
     loc: L10n,
     now: Instant,
-    gaugeCritterEnabled: Boolean,
     workHoursSchedule: WorkHoursSchedule?,
 ) {
     val statusColor = Term.statusColor(window.remainingPercent)
     val weeklySchedule = workHoursSchedule.takeIf { window.kind == WindowKind.WEEKLY }
-    val monsters = rememberGaugeMonsters(agent, window, gaugeCritterEnabled, now)
-    // The whole row is the monster's hit area while one lives on it.
-    Column(
-        modifier = Modifier.monsterHitTarget(monsters, loc, LocalHapticFeedback.current),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -490,7 +453,6 @@ private fun GaugeDetailRow(
                 style = terminalTextStyle(12.sp, FontWeight.SemiBold),
                 modifier = Modifier.weight(1f),
             )
-            monsters?.target?.let { MonsterHpHearts(hp = it.hp, maxHp = it.maxHp) }
             Text(
                 text = "${window.usedPercent.roundToInt()}% used",
                 color = statusColor,
@@ -504,10 +466,7 @@ private fun GaugeDetailRow(
             markerPaused = weeklySchedule?.let { !WorkHours.isWorkingTime(now, it) } ?: false,
             height = 20.dp,
             bracketSize = 15.sp,
-            critterVariant = GaugeCritterVariant.from(window.kind),
-            gaugeCritterEnabled = gaugeCritterEnabled,
             usedContentDescription = loc::a11yUsed,
-            monsters = monsters,
         )
         KvRow(
             key = "remaining",

@@ -114,7 +114,7 @@ fun PixelSpriteView(
 
 /**
  * Toggles a sprite's frames in place for compact previews. Disabling system animations pins the
- * sprite to its landing frame, matching the stationary gauge critter behavior.
+ * sprite to its landing frame, like a gauge monster at rest.
  */
 @Composable
 fun AnimatedPixelSpriteView(
