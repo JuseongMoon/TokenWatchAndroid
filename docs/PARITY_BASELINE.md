@@ -103,6 +103,13 @@ Firebase Analytics runs against the Android app's own Firebase registration and
   A provider outage or throttling therefore no longer reads as users having to sign in again.
   Secure storage that cannot be read right now is `credential`, and its card message does not ask
   the user to sign in again.
+- Copilot same-account matching is the same as iOS (`AgentStore.existingAgent(for:tokens:)`): a
+  Copilot sign-in is matched by GitHub numeric user id only. Readable cards that store an id are
+  compared directly, then a legacy card without one is matched only when its own stored token still
+  proves the same id; the matched card keeps its id and gets the new token. A card whose stored
+  credential cannot be read (a missing key or a keystore error included) cannot prove its account,
+  so it is skipped: it no longer blocks the sign-in, and with no proven match the sign-in becomes a
+  new card while the old card stays until the user removes it.
 - "hide unused graphs" split (iOS `6171f42`): a heading with two checkboxes. `percentage (0%)`
   keeps the single-toggle era key and `hide_unused` event, so existing choices carry over;
   `credit (never used)` hides credit gauges whose provider-supplied total is untouched (e.g.

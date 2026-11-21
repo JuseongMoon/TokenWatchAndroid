@@ -29,7 +29,6 @@ import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
-import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -285,48 +284,115 @@ class AgentStoreReloginTest {
     }
 
     /**
-     * D021: a card whose credential cannot be read right now may be this very account. Treating it
-     * as "no account" would add a duplicate card, so the sign-in fails instead and nothing changes.
+     * iOS `existingAgent(for:tokens:)`: a Copilot card whose credential cannot be read cannot prove
+     * which account it is, so it is skipped. It never blocks the sign-in and is never touched.
      */
     @Test
-    fun `copilot sign-in while an existing card cannot be read adds no duplicate card`() = runBlocking {
-        val existing = Agent(AgentProvider.COPILOT, accountLabel = "github")
-        val vault = MemoryVault()
-        val tokenStore = TokenStore(vault, TokenRefresher { _, _ -> error("unused") })
-        tokenStore.save(existing.id, OAuthTokens.session("old-token", accountId = "1001"))
-        vault.unreadable += existing.id
-        val store = store(listOf(existing), tokenStore)
-        store.awaitInitialLoad()
+    fun `copilot sign-in with another account adds a new card while an existing card cannot be read`() =
+        runBlocking {
+            for (reason in UNREADABLE_REASONS) {
+                val existing = Agent(AgentProvider.COPILOT, accountLabel = "github")
+                val vault = MemoryVault()
+                val tokenStore = TokenStore(vault, TokenRefresher { _, _ -> error("unused") })
+                tokenStore.save(existing.id, OAuthTokens.session("old-token", accountId = "1001"))
+                vault.unreadable += existing.id
+                vault.unreadableReason = reason
+                val store = store(listOf(existing), tokenStore)
+                store.awaitInitialLoad()
 
-        val error = assertThrows(CredentialUnavailableException::class.java) {
-            runBlocking { store.addAgent(AgentProvider.COPILOT, OAuthTokens.session("new-token", accountId = "1001")) }
+                val result = store.addAgent(AgentProvider.COPILOT, OAuthTokens.session("new-token", accountId = "2002"))
+
+                assertFalse("$reason", result.replacedExisting)
+                assertEquals("$reason", listOf(existing, result.agent), store.agents.value)
+                assertEquals("$reason", "new-token", tokenStore.tokens(result.agent.id)?.accessToken)
+                vault.unreadable.clear()
+                assertEquals("$reason", "old-token", tokenStore.tokens(existing.id)?.accessToken)
+                store.close()
+            }
         }
 
-        assertEquals(CredentialUnavailableException.Reason.KEYSTORE_UNAVAILABLE, error.reason)
-        assertEquals(listOf(existing), store.agents.value)
-        vault.unreadable.clear()
-        assertEquals("old-token", tokenStore.tokens(existing.id)?.accessToken)
-        store.close()
-    }
+    /**
+     * Even the unreadable card's own account is not merged on a guess (iOS skips it too): the
+     * sign-in becomes a new card and the old card stays until the user removes it.
+     */
+    @Test
+    fun `copilot sign-in matching only an unreadable card becomes a new card and keeps the old one`() =
+        runBlocking {
+            for (reason in UNREADABLE_REASONS) {
+                val existing = Agent(AgentProvider.COPILOT, accountLabel = "github")
+                val vault = MemoryVault()
+                val tokenStore = TokenStore(vault, TokenRefresher { _, _ -> error("unused") })
+                tokenStore.save(existing.id, OAuthTokens.session("old-token", accountId = "1001"))
+                vault.unreadable += existing.id
+                vault.unreadableReason = reason
+                val store = store(listOf(existing), tokenStore)
+                store.awaitInitialLoad()
+
+                val result = store.addAgent(AgentProvider.COPILOT, OAuthTokens.session("new-token", accountId = "1001"))
+
+                assertFalse("$reason", result.replacedExisting)
+                assertEquals("$reason", 2, store.agents.value.size)
+                assertTrue("$reason", existing in store.agents.value)
+                vault.unreadable.clear()
+                assertEquals("$reason", "old-token", tokenStore.tokens(existing.id)?.accessToken)
+                store.close()
+            }
+        }
 
     @Test
     fun `a readable copilot card that matches is replaced even when another cannot be read`() = runBlocking {
-        val unreadable = Agent(AgentProvider.COPILOT, accountLabel = "first")
-        val matching = Agent(AgentProvider.COPILOT, accountLabel = "second")
-        val vault = MemoryVault()
-        val tokenStore = TokenStore(vault, TokenRefresher { _, _ -> error("unused") })
-        tokenStore.save(unreadable.id, OAuthTokens.session("first-token", accountId = "2002"))
-        tokenStore.save(matching.id, OAuthTokens.session("second-token", accountId = "1001"))
-        vault.unreadable += unreadable.id
-        val store = store(listOf(unreadable, matching), tokenStore)
-        store.awaitInitialLoad()
+        for (reason in UNREADABLE_REASONS) {
+            val unreadable = Agent(AgentProvider.COPILOT, accountLabel = "first")
+            val matching = Agent(AgentProvider.COPILOT, accountLabel = "second")
+            val vault = MemoryVault()
+            val tokenStore = TokenStore(vault, TokenRefresher { _, _ -> error("unused") })
+            tokenStore.save(unreadable.id, OAuthTokens.session("first-token", accountId = "2002"))
+            tokenStore.save(matching.id, OAuthTokens.session("second-token", accountId = "1001"))
+            vault.unreadable += unreadable.id
+            vault.unreadableReason = reason
+            val store = store(listOf(unreadable, matching), tokenStore)
+            store.awaitInitialLoad()
 
-        val result = store.addAgent(AgentProvider.COPILOT, OAuthTokens.session("new-token", accountId = "1001"))
+            val result = store.addAgent(AgentProvider.COPILOT, OAuthTokens.session("new-token", accountId = "1001"))
 
-        assertTrue(result.replacedExisting)
-        assertEquals(matching.id, result.agent.id)
-        assertEquals(2, store.agents.value.size)
-        store.close()
+            assertTrue("$reason", result.replacedExisting)
+            assertEquals("$reason", matching.id, result.agent.id)
+            assertEquals("$reason", listOf(unreadable, matching), store.agents.value)
+            assertEquals("$reason", "new-token", tokenStore.tokens(matching.id)?.accessToken)
+            vault.unreadable.clear()
+            assertEquals("$reason", "first-token", tokenStore.tokens(unreadable.id)?.accessToken)
+            store.close()
+        }
+    }
+
+    @Test
+    fun `legacy copilot card is still identified when another card cannot be read`() = runBlocking {
+        for (reason in UNREADABLE_REASONS) {
+            val unreadable = Agent(AgentProvider.COPILOT, accountLabel = "first")
+            val legacy = Agent(AgentProvider.COPILOT, accountLabel = "legacy")
+            val vault = MemoryVault()
+            val tokenStore = TokenStore(vault, TokenRefresher { _, _ -> error("unused") })
+            tokenStore.save(unreadable.id, OAuthTokens.session("first-token", accountId = "2002"))
+            tokenStore.save(legacy.id, OAuthTokens.session("legacy-token"))
+            vault.unreadable += unreadable.id
+            vault.unreadableReason = reason
+            val resolved = mutableListOf<String>()
+            val store = store(listOf(unreadable, legacy), tokenStore, resolveAccountId = { _, tokens ->
+                resolved += tokens.accessToken
+                "1001"
+            })
+            store.awaitInitialLoad()
+
+            val result = store.addAgent(AgentProvider.COPILOT, OAuthTokens.session("new-token", accountId = "1001"))
+
+            assertTrue("$reason", result.replacedExisting)
+            assertEquals("$reason", legacy.id, result.agent.id)
+            assertEquals("$reason", listOf(unreadable, legacy), store.agents.value)
+            // Only the readable legacy card's own token is looked up; the unreadable card is skipped.
+            assertEquals("$reason", listOf("legacy-token"), resolved)
+            assertEquals("$reason", "1001", tokenStore.tokens(legacy.id)?.accountId)
+            store.close()
+        }
     }
 
     /** The detail screen asks for account details; an unreadable credential shows as unknown. */
@@ -410,11 +476,22 @@ class AgentStoreReloginTest {
         error = message,
     )
 
+    private companion object {
+        /** A transient keystore failure and a key that is gone for good (I003). */
+        val UNREADABLE_REASONS = listOf(
+            CredentialUnavailableException.Reason.KEYSTORE_UNAVAILABLE,
+            CredentialUnavailableException.Reason.KEY_MISSING,
+        )
+    }
+
     private class MemoryVault : CredentialVault {
         private val values = mutableMapOf<UUID, OAuthTokens>()
 
         /** Accounts whose stored credential cannot be read right now. */
         val unreadable: MutableSet<UUID> = java.util.Collections.synchronizedSet(mutableSetOf())
+
+        /** Why [unreadable] accounts cannot be read. */
+        @Volatile var unreadableReason = CredentialUnavailableException.Reason.KEYSTORE_UNAVAILABLE
 
         @Synchronized override fun save(agentId: UUID, tokens: OAuthTokens) {
             values[agentId] = tokens
@@ -422,7 +499,7 @@ class AgentStoreReloginTest {
 
         @Synchronized override fun load(agentId: UUID): OAuthTokens? {
             if (agentId in unreadable) {
-                throw CredentialUnavailableException(CredentialUnavailableException.Reason.KEYSTORE_UNAVAILABLE)
+                throw CredentialUnavailableException(unreadableReason)
             }
             return values[agentId]
         }
