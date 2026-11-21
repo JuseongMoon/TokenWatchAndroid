@@ -301,9 +301,32 @@ data class L10n(val lang: Lang) {
         "This device's secure storage key is missing. Please sign in again.",
     )
 
-    /** The card text for an unusable stored credential; only a missing key asks to sign in again. */
+    /** [errCredentialKeyMissing] for a card that signing in again would not refill ([signInRefillsLostCard]). */
+    val errCredentialKeyMissingRemoveCard get() = choose(
+        "이 기기의 보안 저장소 키를 찾을 수 없습니다. 이 카드를 지우고 다시 추가해 주세요.",
+        "This device's secure storage key is missing. Remove this card and add it again.",
+    )
+
+    /** A card with no stored credential at all, which signing in again would not refill. */
+    val errNoSavedSignInRemoveCard get() = choose(
+        "저장된 로그인 정보가 없습니다. 이 카드를 지우고 다시 추가해 주세요.",
+        "No saved sign-in for this card. Remove this card and add it again.",
+    )
+
+    /** The text for an unusable stored credential; only a missing key asks to sign in again. */
     fun errCredential(reason: CredentialUnavailableException.Reason): String =
         if (reason == CredentialUnavailableException.Reason.KEY_MISSING) errCredentialKeyMissing else errCredentialUnavailable
+
+    /**
+     * A card's text for an unusable stored credential. A missing key asks to sign in again where
+     * that refills this card, and to remove it and add it again where it would only add a new one.
+     */
+    fun errCredential(reason: CredentialUnavailableException.Reason, provider: AgentProvider): String =
+        if (reason == CredentialUnavailableException.Reason.KEY_MISSING && !signInRefillsLostCard(provider)) {
+            errCredentialKeyMissingRemoveCard
+        } else {
+            errCredential(reason)
+        }
     val errNetwork get() = choose(
         "네트워크에 연결할 수 없습니다. 인터넷 연결을 확인한 뒤 다시 시도해 주세요.",
         "Couldn't reach the network. Check your internet connection and try again.",
@@ -518,4 +541,18 @@ data class L10n(val lang: Lang) {
     }
 
     internal fun choose(korean: String, english: String): String = if (lang == Lang.KO) korean else english
+}
+
+/**
+ * Whether signing in again refills a card that lost its stored credential, so its text may say
+ * "sign in again". It follows how a sign-in finds its card: email providers by the signed-in email.
+ * Copilot matches by the GitHub id in the card's stored credential, which such a card no longer
+ * has, and an API key carries no account, so for them a sign-in only adds a new card and the text
+ * says to remove this one and add it again instead.
+ */
+internal fun signInRefillsLostCard(provider: AgentProvider): Boolean = when (provider) {
+    AgentProvider.CLAUDE, AgentProvider.CODEX, AgentProvider.GROK, AgentProvider.CURSOR -> true
+    AgentProvider.COPILOT, AgentProvider.KIMI, AgentProvider.OPENROUTER, AgentProvider.DEEPSEEK,
+    AgentProvider.POE, AgentProvider.ELEVENLABS,
+    -> false
 }

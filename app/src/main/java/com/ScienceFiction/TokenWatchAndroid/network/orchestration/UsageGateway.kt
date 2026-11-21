@@ -9,6 +9,7 @@ import com.ScienceFiction.TokenWatchAndroid.domain.AgentProvider
 import com.ScienceFiction.TokenWatchAndroid.domain.AgentSnapshot
 import com.ScienceFiction.TokenWatchAndroid.localization.AppLanguage
 import com.ScienceFiction.TokenWatchAndroid.localization.L10n
+import com.ScienceFiction.TokenWatchAndroid.localization.signInRefillsLostCard
 import com.ScienceFiction.TokenWatchAndroid.network.core.UsageException
 import com.ScienceFiction.TokenWatchAndroid.network.providers.subscription.CodexAccountClient
 import java.time.Duration
@@ -84,8 +85,25 @@ class UsageGateway(
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Throwable) {
-            errorSnapshot(localizedMessage(error, localization(), provider), error.toFetchErrorReason())
+            val credentialMissing = error is OAuthException.NotAuthenticated &&
+                !signInRefillsLostCard(provider) && hasNoStoredCredential(agentId)
+            errorSnapshot(
+                localizedMessage(error, localization(), provider, credentialMissing),
+                error.toFetchErrorReason(),
+            )
         }
+    }
+
+    /**
+     * Whether this card has no stored credential at all, as opposed to one the server turned down
+     * or one that expired without a refresh token. Read only to choose the wording.
+     */
+    private suspend fun hasNoStoredCredential(agentId: UUID): Boolean = try {
+        tokenStore.tokens(agentId) == null
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (_: Exception) {
+        false
     }
 
     /**
@@ -119,13 +137,20 @@ class UsageGateway(
 
         /**
          * [provider] only refines the wording for errors whose meaning is provider-specific; the
-         * exception (and therefore the analytics bucket) is unchanged.
+         * exception (and therefore the analytics bucket) is unchanged. [credentialMissing] says the
+         * card has no stored credential at all (it was never saved, or was discarded as damaged,
+         * e.g. sealed by a keystore key that is gone).
          */
         internal fun localizedMessage(
             error: Throwable,
             l10n: L10n,
             provider: AgentProvider? = null,
+            credentialMissing: Boolean = false,
         ): String = when {
+            // Signing in again would only add a new card, so the old one is to be removed.
+            provider != null && credentialMissing && error is OAuthException.NotAuthenticated &&
+                !signInRefillsLostCard(provider) -> l10n.errNoSavedSignInRemoveCard
+            provider != null && error is CredentialUnavailableException -> l10n.errCredential(error.reason, provider)
             // An API key has no refresh token, so its 401 surfaces as NotAuthenticated.
             provider == AgentProvider.OPENROUTER && error is OAuthException.NotAuthenticated ->
                 l10n.errOpenRouterKeyRejected

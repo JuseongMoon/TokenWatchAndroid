@@ -354,8 +354,12 @@ Firebase Analytics runs against the Android app's own Firebase registration and
 - `credential` (D021) on Android: the vault deletes a stored credential only when it is damaged (it
   does not parse, its tag fails under the existing key, or it is not a credential). A missing
   Keystore key, a keystore error or an unknown format version keeps it, and reading never creates a
-  key. A missing key does not come back, so only that card asks the user to sign in again; the
-  others say to try again in a moment. A rotated refresh token the vault would not take is kept in
+  key. A missing key does not come back, so that card asks the user to sign in again where that
+  refills it (the email providers). For Copilot and the API key providers a sign-in adds a new card,
+  so their card asks to remove it and add it again instead; so does a card of theirs with no stored
+  credential left (once a sign-in has created a new key, the old payload fails its tag and is
+  discarded). A token the server turns down keeps its usual text. The other reasons say to try
+  again in a moment. A rotated refresh token the vault would not take is kept in
   memory and used while it is valid, and every later access tries to write it; a request that would
   need another refresh before then fails as `credential` instead of rotating it again. iOS reports
   `credential` when data protection keeps the Keychain from being read.
